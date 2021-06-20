@@ -46,12 +46,9 @@ export class RestTransporter implements Transporter {
     query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>): Observable<QueryStream<T>> {
 
 
-        const { _cursor, _limit = 20, _order_by, _sort = 'desc', filters = [] } = options
-        const query = {
-            ...filters.reduce((p, [name, expression, value]) => {
-                p[expression == '==' ? name as string : `${name}[${mapper[expression]}]`] = value
-                return p
-            }, {} as any),
+        const { _cursor, _limit = 20, _order_by, _sort = 'desc', filters = {} } = options
+        const query: { [key: string]: any } = {
+            ...filters,
             _limit,
             ..._cursor ? { _cursor } : {},
             ..._order_by ? { _order_by, _sort } : {}
@@ -63,14 +60,14 @@ export class RestTransporter implements Transporter {
             return headers
         }
 
-        
+
 
         const $when_socket_ready: Observable<any> = this.socket?.$last_state.pipe(
             filter(s => s == 1)
-        ) || of(true) 
+        ) || of(true)
 
         const http_request = $when_socket_ready
-            .pipe( 
+            .pipe(
                 mergeMap(get_headers),
                 concatMap(headers => ajax<QueryData<T>>({
                     url: `${this.config.base_url()}/${ref}`,
