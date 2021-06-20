@@ -1,0 +1,61 @@
+import { LivequeryRequest } from "@livequery/types";
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
+import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
+import { COLLECTION_REF_SLICE_INDEX } from "./const";
+import {} from 'rxjs'
+
+@Injectable()
+export class LivequeryInterceptor implements NestInterceptor {
+
+    constructor(
+        @Optional() private LivequeryWebsocketSync: LivequeryWebsocketSync = null
+    ) { }
+
+    intercept(context: ExecutionContext, next: CallHandler) {
+
+        const req = context.switchToHttp().getRequest()
+        const { _limit = 20, _cursor, _order_by, _sort, _select, ...rest } = req.query
+
+        const filters = Object
+            .keys(rest)
+            .map(key => {
+                const [name, expression] = key.split(':')
+                try {
+                    return [name, expression || '==', JSON.parse(rest[key])]
+                } catch (e) {
+                    return [name, expression || '==', rest[key]]
+                }
+            })
+
+
+        const refs = (req._parsedUrl.pathname as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1)
+        const ref = refs.join('/')
+        const is_collection = refs.length % 2 == 1
+        const collection_ref = refs.slice(0, refs.length - (is_collection ? 0 : 1)).join('/')
+        const doc_id = !is_collection && refs[refs.length - 1]
+
+        req.__livequery_request = {
+            ref,
+            collection_ref,
+            is_collection,
+            doc_id,
+            options: {
+                _limit: Number(_limit),
+                _cursor,
+                _order_by,
+                _sort,
+                _select,
+                filters
+            },
+            keys: req.params
+        } as LivequeryRequest
+
+        // Add socket
+        const socket_id = req.headers.socket_id
+        socket_id && this.LivequeryWebsocketSync?.listen(socket_id, ref)
+        return next.handle()
+    }
+}
+
+
+export const UseLivequeryInterceptor = () => UseInterceptors(LivequeryInterceptor)
