@@ -120,8 +120,9 @@ export class RestTransporter implements Transporter {
 
         return Object.assign(
             merge(http_request, websocket_sync),
-            { reload: () => $on_reload.next(0) }
-        )
+            {
+                reload: () => $on_reload.next(0)
+            })
     }
 
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
