@@ -3,7 +3,7 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "1.0.3",
+    "version": "1.0.5",
     "description": "",
     "main": "build/index.js",
     "types": "build/index.d.ts",
@@ -16,7 +16,7 @@
         "uuid": "^8.3.2"
     },
     "devDependencies": {
-        "@livequery/types": "^1.0.21"
+        "@livequery/types": "^1.0.22"
     },
     "peerDependencies": {},
     "scripts": {
