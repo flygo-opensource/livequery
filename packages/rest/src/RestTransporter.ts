@@ -134,11 +134,11 @@ export class RestTransporter implements Transporter {
     }
 
     async add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
-        return await this.call(ref, 'GET', {}, data)
+        return await this.call(ref, 'POST', {}, data)
     }
 
-    async update<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
-        return await this.call(ref, 'PATCH', {}, data)
+    async update<T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> {
+        return await this.call(ref, method, {}, data)
     }
 
     async remove(ref: string): Promise<void> {
