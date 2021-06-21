@@ -16,7 +16,7 @@
         "uuid": "^8.3.2"
     },
     "devDependencies": {
-        "@livequery/types": "^1.0.18"
+        "@livequery/types": "^1.0.20"
     },
     "peerDependencies": {},
     "scripts": {

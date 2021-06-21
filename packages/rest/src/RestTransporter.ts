@@ -2,7 +2,7 @@ import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, D
 import { firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, concatMap, filter, finalize, map, mapTo, mergeMap, take, tap } from 'rxjs/operators';
 import { ajax } from 'rxjs/ajax'
-import { from, merge } from 'rxjs'
+import { from, merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
 
 const mapper = {
@@ -43,7 +43,7 @@ export class RestTransporter implements Transporter {
         return response
     }
 
-    query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>): Observable<QueryStream<T>> {
+    query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>) {
 
 
         const { _cursor, _limit = 20, _order_by, _sort = 'desc', filters = {} } = options
@@ -60,13 +60,15 @@ export class RestTransporter implements Transporter {
             return headers
         }
 
-
+        const $on_reload = new Subject()
 
         const $when_socket_ready: Observable<any> = this.socket?.$last_state.pipe(
             filter(s => s == 1)
         ) || of(true)
 
-        const http_request = $when_socket_ready
+        const $on_can_reload = $on_reload.pipe(filter(() => !this.socket || this.socket.$last_state.getValue() == 1))
+
+        const http_request = merge($when_socket_ready, $on_can_reload)
             .pipe(
                 mergeMap(get_headers),
                 concatMap(headers => ajax<QueryData<T>>({
@@ -116,7 +118,10 @@ export class RestTransporter implements Transporter {
             )
         )
 
-        return merge(http_request, websocket_sync)
+        return Object.assign(
+            merge(http_request, websocket_sync),
+            { reload: () => $on_reload.next(0) }
+        )
     }
 
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
