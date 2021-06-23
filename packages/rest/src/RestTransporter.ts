@@ -1,22 +1,10 @@
 import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse } from '@livequery/types'
 import { firstValueFrom, Observable, of } from 'rxjs';
-import { catchError, concatMap, filter, finalize, map, mapTo, mergeMap, take, tap } from 'rxjs/operators';
+import { catchError, concatMap, filter, finalize, map, mergeMap } from 'rxjs/operators';
 import { ajax } from 'rxjs/ajax'
 import { from, merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
 
-const mapper = {
-    '==': 'eq',
-    '!=': 'ne',
-    '<': 'lt',
-    '<=': 'lte',
-    '>': 'gt',
-    '>=': 'gte',
-    'in-array': 'in-array',
-    'contains': 'contains',
-    'not-in-array': 'not-in-array',
-    'like': 'like'
-}
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -46,14 +34,6 @@ export class RestTransporter implements Transporter {
     query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>) {
 
 
-        const { _cursor, _limit = 20, _order_by, _sort = 'desc', filters = {} } = options
-        const query: { [key: string]: any } = {
-            ...filters,
-            _limit,
-            ..._cursor ? { _cursor } : {},
-            ..._order_by ? { _order_by, _sort } : {}
-        }
-
         const get_headers = async () => {
             let headers = await this.config.headers?.() || {}
             this.socket?.socket_session && (headers.socket_id = this.socket?.socket_session)
@@ -73,7 +53,7 @@ export class RestTransporter implements Transporter {
                 mergeMap(get_headers),
                 concatMap(headers => ajax<QueryData<T>>({
                     url: `${this.config.base_url()}/${ref}`,
-                    queryParams: query,
+                    queryParams: options as any,
                     headers,
                     responseType: 'json'
                 })),

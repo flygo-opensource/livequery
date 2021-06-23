@@ -1,6 +1,6 @@
 import { UpdatedData } from "@livequery/types";
-import { firstValueFrom, from, fromEvent, interval, Observable, of, Subject, BehaviorSubject, merge } from "rxjs";
-import { tap, filter, mapTo, finalize } from "rxjs/operators";
+import { firstValueFrom, fromEvent, Observable, Subject, BehaviorSubject, merge } from "rxjs";
+import { finalize } from "rxjs/operators";
 import { v4 } from 'uuid'
 
 export class Socket {
