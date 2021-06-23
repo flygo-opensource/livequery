@@ -45,7 +45,7 @@ export class LivequeryInterceptor implements NestInterceptor {
                 _cursor,
                 _order_by,
                 _sort,
-                _select
+                ..._select ? { _select: JSON.parse(_select as any as string) } : {}
             },
             keys: req.params
         } as LivequeryRequest
