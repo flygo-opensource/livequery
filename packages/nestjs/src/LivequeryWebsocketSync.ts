@@ -1,7 +1,7 @@
 import { UpdatedData } from "@livequery/types";
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 import { Subject } from "rxjs";
-import { bufferTime, mergeMap } from "rxjs/operators";
+import { mergeMap } from "rxjs/operators";
 
 
 
@@ -15,17 +15,14 @@ export class LivequeryWebsocketSync {
 
     constructor() {
         this.changes.pipe(
-            bufferTime(500),
-            mergeMap(changes => {
+            mergeMap(change => {
                 const map = new Map<string, UpdatedData[]>()
-                for (const change of changes) {
-                    if (!map.has(change.ref)) map.set(change.ref, [])
-                    map.get(change.ref).push(change)
-                }
+                if (!map.has(change.ref)) map.set(change.ref, [])
+                map.get(change.ref).push(change)
                 return [...map.entries()].map(([ref, changes]) => ({ ref, changes }))
             })
         ).subscribe(({ ref, changes }) => {
-            
+
             const connections = this.refs.get(ref)
             if (!connections) return
             const payload = JSON.stringify({ event: 'sync', data: { changes } })

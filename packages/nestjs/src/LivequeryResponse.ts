@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
-import { QueryData, Response } from '@livequery/types'
+import { QueryData } from '@livequery/types'
 
 export const LivequeryResponse = createParamDecorator((data: unknown, ctx: ExecutionContext) => {
     const request = ctx.switchToHttp().getRequest()
