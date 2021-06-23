@@ -1,8 +1,8 @@
-import { LivequeryRequest } from "@livequery/types";
+import { LivequeryRequest, QueryOption } from "@livequery/types";
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
 import { COLLECTION_REF_SLICE_INDEX } from "./const";
-import {} from 'rxjs'
+import { } from 'rxjs'
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
@@ -14,7 +14,7 @@ export class LivequeryInterceptor implements NestInterceptor {
     intercept(context: ExecutionContext, next: CallHandler) {
 
         const req = context.switchToHttp().getRequest()
-        const { _limit = 20, _cursor, _order_by, _sort, _select, ...rest } = req.query
+        const { _limit = 20, _cursor, _order_by, _sort, _select, ...rest } = req.query as QueryOption<any>
 
         const filters = Object
             .keys(rest)
@@ -39,13 +39,13 @@ export class LivequeryInterceptor implements NestInterceptor {
             collection_ref,
             is_collection,
             doc_id,
+            filters,
             options: {
                 _limit: Number(_limit),
                 _cursor,
                 _order_by,
                 _sort,
-                _select,
-                filters
+                _select
             },
             keys: req.params
         } as LivequeryRequest
