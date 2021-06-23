@@ -152,6 +152,6 @@ export class RestTransporter implements Transporter {
     }
 
     async trigger<Query = any, Payload = any, Response = void>(ref: string, name: string, query: Query, payload: Payload): Promise<Response> {
-        return await this.call(`${ref}~${name}`, 'POST', query, payload)
+        return await this.call(`${ref}/~${name}`, 'POST', query, payload)
     }
 }
