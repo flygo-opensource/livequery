@@ -31,11 +31,18 @@ export class LivequeryInterceptor implements NestInterceptor {
 
 
         const refs = (req._parsedUrl.pathname as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1)
-        const schema_collection_ref = (req.route.path as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1).join('/')
+
         const ref = refs.join('/')
         const is_collection = refs.length % 2 == 1
         const collection_ref = refs.slice(0, refs.length - (is_collection ? 0 : 1)).join('/')
         const doc_id = !is_collection && refs[refs.length - 1]
+
+        const schema_collection_ref = (req.route.path as string)
+            .split('/')
+            .slice(COLLECTION_REF_SLICE_INDEX + 1)
+            .filter((_, i) => i % 2 == 0)
+            .join('/')
+            .replaceAll(':', '')
 
         req.__livequery_request = {
             ref,
