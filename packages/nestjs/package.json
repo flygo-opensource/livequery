@@ -3,7 +3,7 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "1.0.13",
+    "version": "1.0.15",
     "description": "",
     "main": "build/index.js",
     "types": "build/index.d.ts",
@@ -18,7 +18,7 @@
         "rxjs": "^7.1.0"
     },
     "devDependencies": {
-        "@livequery/types": "^1.0.24",
+        "@livequery/types": "^1.0.25",
         "@types/express": "^4.17.11",
         "@types/node": "^14.14.20"
     },

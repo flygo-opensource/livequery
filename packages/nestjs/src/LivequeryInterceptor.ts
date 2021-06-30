@@ -31,6 +31,7 @@ export class LivequeryInterceptor implements NestInterceptor {
 
 
         const refs = (req._parsedUrl.pathname as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1)
+        const schema_collection_ref = (req.route.path as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1).join('/')
         const ref = refs.join('/')
         const is_collection = refs.length % 2 == 1
         const collection_ref = refs.slice(0, refs.length - (is_collection ? 0 : 1)).join('/')
@@ -39,6 +40,7 @@ export class LivequeryInterceptor implements NestInterceptor {
         req.__livequery_request = {
             ref,
             collection_ref,
+            schema_collection_ref,
             is_collection,
             doc_id,
             filters,
