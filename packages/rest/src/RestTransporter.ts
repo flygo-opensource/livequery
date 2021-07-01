@@ -26,9 +26,8 @@ export class RestTransporter implements Transporter {
         config.realtime && (this.socket = new Socket(config.websocket_url))
     }
 
-    async get<T>(ref: string) {
-        const { response } = await firstValueFrom(ajax<T>(ref))
-        return response
+    async get<T>(ref: string, query: any = {}) {
+        return await this.call<{}, {}, T>(ref, 'GET', query, null)
     }
 
     query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>) {
@@ -113,11 +112,12 @@ export class RestTransporter implements Transporter {
                     queryParams: query as {},
                     headers,
                     method,
-                    body: payload
+                    ...payload ? { body: payload } : {}
                 }))
             ))
         return response
     }
+
 
     async add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
         return await this.call(ref, 'POST', {}, data)
