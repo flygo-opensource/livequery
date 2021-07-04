@@ -4,7 +4,7 @@ import { catchError, concatMap, filter, finalize, map, mergeMap } from 'rxjs/ope
 import { ajax } from 'rxjs/ajax'
 import { from, merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
-import ky from 'ky-universal'
+import { stringify } from 'query-string'
 
 
 type MaybePromise<T> = T | Promise<T>
@@ -100,14 +100,15 @@ export class RestTransporter implements Transporter {
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
         return await firstValueFrom(from(this.config.headers?.() || Promise.resolve({}))
             .pipe(
-                concatMap(headers => ky(`${this.config.base_url()}/${url}`, {
-                    method,
-                    searchParams: query as any,
-                    headers,
-                    throwHttpErrors: false,
-                    retry: 3,
-                    ...payload ? { json: payload } : {}
-                }).json()),
+                concatMap(
+                    headers => fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+                        method,
+                        headers: headers as any,
+                        ...payload ? { body: JSON.stringify(payload) } : {},
+                    })
+                        .then(r => r.json())
+                ),
+                catchError(e => of(e)),
                 map((response: Response) => {
                     if ((response as any)?.error) throw (response as any).error
                     return response
