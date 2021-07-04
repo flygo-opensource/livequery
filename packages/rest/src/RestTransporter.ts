@@ -98,22 +98,26 @@ export class RestTransporter implements Transporter {
     }
 
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
-        return await firstValueFrom(from(this.config.headers?.() || Promise.resolve({}))
-            .pipe(
-                concatMap(
-                    headers => fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
-                        method,
-                        headers: headers as any,
-                        ...payload ? { body: JSON.stringify(payload) } : {},
-                    })
-                        .then(r => r.json())
-                ),
-                catchError(e => of(e)),
-                map((response: Response) => {
-                    if ((response as any)?.error) throw (response as any).error
-                    return response
-                })
-            ))
+
+        const headers = {
+            ... await this.config.headers?.() || {},
+            ...payload ? {
+                'Content-Type': 'application/json'
+            } : {}
+        }
+
+        try {
+            const data = fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+                method,
+                headers: headers as any,
+                ...payload ? { body: JSON.stringify(payload) } : {},
+            })
+                .then(r => r.json())
+
+            return data 
+        } catch (e) {
+            throw e.error || e 
+        } 
     }
 
 
