@@ -114,10 +114,11 @@ export class RestTransporter implements Transporter {
             })
                 .then(r => r.json())
 
-            return data 
+            if ((data as any)?.error) throw (data as any)?.error
+            return data
         } catch (e) {
-            throw e.error || e 
-        } 
+            throw e.error || e
+        }
     }
 
 
