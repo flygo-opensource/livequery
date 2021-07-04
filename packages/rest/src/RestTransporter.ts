@@ -107,13 +107,12 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const data = fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+            const data = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
             })
                 .then(r => r.json())
-
             if ((data as any)?.error) throw (data as any)?.error
             return data
         } catch (e) {
