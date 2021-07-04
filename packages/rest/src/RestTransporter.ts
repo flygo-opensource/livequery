@@ -4,6 +4,7 @@ import { catchError, concatMap, filter, finalize, map, mergeMap } from 'rxjs/ope
 import { ajax } from 'rxjs/ajax'
 import { from, merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
+import ky from 'ky-universal'
 
 
 type MaybePromise<T> = T | Promise<T>
@@ -21,6 +22,7 @@ export class RestTransporter implements Transporter {
     private socket: Socket
 
     constructor(
+
         private config: RestTransporterConfig
     ) {
         config.realtime && (this.socket = new Socket(config.websocket_url))
@@ -32,13 +34,6 @@ export class RestTransporter implements Transporter {
 
     query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>) {
 
-
-        const get_headers = async () => {
-            let headers = await this.config.headers?.() || {}
-            this.socket?.socket_session && (headers.socket_id = this.socket?.socket_session)
-            return headers
-        }
-
         const $on_reload = new Subject()
 
         const $when_socket_ready: Observable<any> = this.socket?.$last_state.pipe(
@@ -49,19 +44,17 @@ export class RestTransporter implements Transporter {
 
         const http_request = merge($when_socket_ready, $on_can_reload)
             .pipe(
-                mergeMap(get_headers),
-                concatMap(headers => ajax<QueryData<T>>({
-                    url: `${this.config.base_url()}/${ref}`,
-                    queryParams: options as any,
-                    headers,
-                    responseType: 'json'
-                })),
-                catchError(e => of({
-                    response: { error: { code: e.message, data: { items: [] } } } as QueryData<T>
-                })),
-                map(({ response }) => {
+                mergeMap(() => this.call<any, null, QueryData<T>>(ref, 'GET', options)),
+                catchError(error => of({ error })),
+                map(response => {
                     const collection_response = response as CollectionResponse<T>
                     const document_response = response as DocumentResponse<T>
+
+                    // If error
+                    if (collection_response.error) {
+                        return { error: collection_response.error }
+                    }
+
 
                     // If collection
                     if (collection_response.data?.items) {
@@ -105,17 +98,21 @@ export class RestTransporter implements Transporter {
     }
 
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
-        const { response } = await firstValueFrom(from(this.config.headers?.() || Promise.resolve({}))
+        return await firstValueFrom(from(this.config.headers?.() || Promise.resolve({}))
             .pipe(
-                concatMap(headers => ajax<Response>({
-                    url: `${this.config.base_url()}/${url}`,
-                    queryParams: query as {},
-                    headers,
+                concatMap(headers => ky(`${this.config.base_url()}/${url}`, {
                     method,
-                    ...payload ? { body: payload } : {}
-                }))
+                    searchParams: query as any,
+                    headers,
+                    throwHttpErrors: false,
+                    retry: 3,
+                    ...payload ? { json: payload } : {}
+                }).json()),
+                map((response: Response) => {
+                    if ((response as any)?.error) throw (response as any).error
+                    return response
+                })
             ))
-        return response
     }
 
 
@@ -132,6 +129,6 @@ export class RestTransporter implements Transporter {
     }
 
     async trigger<Query = any, Payload = any, Response = void>(ref: string, name: string, query: Query, payload: Payload): Promise<Response> {
-        return await this.call(`${ref}/~${name}`, 'POST', query, payload)
+        return await this.call<Query, Payload, Response>(`${ref}/~${name}`, 'POST', query, payload)
     }
 }
