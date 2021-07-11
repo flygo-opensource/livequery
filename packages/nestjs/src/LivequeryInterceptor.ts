@@ -3,7 +3,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Optional, U
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
 import { COLLECTION_REF_SLICE_INDEX } from "./const";
 import { of } from 'rxjs'
-import { catchError } from "rxjs/operators";
+import { catchError, map } from "rxjs/operators";
 import e from "express";
 
 @Injectable()
@@ -65,9 +65,8 @@ export class LivequeryInterceptor implements NestInterceptor {
         const socket_id = req.headers.socket_id
         socket_id && this.LivequeryWebsocketSync?.listen(socket_id, ref)
         return next.handle().pipe(
-            catchError(error => {
-                return of(error.code ? { error } : { error: { code: 'SERVER_ERROR', message: error } })
-            })
+            map(data => ({ data })),
+            catchError(error => of({ error }))
         )
     }
 }
