@@ -97,13 +97,14 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const { data, error } = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+            const { data, error, statusCode, message } = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
             })
                 .then(r => r.json())
-            if (error) throw error
+            if (error) throw typeof error == 'string' ? { error: { message: error, code: error } } : error
+            if (statusCode > 205) throw { message }
             return data
         } catch (e) {
             throw e.error || e
