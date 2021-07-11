@@ -1,7 +1,6 @@
-import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse } from '@livequery/types'
-import { firstValueFrom, Observable, of } from 'rxjs';
-import { catchError, concatMap, filter, finalize, map, mergeMap } from 'rxjs/operators';
-import { ajax } from 'rxjs/ajax'
+import { Transporter, QueryOption, QueryStream, QueryData, Paging } from '@livequery/types'
+import { Observable, of } from 'rxjs';
+import { catchError, filter, finalize, map, mergeMap } from 'rxjs/operators';
 import { from, merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
 import { stringify } from 'query-string'
@@ -45,40 +44,31 @@ export class RestTransporter implements Transporter {
         const http_request = merge($when_socket_ready, $on_can_reload)
             .pipe(
                 mergeMap(() => this.call<any, null, QueryData<T>>(ref, 'GET', options)),
-                catchError(error => of({ error })),
                 map(response => {
-                    const collection_response = response as CollectionResponse<T>
-                    const document_response = response as DocumentResponse<T>
-
-                    // If error
-                    if (collection_response.error) {
-                        return { error: collection_response.error }
-                    }
-
+                    const collection_response = response as { items: T[]; paging: Paging; }
+                    const document_response = response as T
 
                     // If collection
-                    if (collection_response.data?.items) {
-                        const { data: { items, paging }, error } = collection_response
+                    if (collection_response.items) {
+                        const { items, paging } = collection_response
                         return {
                             data: {
                                 changes: items.map(data => ({ data, type: 'added', ref })),
                                 paging: { ...paging, n: 0 }
-                            },
-                            error
+                            }
                         } as QueryStream<T>
                     }
 
-                    // If document 
-                    const { data, error } = document_response
+                    // If document  
                     return {
                         data: {
-                            changes: [{ data, type: 'added', ref }],
+                            changes: [{ data: document_response, type: 'added', ref }],
                             paging: { n: 0 }
-                        },
-                        error
+                        }
                     } as QueryStream<T>
 
-                })
+                }),
+                catchError(error => of({ error })),
             )
 
 
@@ -107,13 +97,13 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const data = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+            const { data, error } = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
             })
                 .then(r => r.json())
-            if ((data as any)?.error) throw (data as any)?.error
+            if (error) throw error
             return data
         } catch (e) {
             throw e.error || e
