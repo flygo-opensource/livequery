@@ -62,6 +62,7 @@ export class LivequeryWebsocketSync {
     }
 
     listen(connection_id: string, ref: string) {
+        console.log(`Listen [${ref}] for ${connection_id}`)
         const cnn = this.connections.get(connection_id)
         if (cnn) {
             cnn.refs.add(ref)
