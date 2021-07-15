@@ -61,8 +61,7 @@ export class LivequeryWebsocketSync {
         for (const ref of refs) this.refs.get(ref)?.delete(socket.id)
     }
 
-    listen(connection_id: string, ref: string) {
-        console.log(`Listen [${ref}] for ${connection_id}`)
+    listen(connection_id: string, ref: string) { 
         const cnn = this.connections.get(connection_id)
         if (cnn) {
             cnn.refs.add(ref)
