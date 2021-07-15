@@ -21,7 +21,6 @@ export class RestTransporter implements Transporter {
     private socket: Socket
 
     constructor(
-
         private config: RestTransporterConfig
     ) {
         config.realtime && (this.socket = new Socket(config.websocket_url))
@@ -93,7 +92,8 @@ export class RestTransporter implements Transporter {
             ... await this.config.headers?.() || {},
             ...payload ? {
                 'Content-Type': 'application/json'
-            } : {}
+            } : {},
+            ... this.config.realtime ? { socket_id: this.socket.socket_session } : {}
         }
 
         try {
