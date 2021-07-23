@@ -19,14 +19,15 @@ export const ControllerMetadata = {
                 .filter(method => Reflect.hasMetadata(key, target.prototype, method))
                 .map(method => {
                     const data = Reflect.getMetadata(key, target.prototype, method) as T
-                    const path: string = Reflect.getMetadata('path', target.prototype[method]) || ''
-                    const ref = [collection_path.split('/'), path.split('/')]
-                        .flat(2)
-                        .filter(x => x.length > 0)
-                        .slice(COLLECTION_REF_SLICE_INDEX)
-                        .join('/')
+                    const method_path: string = Reflect.getMetadata('path', target.prototype[method]) || ''
+                    const refs = `${collection_path}/${method_path}`
                         .replaceAll(':', '')
-                    return { data, method, ref }
+                        .split('/')
+                        .filter(s => s.length > 0)
+                        .slice(COLLECTION_REF_SLICE_INDEX)
+                    const ref = refs.join('/')
+                    const schema_ref = refs.filter((_, i) => i % 2 == 0).join('/')
+                    return { data, method, ref, schema_ref }
                 })
         }
 
