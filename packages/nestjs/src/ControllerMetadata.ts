@@ -19,7 +19,7 @@ export const ControllerMetadata = {
                 .filter(method => Reflect.hasMetadata(key, target.prototype, method))
                 .map(method => {
                     const data = Reflect.getMetadata(key, target.prototype, method) as T
-                    const path: string = Reflect.getMetadata('path', target.prototype, method) || ''
+                    const path: string = Reflect.getMetadata('path', target.prototype[method]) || ''
                     const ref = [collection_path.split('/'), path.split('/')]
                         .flat(2)
                         .filter(x => x.length > 0)
