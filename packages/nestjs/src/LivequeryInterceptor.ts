@@ -4,7 +4,6 @@ import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
 import { COLLECTION_REF_SLICE_INDEX } from "./const";
 import { of } from 'rxjs'
 import { catchError, map } from "rxjs/operators";
-import e from "express";
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
@@ -23,9 +22,9 @@ export class LivequeryInterceptor implements NestInterceptor {
             .map(key => {
                 const [name, expression] = key.split(':')
                 try {
-                    return [name, expression || '==', JSON.parse(rest[key])]
+                    return [name, expression || 'eq', JSON.parse(rest[key])]
                 } catch (e) {
-                    return [name, expression || '==', rest[key]]
+                    return [name, expression || 'eq', rest[key]]
                 }
             })
 

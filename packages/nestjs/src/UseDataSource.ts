@@ -4,7 +4,7 @@ import { ModuleRef } from '@nestjs/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
-const DataSourceMetadataKey = 'jjj'// Symbol()
+const DataSourceMetadataKey = Symbol()
 
 export type Datasource = {
     query(query: LivequeryRequest): Promise<QueryData>
