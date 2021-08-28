@@ -30,7 +30,7 @@ export class RestTransporter implements Transporter {
         return await this.call<{}, {}, T>(ref, 'GET', query, null)
     }
 
-    query<T extends { id: string }>(query_id: number, ref: string, options?: Partial<QueryOption<T>>) {
+    query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) {
 
         const $on_reload = new Subject()
 
@@ -71,11 +71,9 @@ export class RestTransporter implements Transporter {
             )
 
 
-        const websocket_sync = (!this.socket || this.queries.has(query_id)) ? from([]) as Observable<QueryStream<T>> : (
-            this.queries.add(query_id),
+        const websocket_sync = (!this.socket || options._cursor) ? from([]) as Observable<QueryStream<T>> : (
             this.socket.listen(ref).pipe(
                 map((change) => ({ data: { changes: [change] } } as QueryStream<T>)),
-                finalize(() => this.queries.delete(query_id))
             )
         )
 

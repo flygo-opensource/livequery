@@ -76,9 +76,11 @@ export class Socket {
         const stream = this.topics.get(ref).stream.pipe(
             finalize(() => {
                 this.topics.get(ref).listen_count--
-                if (this.topics.get(ref).listen_count == 0) {
-                    this.$input.next({ event: 'unsubscribe', data: { ref } })
-                }
+                setTimeout(() => {
+                    if (this.topics.get(ref).listen_count == 0) {
+                        this.$input.next({ event: 'unsubscribe', data: { ref } })
+                    }
+                }, 2000)
             })
         )
 
