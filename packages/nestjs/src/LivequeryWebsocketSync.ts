@@ -57,15 +57,17 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebSocket & { id: string }
     ) {
         if (!this.connections.has(socket.id)) return
-        const refs = [... this.connections.get(socket.id).refs]
-        for (const ref of refs) this.refs.get(ref)?.delete(socket.id)
+        this.connections.get(socket.id).refs.delete(ref)
+        this.refs.get(ref).delete(socket.id)
+        this.refs.get(ref).size == 0 && this.refs.delete(ref)
     }
 
-    listen(connection_id: string, ref: string) { 
+    listen(connection_id: string, collection_ref: string, doc_id?: string) {
         const cnn = this.connections.get(connection_id)
         if (cnn) {
-            cnn.refs.add(ref)
-            if (!this.refs.has(ref)) this.refs.set(ref, new Set())
+            const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
+            !cnn.refs.has(collection_ref) && cnn.refs.add(ref)
+            !this.refs.has(ref) && this.refs.set(ref, new Set())
             this.refs.get(ref).add(connection_id)
         }
     }
