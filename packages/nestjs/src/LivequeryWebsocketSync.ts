@@ -37,7 +37,7 @@ export class LivequeryWebsocketSync {
 
     private async handleDisconnect(socket: WebSocket & { id: string }) {
         for (const ref of this.connections.get(socket.id)?.refs || []) {
-            this.refs.get(ref).delete(socket.id)
+            this.refs.get(ref)?.delete(socket.id)
         }
         this.connections.delete(socket.id)
     }
@@ -57,9 +57,9 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebSocket & { id: string }
     ) {
         if (!this.connections.has(socket.id)) return
-        this.connections.get(socket.id).refs.delete(ref)
-        this.refs.get(ref).delete(socket.id)
-        this.refs.get(ref).size == 0 && this.refs.delete(ref)
+        this.connections.get(socket.id)?.refs?.delete(ref)
+        this.refs.get(ref)?.delete(socket.id)
+        this.refs.get(ref)?.size == 0 && this.refs.delete(ref)
     }
 
     listen(connection_id: string, collection_ref: string, doc_id?: string) {
