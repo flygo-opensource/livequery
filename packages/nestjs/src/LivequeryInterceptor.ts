@@ -1,9 +1,10 @@
 import { LivequeryRequest, QueryOption } from "@livequery/types";
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
+import { CallHandler, ExecutionContext, HttpException, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
-import { COLLECTION_REF_SLICE_INDEX } from "./const";
+import { LIVEQUERY_MAGIC_KEY } from "./const";
 import { of } from 'rxjs'
 import { catchError, map } from "rxjs/operators";
+import { LivequeryRequestKey } from "index";
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
@@ -29,7 +30,12 @@ export class LivequeryInterceptor implements NestInterceptor {
             })
 
 
-        const refs = (req._parsedUrl.pathname as string).split('/').slice(COLLECTION_REF_SLICE_INDEX + 1)
+        const refs = (req._parsedUrl.pathname as string)
+            ?.split(LIVEQUERY_MAGIC_KEY)
+            ?.[1]
+            ?.split('/')
+
+        if (!refs) throw new HttpException('CAN_NOT_DETECT_LIVEQUERY_KEY', 400)
 
         const ref = refs.join('/')
         const is_collection = refs.length % 2 == 1
@@ -37,13 +43,16 @@ export class LivequeryInterceptor implements NestInterceptor {
         const doc_id = !is_collection && refs[refs.length - 1]
 
         const schema_collection_ref = (req.route.path as string)
-            .split('/')
-            .slice(COLLECTION_REF_SLICE_INDEX + 1)
-            .filter((_, i) => i % 2 == 0)
-            .join('/')
-            .replaceAll(':', '')
+            ?.split(LIVEQUERY_MAGIC_KEY)
+            ?.[1]
+            ?.split('/')
+            ?.filter((_, i) => i % 2 == 0)
+            ?.join('/')
+            ?.replaceAll(':', '')
 
-        req.__livequery_request = {
+        if (!schema_collection_ref) throw new HttpException('CAN_NOT_DETECT_LIVEQUERY_KEY', 400)
+
+        req[LivequeryRequestKey] = {
             ref,
             collection_ref,
             schema_collection_ref,
