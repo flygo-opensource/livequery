@@ -4,7 +4,7 @@ import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
 import { LIVEQUERY_MAGIC_KEY } from "./const";
 import { of } from 'rxjs'
 import { catchError, map } from "rxjs/operators";
-import { LivequeryRequestKey } from "index";
+import { LivequeryRequestKey } from "./LivequeryRequest";
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
