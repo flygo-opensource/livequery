@@ -1,10 +1,10 @@
 import { LivequeryRequest, QueryOption } from "@livequery/types";
 import { CallHandler, ExecutionContext, HttpException, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
-import { LIVEQUERY_MAGIC_KEY } from "./const";
 import { of } from 'rxjs'
 import { catchError, map } from "rxjs/operators";
 import { LivequeryRequestKey } from "./LivequeryRequest";
+import { PathHelper } from "./PathHelper";
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
@@ -29,28 +29,16 @@ export class LivequeryInterceptor implements NestInterceptor {
                 }
             })
 
+        const {
+            ref,
+            is_collection,
+            collection_ref,
+            doc_id,
 
-        const refs = (req._parsedUrl.pathname as string)
-            ?.split(LIVEQUERY_MAGIC_KEY)
-            ?.[1]
-            ?.split('/')
+        } = PathHelper.livequeryPathExtractor(req._parsedUrl.pathname)
 
-        if (!refs) throw new HttpException('CAN_NOT_DETECT_LIVEQUERY_KEY', 400)
+        const { collection_ref: schema_collection_ref } = PathHelper.livequeryPathExtractor(req.route.path)
 
-        const ref = refs.join('/')
-        const is_collection = refs.length % 2 == 1
-        const collection_ref = refs.slice(0, refs.length - (is_collection ? 0 : 1)).join('/')
-        const doc_id = !is_collection && refs[refs.length - 1]
-
-        const schema_collection_ref = (req.route.path as string)
-            ?.split(LIVEQUERY_MAGIC_KEY)
-            ?.[1]
-            ?.split('/')
-            ?.filter((_, i) => i % 2 == 0)
-            ?.join('/')
-            ?.replaceAll(':', '')
-
-        if (!schema_collection_ref) throw new HttpException('CAN_NOT_DETECT_LIVEQUERY_KEY', 400)
 
         req[LivequeryRequestKey] = {
             ref,
@@ -66,7 +54,9 @@ export class LivequeryInterceptor implements NestInterceptor {
                 _sort,
                 ..._select ? { _select: JSON.parse(_select as any as string) } : {}
             },
-            keys: req.params
+            keys: req.params,
+            body: req.body,
+            method: req.method.toLowerCase()
         } as LivequeryRequest
 
         // Add socket

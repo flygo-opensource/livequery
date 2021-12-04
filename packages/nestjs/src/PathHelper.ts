@@ -5,16 +5,22 @@ export class PathHelper {
 
     static #toArray = (a: string | string[]) => typeof a == 'string' ? [a] : a
 
+
     static livequeryPathExtractor(path: string) {
         const refs = path
             ?.replaceAll(':', '')
             ?.split(LIVEQUERY_MAGIC_KEY)?.[1]
             ?.split('/')
             ?.filter(s => s.length > 0)
-        if (!refs) return null
+        if (!refs) throw 'LIVEQUERY_MAGIC_KEY_NOT_FOUND'
+
+        const is_collection = refs.length % 2 == 1
         const ref = refs.join('/')
+        const collection_ref = is_collection ? ref : refs.slice(0, refs.length - 1).join('/')
         const schema_ref = refs.filter((_, i) => i % 2 == 0).join('/')
-        return { ref, schema_ref }
+        const doc_id = is_collection ? refs[refs.length - 1] : null
+
+        return { ref, schema_ref, is_collection, doc_id, collection_ref }
 
     }
 
