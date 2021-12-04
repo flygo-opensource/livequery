@@ -25,7 +25,7 @@ export class PathHelper {
     }
 
     static nestjsPathResolver(target: Function, method: string) {
-        const collection_paths = this.#toArray(Reflect.getMetadata('path', target) || '')
+        const collection_paths = this.#toArray(Reflect.getMetadata('path', target) || '') 
         const method_paths = this.#toArray(Reflect.getMetadata('path', target.prototype[method]) || '')
         return collection_paths.map(
             collection_path => method_paths.map(
