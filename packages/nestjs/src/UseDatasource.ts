@@ -14,7 +14,6 @@ type Datasource = {
 @Injectable()
 export class UseDatasource {
 
-    public static readonly UseDatasourceMetadata = Symbol()
     private static ControllerList: Array<{ target: Function, method: string, options }> = []
 
 
@@ -23,12 +22,14 @@ export class UseDatasource {
         private reflector: Reflector
     ) { }
 
-    static createDatasourceMapper<T>(factory: { new(): Datasource }) {
+    static createDatasourceMapper<T = {}>(factory: { new(): Datasource }) {
 
-        const decorator = (options: T) => applyDecorators(
+        const decorator = (options: T & { _manual_query?: boolean }) => applyDecorators(
             UseInterceptors(LivequeryInterceptor),
-            UseInterceptors(this),
-            SetMetadata(this.UseDatasourceMetadata, { options, factory }),
+            ...options._manual_query == true ? [] : [
+                SetMetadata(UseDatasource, { options, factory }),
+                UseInterceptors(this)
+            ],
             (target, method) => this.ControllerList.push({
                 target: target.constructor,
                 method,
@@ -49,7 +50,7 @@ export class UseDatasource {
     async intercept(context: ExecutionContext, next: CallHandler) {
         const request = context.switchToHttp().getRequest()
         const livequery = request[LivequeryRequestKey]
-        const { factory } = this.reflector.get(UseDatasource.UseDatasourceMetadata, context.getHandler())
+        const { factory } = this.reflector.get(UseDatasource, context.getHandler())
         const ds = await this.moduleRef.get<Datasource>(factory)
         const result = await ds.query(livequery)
         return next.handle().pipe(
