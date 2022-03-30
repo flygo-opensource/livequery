@@ -84,6 +84,18 @@ export class RestTransporter implements Transporter {
             })
     }
 
+    #encode_query(query: any) {
+
+        if (!query || Object.keys(query || {}).length == 0) return ''
+
+        const encoded_query = Object.keys(query).reduce((o, key) => ({
+            ...o,
+            [key]: typeof query[key] == 'object' ? JSON.stringify(query[key]) : query[key]
+        }), {})
+
+        return `?${stringify(encoded_query)}`
+    }
+
     private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
 
         const headers = {
@@ -95,7 +107,7 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const { data, error, statusCode, message } = await fetch(`${this.config.base_url()}/${url}${query ? `?${stringify(query)}` : ''}`, {
+            const { data, error, statusCode, message } = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
