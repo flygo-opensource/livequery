@@ -64,8 +64,7 @@ export class LivequeryInterceptor implements NestInterceptor {
         const socket_id = req.headers.socket_id
         socket_id && this.LivequeryWebsocketSync?.listen(socket_id, collection_ref, doc_id)
         return next.handle().pipe(
-            map(data => ({ data })),
-            catchError(error => of({ error }))
+            map(data => ({ data })) 
         )
     }
 }
