@@ -15,17 +15,21 @@ export class LivequeryWebsocketSync {
 
     constructor() {
         this.changes.pipe(
-            mergeMap(change => {
-                const map = new Map<string, UpdatedData[]>()
-                if (!map.has(change.ref)) map.set(change.ref, [])
-                map.get(change.ref).push(change)
-                return [...map.entries()].map(([ref, changes]) => ({ ref, changes }))
-            })
-        ).subscribe(({ ref, changes }) => {
+            // mergeMap(change => {
+            //     const map = new Map<string, UpdatedData[]>()
+            //     if (!map.has(change.ref)) map.set(change.ref, [])
+            //     map.get(change.ref).push(change)
+            //     return [...map.entries()].map(([ref, changes]) => ({ ref, changes }))
+            // })
+        ).subscribe(({ ref, data, type }) => {
 
-            const connections = this.refs.get(ref)
+            const connections = new Set([
+                ...this.refs.get(ref) || [],
+                ... this.refs.get(`${ref}/${data.id}`) || []
+            ])
+
             if (!connections) return
-            const payload = JSON.stringify({ event: 'sync', data: { changes } })
+            const payload = JSON.stringify({ event: 'sync', data: { changes: [{ ref, data, type }] } })
 
             for (const cid of connections) {
                 const connection = this.connections.get(cid)
