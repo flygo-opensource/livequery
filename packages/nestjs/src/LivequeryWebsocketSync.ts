@@ -14,18 +14,14 @@ export class LivequeryWebsocketSync {
     public readonly changes = new Subject<UpdatedData>()
 
     constructor() {
-        this.changes.pipe(
-            // mergeMap(change => {
-            //     const map = new Map<string, UpdatedData[]>()
-            //     if (!map.has(change.ref)) map.set(change.ref, [])
-            //     map.get(change.ref).push(change)
-            //     return [...map.entries()].map(([ref, changes]) => ({ ref, changes }))
-            // })
-        ).subscribe(({ ref, data, type }) => {
+        this.changes.subscribe(({ ref, data, type }) => {
+
+            const refs = ref.split('/')
+            const collection_ref = refs.length % 2 == 1 ? ref : refs.slice(0, refs.length - 1).join('/')
 
             const connections = new Set([
-                ...this.refs.get(ref) || [],
-                ... this.refs.get(`${ref}/${data.id}`) || []
+                ...this.refs.get(collection_ref) || [],
+                ... this.refs.get(`${collection_ref}/${data.id}`) || []
             ])
 
             if (!connections) return
