@@ -3,7 +3,6 @@ import { CallHandler, ExecutionContext, HttpException, Injectable, NestIntercept
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync'
 import { of } from 'rxjs'
 import { catchError, map } from "rxjs/operators";
-import { LivequeryRequestKey } from "./LivequeryRequest";
 import { PathHelper } from "./PathHelper";
 
 @Injectable()
@@ -37,10 +36,12 @@ export class LivequeryInterceptor implements NestInterceptor {
 
         } = PathHelper.livequeryPathExtractor(req._parsedUrl.pathname)
 
-        const { collection_ref: schema_collection_ref } = PathHelper.livequeryPathExtractor(req.route.path)
+        const {
+            collection_ref: schema_collection_ref
+        } = PathHelper.livequeryPathExtractor(req.route.path)
 
 
-        req[LivequeryRequestKey] = {
+        req.livequery = {
             ref,
             collection_ref,
             schema_collection_ref,
@@ -59,11 +60,12 @@ export class LivequeryInterceptor implements NestInterceptor {
             method: req.method.toLowerCase()
         } as LivequeryRequest
 
-        // Add socket
+        // Allow realtime by default 
         const socket_id = req.headers.socket_id
         socket_id && this.LivequeryWebsocketSync?.listen(socket_id, collection_ref, doc_id)
         return next.handle().pipe(
-            map(data => ({ data }))
+            map(data => ({ data })),
+            catchError(error => of({ error }))
         )
     }
 }

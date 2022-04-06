@@ -1,8 +1,8 @@
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
-
-export const LivequeryRequestKey = Symbol()
+ 
 
 export const LivequeryRequest = createParamDecorator((data: unknown, ctx: ExecutionContext) => {
     const request = ctx.switchToHttp().getRequest()
-    return request[LivequeryRequestKey]
+    return request.livequery
 })
+ 
