@@ -58,7 +58,7 @@ export class LivequeryInterceptor implements NestInterceptor {
             keys: req.params,
             body: req.body,
             method: req.method.toLowerCase()
-        } as LivequeryRequest
+        } as LivequeryRequest 
 
         // Allow realtime by default 
         const socket_id = req.headers.socket_id
