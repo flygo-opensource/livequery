@@ -37,12 +37,13 @@ export class LivequeryInterceptor implements NestInterceptor {
         } = PathHelper.livequeryPathExtractor(req._parsedUrl.pathname)
 
         const {
-            collection_ref: schema_collection_ref
+            collection_ref: schema_collection_ref,
+            ref:schema_ref
         } = PathHelper.livequeryPathExtractor(req.route.path)
-
 
         req.livequery = {
             ref,
+            schema_ref,
             collection_ref,
             schema_collection_ref,
             is_collection,
@@ -58,13 +59,15 @@ export class LivequeryInterceptor implements NestInterceptor {
             keys: req.params,
             body: req.body,
             method: req.method.toLowerCase()
-        } as LivequeryRequest 
+        } as any as LivequeryRequest
+
+        console.log({req: req.livequery})
 
         // Allow realtime by default 
         const socket_id = req.headers.socket_id
         socket_id && this.LivequeryWebsocketSync?.listen(socket_id, collection_ref, doc_id)
         return next.handle().pipe(
-            map(data => ({ data })) 
+            map(data => ({ data }))
         )
     }
 }
