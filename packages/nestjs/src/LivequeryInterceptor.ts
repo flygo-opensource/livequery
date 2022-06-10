@@ -34,12 +34,12 @@ export class LivequeryInterceptor implements NestInterceptor {
             collection_ref,
             doc_id,
 
-        } = PathHelper.livequeryPathExtractor(req._parsedUrl.pathname)
+        } = PathHelper.parseHttpRequestPath(req._parsedUrl.pathname)
 
         const {
             collection_ref: schema_collection_ref,
-            ref:schema_ref
-        } = PathHelper.livequeryPathExtractor(req.route.path)
+            ref: schema_ref
+        } = PathHelper.parseHttpRequestPath(req.route.path)
 
         req.livequery = {
             ref,

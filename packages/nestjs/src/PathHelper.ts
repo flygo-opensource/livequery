@@ -3,15 +3,30 @@ import { LIVEQUERY_MAGIC_KEY } from "./const"
 
 export class PathHelper {
 
-    static #toArray = (a: string | string[]) => typeof a == 'string' ? [a] : a
 
-
-    static livequeryPathExtractor(path: string) {
-        const refs = path
+    static trimLivequeryHotkey(path: string) {
+        const ref = path
+            ?.split('~')[0]
             ?.replaceAll(':', '')
             ?.split(LIVEQUERY_MAGIC_KEY)?.[1]
             ?.split('/')
             ?.filter(s => s.length > 0)
+            ?.join('/')
+
+        if (!ref) throw 'LIVEQUERY_MAGIC_KEY_NOT_FOUND'
+
+        return ref
+    }
+
+
+    static parseHttpRequestPath(path: string) {
+        const refs = path
+            ?.split('~')[0]
+            ?.replaceAll(':', '')
+            ?.split(LIVEQUERY_MAGIC_KEY)?.[1]
+            ?.split('/')
+            ?.filter(s => s.length > 0)
+
         if (!refs) throw 'LIVEQUERY_MAGIC_KEY_NOT_FOUND'
 
         const is_collection = refs.length % 2 == 1
@@ -24,14 +39,14 @@ export class PathHelper {
 
     }
 
-    static nestjsPathResolver(target: Function, method: string) {
-        const collection_paths = this.#toArray(Reflect.getMetadata('path', target) || '')
-        const method_paths = this.#toArray(Reflect.getMetadata('path', target.prototype[method]) || '')
-        return collection_paths.map(
-            collection_path => method_paths.map(
-                method_path => `${collection_path}/${method_path}`
-            )
-        ).flat(2)
+    static join(a: string | string[], b: string | string[]) {
+        return [a || '']
+            .flat(2)
+            .map(r1 => [b || ''].flat(2).map(r2 => `${r1}/${r2}`))
+            .flat(2)
+            .map(r => r.split('/')
+                .filter(r => r != '')
+                .join('/'))
     }
 
 }
