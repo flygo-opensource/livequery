@@ -1,7 +1,7 @@
-import { Transporter, QueryOption, QueryStream, QueryData, Paging } from '@livequery/types'
-import { Observable, of } from 'rxjs';
-import { catchError, filter, finalize, map, mergeMap } from 'rxjs/operators';
-import { from, merge, Subject } from 'rxjs'
+import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse } from '@livequery/types'
+import { of } from 'rxjs';
+import { catchError, map, mergeMap } from 'rxjs/operators';
+import { merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
 import { stringify } from 'query-string'
 
@@ -12,18 +12,16 @@ export type RestTransporterConfig = {
     websocket_url: () => MaybePromise<string>,
     base_url: () => MaybePromise<string>,
     headers?: () => Promise<{ [key: string]: string }>
-    realtime?: boolean
 }
 
 export class RestTransporter implements Transporter {
 
-    private queries = new Set<number>()
     private socket: Socket
 
     constructor(
         private config: RestTransporterConfig
     ) {
-        config.realtime && (this.socket = new Socket(config.websocket_url))
+        config.websocket_url && (this.socket = new Socket(config.websocket_url))
     }
 
     async get<T>(ref: string, query: any = {}) {
@@ -32,36 +30,32 @@ export class RestTransporter implements Transporter {
 
     query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) {
 
-        const $on_reload = new Subject()
+        const $on_reload = new Subject<void>()
 
-        const $when_socket_ready: Observable<any> = this.socket?.$last_state.pipe(
-            filter(s => s == 1)
-        ) || of(true)
-
-        const $on_can_reload = $on_reload.pipe(filter(() => !this.socket || this.socket.$last_state.getValue() == 1))
-
-        const http_request = merge($when_socket_ready, $on_can_reload)
+        const http_request = merge(of(1), this.socket?.$reconnect || of<void>(), $on_reload)
             .pipe(
                 mergeMap(() => this.call<any, null, QueryData<T>>(ref, 'GET', options)),
-                map(response => {
-                    const collection_response = response as { items: T[]; paging: Paging; }
-                    const document_response = response as T
+                map(({ data, error }) => {
+                    if (error) throw error
+                    data.realtime_token && this.socket?.subscribe(data.realtime_token)
+
 
                     // If collection
-                    if (collection_response.items) {
-                        const { items, paging } = collection_response
+                    const collection = data as CollectionResponse<T>['data']
+                    if (collection.items) {
                         return {
                             data: {
-                                changes: items.map(data => ({ data, type: 'added', ref })),
-                                paging: { ...paging, n: 0 }
+                                changes: collection.items.map(data => ({ data, type: 'added', ref })),
+                                paging: { ...collection.paging, n: 0 }
                             }
                         } as QueryStream<T>
                     }
 
                     // If document  
+                    const document = data as DocumentResponse<T>['data']
                     return {
                         data: {
-                            changes: [{ data: document_response, type: 'added', ref }],
+                            changes: [{ data: document.item, type: 'added', ref }],
                             paging: { n: 0 }
                         }
                     } as QueryStream<T>
@@ -71,7 +65,7 @@ export class RestTransporter implements Transporter {
             )
 
 
-        const websocket_sync = (!this.socket || options._cursor) ? from([]) as Observable<QueryStream<T>> : (
+        const websocket_sync = (!this.socket || options._cursor) ? of<QueryStream<T>>() : (
             this.socket.listen(ref).pipe(
                 map((change) => ({ data: { changes: [change] } } as QueryStream<T>)),
             )
@@ -80,8 +74,9 @@ export class RestTransporter implements Transporter {
         return Object.assign(
             merge(http_request, websocket_sync),
             {
-                reload: () => $on_reload.next(0)
-            })
+                reload: () => $on_reload.next()
+            }
+        )
     }
 
     #encode_query(query: any) {
@@ -103,18 +98,17 @@ export class RestTransporter implements Transporter {
             ...payload ? {
                 'Content-Type': 'application/json'
             } : {},
-            ... this.config.realtime ? { socket_id: this.socket.socket_session } : {}
+            ... this.socket ? { socket_id: this.socket.socket_session } : {}
         }
 
         try {
-            const { data, error, statusCode, message } = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
+            const { data, error } = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
             })
                 .then(r => r.json())
-            if (error) throw typeof error == 'string' ? { error: { message: error, code: error } } : error
-            if (statusCode > 205) throw { message }
+            if (error) throw error
             return data
         } catch (e) {
             throw e.error || e

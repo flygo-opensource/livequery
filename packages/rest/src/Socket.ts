@@ -1,23 +1,21 @@
 import { UpdatedData } from "@livequery/types";
-import { firstValueFrom, fromEvent, Observable, Subject, BehaviorSubject, merge } from "rxjs";
+import { firstValueFrom, fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject } from "rxjs";
 import { finalize } from "rxjs/operators";
 import { v4 } from 'uuid'
 
 export class Socket {
 
     private topics = new Map<string, { stream: Subject<UpdatedData>, listen_count: number }>()
-    private $input = new Subject<{ data: object, event: string }>()
-    public readonly $last_state = new BehaviorSubject<number>(0)
+    private $input = new ReplaySubject<{ data: object, event: string }>(1000)
+    public readonly $reconnect = new Subject<void>()
     public readonly socket_session = v4()
 
 
-    private async init() {
+    async #init() {
         if (typeof WebSocket == 'undefined') return
 
-        console.log('Use websocket to sync realtime data')
-
         for (let n = 0; true; n++) {
-            console.log('Try connecting websocket .... ')
+            console.log('Connecting websocket .... ')
             const ws = new WebSocket(await this.ws_url_fatory())
 
             const messages_handler = fromEvent(ws, 'message').subscribe((evt: any) => {
@@ -25,29 +23,32 @@ export class Socket {
                 this[`$${event}`]?.(data)
             })
 
-            const connection_handler = fromEvent(ws, 'open').subscribe(() => {
+            const data_sender = fromEvent(ws, 'open').subscribe(() => {
                 console.log('Websocket connected')
                 ws.send(JSON.stringify({ event: 'start', data: { id: this.socket_session } }))
-                const { unsubscribe } = this.$input.subscribe(data => ws.send(JSON.stringify(data)))
-                this.$last_state.next(ws.readyState)
-                return unsubscribe
+                const subscription = this.$input.subscribe(data => ws.send(JSON.stringify(data)))
+                n > 0 && this.$reconnect.next()
+                return () => {
+                    subscription.unsubscribe()
+                    this.$input.complete()
+                }
             })
 
             await firstValueFrom(merge(fromEvent(ws, 'error'), fromEvent(ws, 'close'), fromEvent(ws, 'closed')))
 
-            this.$last_state.next(ws.readyState)
-            connection_handler.unsubscribe()
+            this.$input = new ReplaySubject(1000)
+            data_sender.unsubscribe()
             messages_handler.unsubscribe()
             ws.close()
 
-            console.log(`Websocket connection droped, reconnect in 1s`)
+            console.log(`Websocket connection dropped, reconnect in 1s ...`)
             await new Promise(s => setTimeout(s, 1000))
 
         }
     }
 
     constructor(private ws_url_fatory: () => string | Promise<string>) {
-        this.init()
+        this.#init()
     }
 
     private $sync(data: { changes: UpdatedData<any>[] }) {
@@ -65,6 +66,10 @@ export class Socket {
         }
     }
 
+    subscribe(realtime_token: string) {
+        this.$input.next({ event: 'subscribe', data: { realtime_token } })
+    }
+
     listen(ref: string): Observable<UpdatedData> {
         if (!this.topics.has(ref)) {
             const stream = new Subject<UpdatedData>()
@@ -73,7 +78,7 @@ export class Socket {
 
         this.topics.get(ref).listen_count++
 
-        const stream = this.topics.get(ref).stream.pipe(
+        return this.topics.get(ref).stream.pipe(
             finalize(() => {
                 this.topics.get(ref).listen_count--
                 setTimeout(() => {
@@ -82,9 +87,6 @@ export class Socket {
                     }
                 }, 2000)
             })
-        )
-
-
-        return stream
+        ) 
     }
 }
