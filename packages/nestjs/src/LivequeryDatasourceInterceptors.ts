@@ -2,7 +2,6 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import { map } from 'rxjs';
 import { LivequeryRequest } from '@livequery/types';
 import { ModuleRef } from '@nestjs/core'
-import { Console } from 'console';
 
 export type DatasourceOptions<T> = Array<T & { refs: string[] }>
 export type Datasource<T = any> = { query(query: LivequeryRequest): any }

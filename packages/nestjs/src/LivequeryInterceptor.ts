@@ -1,12 +1,10 @@
 import { LivequeryRequest, QueryOption } from "@livequery/types";
-import { CallHandler, ExecutionContext, HttpException, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
-import { catchError, map } from "rxjs/operators";
+import { CallHandler, ExecutionContext, forwardRef, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
+import { map } from "rxjs/operators";
 import { PathHelper } from "./helpers/PathHelper";
-import JWT from 'jsonwebtoken'
-import { of } from "rxjs";
 import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync";
 import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair";
-
+const JWT = require('jsonwebtoken')
 
 export type RealtimeSubscription = {
     collection_ref: string,
@@ -17,10 +15,9 @@ export type RealtimeSubscription = {
 export class LivequeryInterceptor implements NestInterceptor {
 
     constructor(
-        @Optional() private LivequeryWebsocketSync: LivequeryWebsocketSync,
+        @Optional() @Inject(forwardRef(() => LivequeryWebsocketSync)) private LivequeryWebsocketSync: LivequeryWebsocketSync,
         @Optional() @InjectWebsocketPrivateKey() private secret_or_private_key: string
     ) {
-        if (!LivequeryWebsocketSync && !secret_or_private_key) throw new Error('Missing api-websocket key pair, please use UseWebsocketShareKeyPair in providers list')
     }
 
     async intercept(context: ExecutionContext, next: CallHandler) {
@@ -72,16 +69,14 @@ export class LivequeryInterceptor implements NestInterceptor {
             method: req.method.toLowerCase()
         } as any as LivequeryRequest
 
-        // Allow realtime by default  
+        // Allow realtime by default   
         req.headers.socket_id && this.LivequeryWebsocketSync?.listen(req.headers.socket_id, { collection_ref, doc_id })
-        const realtime_key = await new Promise(s => {
-            if (this.LivequeryWebsocketSync || req.method.toLowerCase() != 'get' || !req.query['realtime']) return {}
-            const subscription_id = Date.now().toString(32)
-            JWT.sign({ collection_ref, doc_id, filters, subscription_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? {} : data))
+        const realtime_token = await new Promise(s => {
+            if (this.LivequeryWebsocketSync || !this.secret_or_private_key || req.method.toLowerCase() != 'get' || req.query._cursor) return s(null)
+            JWT.sign({ collection_ref, doc_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
         })
         return next.handle().pipe(
-            catchError(error => of({ error })),
-            map(data => ({ data: { ...data, realtime_key } }))
+            map(data => ({ data: { ...data, realtime_token } }))
         )
     }
 }
