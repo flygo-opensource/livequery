@@ -1,6 +1,6 @@
 import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse } from '@livequery/types'
 import { of } from 'rxjs';
-import { catchError, map, mergeMap } from 'rxjs/operators';
+import { catchError, finalize, map, mergeMap, tap } from 'rxjs/operators';
 import { merge, Subject } from 'rxjs'
 import { Socket } from './Socket';
 import { stringify } from 'query-string'
@@ -24,21 +24,15 @@ export class RestTransporter implements Transporter {
         config.websocket_url && (this.socket = new Socket(config.websocket_url))
     }
 
-    async get<T>(ref: string, query: any = {}) {
-        return await this.call<{}, {}, T>(ref, 'GET', query, null)
-    }
 
     query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) {
-
-        const $on_reload = new Subject<void>()
-
+        const $on_reload = new Subject<void>();
         const http_request = merge(of(1), this.socket?.$reconnect || of<void>(), $on_reload)
             .pipe(
                 mergeMap(() => this.call<any, null, QueryData<T>>(ref, 'GET', options)),
                 map(({ data, error }) => {
                     if (error) throw error
                     data.realtime_token && this.socket?.subscribe(data.realtime_token)
-
 
                     // If collection
                     const collection = data as CollectionResponse<T>['data']
@@ -64,10 +58,9 @@ export class RestTransporter implements Transporter {
                 catchError(error => of({ error })),
             )
 
-
         const websocket_sync = (!this.socket || options._cursor) ? of<QueryStream<T>>() : (
             this.socket.listen(ref).pipe(
-                map((change) => ({ data: { changes: [change] } } as QueryStream<T>)),
+                map((change) => ({ data: { changes: [change] } } as QueryStream<T>))
             )
         )
 
@@ -102,19 +95,19 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const { data, error } = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
+            return await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
-            })
-                .then(r => r.json())
-            if (error) throw error
-            return data
-        } catch (e) {
-            throw e.error || e
+            }).then(r => r.json())
+        } catch (error) {
+            throw error
         }
     }
 
+    async get<T>(ref: string, query: any = {}) {
+        return await this.call<{}, {}, T>(ref, 'GET', query, null)
+    }
 
     async add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
         return await this.call(ref, 'POST', {}, data)

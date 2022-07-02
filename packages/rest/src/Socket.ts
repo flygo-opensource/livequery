@@ -24,7 +24,7 @@ export class Socket {
             })
 
             const data_sender = fromEvent(ws, 'open').subscribe(() => {
-                console.log('Websocket connected')
+                console.log(n == 0 ? 'Websocket connected' : 'Websocket re-connected')
                 ws.send(JSON.stringify({ event: 'start', data: { id: this.socket_session } }))
                 const subscription = this.$input.subscribe(data => ws.send(JSON.stringify(data)))
                 n > 0 && this.$reconnect.next()
@@ -87,6 +87,6 @@ export class Socket {
                     }
                 }, 2000)
             })
-        ) 
+        )
     }
 }
