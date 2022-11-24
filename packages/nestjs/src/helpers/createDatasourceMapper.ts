@@ -5,7 +5,6 @@ import { PathHelper } from "./PathHelper";
 
 
 
-
 export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(...args): Datasource }) => {
 
 
@@ -22,21 +21,17 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
         }
     )
 
-    const UseDatasource = (fn: (options: Array<T & { refs: string[] }>) => Omit<Provider, 'provide'>) => {
 
-        const options = RouteConfigList.map(config => {
-            return {
-                ...(config.options || {}) as T,
-                refs: PathHelper.join(
-                    Reflect.getMetadata('path', config.target.constructor),
-                    Reflect.getMetadata('path', config.target[config.method])
-                ).map(PathHelper.trimLivequeryHotkey)
-            }
-        })
 
-        return { ...fn(options), provide: datasource_factory } as Provider
+    const getDatasourceMetadatas = () => RouteConfigList.map(config => {
+        return {
+            ...(config.options || {}) as T,
+            refs: PathHelper.join(
+                Reflect.getMetadata('path', config.target.constructor),
+                Reflect.getMetadata('path', config.target[config.method])
+            ).map(PathHelper.trimLivequeryHotkey)
+        }
+    })
 
-    }
-
-    return [UseDatasource, decorator] as [typeof UseDatasource, typeof decorator]
+    return [decorator, getDatasourceMetadatas] as [typeof decorator, typeof getDatasourceMetadatas]
 }
