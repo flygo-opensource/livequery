@@ -22,7 +22,7 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
         }
     )
 
-    const UseDatasource = (fn: (options: Array<T & { refs: string[] }>) => Provider) => {
+    const UseDatasource = (fn: (options: Array<T & { refs: string[] }>) => Omit<Provider, 'provide'>) => {
 
         const options = RouteConfigList.map(config => {
             return {
@@ -34,7 +34,7 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
             }
         })
 
-        return fn(options)
+        return { ...fn(options), provide: datasource_factory }
 
     }
 
