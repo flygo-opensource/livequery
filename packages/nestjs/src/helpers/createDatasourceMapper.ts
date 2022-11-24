@@ -34,7 +34,7 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
             }
         })
 
-        return { ...fn(options), provide: datasource_factory }
+        return { ...fn(options), provide: datasource_factory } as Provider
 
     }
 
