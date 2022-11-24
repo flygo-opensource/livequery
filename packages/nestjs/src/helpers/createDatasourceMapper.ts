@@ -22,25 +22,20 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
         }
     )
 
-    const UseDatasource = ({ useFactory, inject }: { useFactory: (options: DatasourceOptions<T>, ...injects) => Datasource<T> | Promise<Datasource<T>>, inject?: any[] }) => {
-        return {
-            provide: datasource_factory,
-            inject,
-            useFactory: async (...injects) => {
-                const options = RouteConfigList.map(config => {
-                    return {
-                        ...(config.options || {}) as T,
-                        refs: PathHelper.join(
-                            Reflect.getMetadata('path', config.target.constructor),
-                            Reflect.getMetadata('path', config.target[config.method])
-                        ).map(PathHelper.trimLivequeryHotkey)
-                    }
-                })
-                const datasource = await useFactory(options, ...injects)
-                DatasourceList.set(datasource_factory, datasource)
-                return datasource
+    const UseDatasource = (fn: (options: Array<T & { refs: string[] }>) => Provider) => {
+
+        const options = RouteConfigList.map(config => {
+            return {
+                ...(config.options || {}) as T,
+                refs: PathHelper.join(
+                    Reflect.getMetadata('path', config.target.constructor),
+                    Reflect.getMetadata('path', config.target[config.method])
+                ).map(PathHelper.trimLivequeryHotkey)
             }
-        } as Provider
+        })
+
+        return fn(options)
+
     }
 
     return [UseDatasource, decorator] as [typeof UseDatasource, typeof decorator]
