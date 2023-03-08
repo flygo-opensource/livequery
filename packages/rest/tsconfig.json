@@ -4,7 +4,8 @@
 		"jsx": "react",
 		"lib": [
 			"dom",
-			"es2017" 
+			"es2017",
+			"es2019.array"
 		],
 		"module": "CommonJS",
 		"target": "es6",
@@ -13,8 +14,7 @@
 		"sourceMap": false
 	},
 	"include": [
-		"src",
-		"index.ts"
+		"src"
 	],
 	"exclude": [
 		"node_modules",
@@ -23,7 +23,5 @@
 		"bin",
 		"tests"
 	],
-	"files": [
-		"src/index.ts"
-	]
+	"files": ["src/index.ts"]
 }
