@@ -2,7 +2,7 @@
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 import { Subject } from "rxjs";
 import { LivequeryInterceptor, RealtimeSubscription } from "./LivequeryInterceptor";
-import { v4 } from 'uuid'
+import { randomUUID } from 'crypto'
 import { forwardRef, Inject, Optional } from "@nestjs/common";
 import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair";
 import { UpdatedData, UpdatedDataType } from "@livequery/types";
@@ -50,7 +50,7 @@ export class LivequeryWebsocketSync {
 
     @SubscribeMessage('start')
     start(
-        @MessageBody() { id = v4() }: { id: string },
+        @MessageBody() { id = randomUUID() }: { id: string },
         @ConnectedSocket() socket: WebSocket & { id: string }
     ) {
         if (typeof id == 'string' && id.length < 40) {
