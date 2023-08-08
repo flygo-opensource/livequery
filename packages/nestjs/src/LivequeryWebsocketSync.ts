@@ -48,6 +48,50 @@ export class LivequeryWebsocketSync {
         this.connections.delete(socket.id)
     }
 
+    async sync_db_change<T extends { id: string }>(event: { type: UpdatedDataType, old_data?: T, old_ref: string, new_data?: T, new_ref: string }) {
+
+        if (event.type == 'added') {
+            this.changes.next({
+                data: event.new_data,
+                ref: event.new_ref,
+                type: event.type
+            })
+            return
+        }
+
+        if (event.type == 'modified') {
+            if (event.old_ref == event.new_ref) {
+                this.changes.next({
+                    type: 'modified',
+                    ref: event.new_ref,
+                    data: event.new_data
+                })
+            } else {
+                this.changes.next({
+                    type: 'removed',
+                    ref: event.old_ref,
+                    data: { id: event.old_data.id }
+                })
+
+                this.changes.next({
+                    type: 'added',
+                    ref: event.new_ref,
+                    data: { ...event.old_data || {}, ...event.new_data || {}, id: event.old_data.id }
+                })
+            }
+            return
+        }
+
+        if (event.type == 'removed') {
+            this.changes.next({
+                data: { id: event.old_data.id },
+                ref: event.old_ref,
+                type: event.type
+            })
+            return
+        }
+    }
+
     @SubscribeMessage('start')
     start(
         @MessageBody() { id = randomUUID() }: { id: string },
