@@ -5,24 +5,24 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "1.0.75",
+    "version": "1.0.77",
     "description": "Nestjs decorators for @livequery ecosystem",
-    "main": "build/index.js",
-    "types": "build/index.d.ts",
+    "main": "./build/src/index.js",
+    "types": "./build/src/index.d.ts",
     "files": [
         "build/**/*"
     ],
     "exports": {
         ".": {
             "import": {
-                "types": "./build/index.d.ts",
-                "default": "./build/index.js"
+                "types": "./build/src/index.d.ts",
+                "default": "./build/src/index.js"
             }
         }
     },
     "type": "module",
     "devDependencies": {
-        "@livequery/types": "x",
+        "@livequery/types": "1.0.77",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
         "@nestjs/websockets": "x",

@@ -28,6 +28,4 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
         )
     }
 }
-
-
-export const XXXXX = ModuleRef
+ 
