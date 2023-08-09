@@ -1,10 +1,10 @@
 import { LivequeryRequest, QueryOption } from "@livequery/types";
 import { CallHandler, ExecutionContext, forwardRef, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
-import { PathHelper } from "./helpers/PathHelper";
-import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync";
-import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair";
-const JWT = require('jsonwebtoken')
+import { PathHelper } from "./helpers/PathHelper.js";
+import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
+import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair.js";
+import JWT from 'jsonwebtoken'
 
 export type RealtimeSubscription = {
     collection_ref: string,
@@ -15,7 +15,7 @@ export type RealtimeSubscription = {
 export class LivequeryInterceptor implements NestInterceptor {
 
     constructor(
-        @Optional() @Inject(forwardRef(() => LivequeryWebsocketSync)) private LivequeryWebsocketSync: LivequeryWebsocketSync,
+        @Optional() @Inject(LivequeryWebsocketSync) private LivequeryWebsocketSync: LivequeryWebsocketSync,
         @Optional() @InjectWebsocketPrivateKey() private secret_or_private_key: string
     ) {
     }
@@ -73,7 +73,7 @@ export class LivequeryInterceptor implements NestInterceptor {
         req.method == 'GET' && req.headers.socket_id && this.LivequeryWebsocketSync?.listen(req.headers.socket_id, { collection_ref, doc_id })
 
         const realtime_token = await new Promise(s => {
-            if (this.LivequeryWebsocketSync || !this.secret_or_private_key || req.method.toLowerCase() != 'get' || req.query._cursor) return s(null)
+            if (!this.secret_or_private_key || req.method.toLowerCase() != 'get' ) return s(null)
             JWT.sign({ collection_ref, doc_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
         })
         return next.handle().pipe(

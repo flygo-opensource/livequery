@@ -1,14 +1,15 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "NodeNext",
     "declaration": true,
     "removeComments": true,
     "allowSyntheticDefaultImports": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "target": "ESNext",
-    "sourceMap": false,
+    "sourceMap": true,
     "baseUrl": ".",
+    "moduleResolution": "NodeNext",
     "outDir": "./build",
     "incremental": false,
     "useDefineForClassFields": true,
@@ -19,7 +20,9 @@
       "ESNext.Array",
       "ESNext.String",
       "ESNext"
-    ]
+    ],
+    "esModuleInterop": true,
+    "importHelpers": true
   },
   "exclude": [
     "node_modules",

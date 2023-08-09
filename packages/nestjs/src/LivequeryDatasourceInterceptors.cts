@@ -1,4 +1,4 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, Module, NestInterceptor } from '@nestjs/common';
 import { map } from 'rxjs';
 import { LivequeryRequest } from '@livequery/types';
 import { ModuleRef } from '@nestjs/core'
@@ -15,7 +15,7 @@ export const $__datasource_factory_token = Symbol()
 @Injectable()
 export class LivequeryDatasourceInterceptors implements NestInterceptor {
 
-    constructor(private moduleRef: ModuleRef ) {   }
+    constructor(private moduleRef: ModuleRef) { }
 
     async intercept(ctx: ExecutionContext, next: CallHandler) {
 
@@ -28,3 +28,6 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
         )
     }
 }
+
+
+export const XXXXX = ModuleRef

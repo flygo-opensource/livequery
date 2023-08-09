@@ -1,42 +1,43 @@
 {
     "name": "@livequery/nestjs",
+    "author": "Duong Van Ba",
+    "license": "MIT",
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "1.0.50",
-    "description": "",
+    "version": "1.0.51",
+    "description": "Nestjs decorators for @livequery ecosystem",
     "main": "build/index.js",
     "types": "build/index.d.ts",
     "files": [
         "build/**/*"
     ],
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./build/index.d.ts",
+                "default": "./build/index.js"
+            }
+        }
+    },
+    "type": "module",
     "devDependencies": {
         "@livequery/types": "x",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
         "@nestjs/websockets": "x",
         "@types/express": "x",
+        "@types/jsonwebtoken": "x",
         "@types/node": "x",
+        "jsonwebtoken": "x",
         "reflect-metadata": "x",
-        "rxjs": "^.x"
-    },
-    "peerDependencies": {
-        "@nestjs/common": "x",
-        "@nestjs/core": "x",
-        "@nestjs/websockets": "x",
-        "reflect-metadata": "x",
-        "rxjs": "x"
+        "rxjs": "x",
+        "tslib": "^2.6.1",
+        "typescript": "^5.1.6"
     },
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
         "build": "tsc -b .",
         "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
-    },
-    "author": "",
-    "license": "ISC",
-    "dependencies": {
-        "@types/jsonwebtoken": "x",
-        "jsonwebtoken": "x",
-        "typescript": "^5.1.6"
     }
 }

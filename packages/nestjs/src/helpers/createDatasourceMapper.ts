@@ -1,7 +1,7 @@
-import { applyDecorators, UseInterceptors, Provider } from "@nestjs/common";
-import { Datasource, LivequeryDatasourceInterceptors, DatasourceOptions, $__datasource_factory_token, DatasourceList } from "../LivequeryDatasourceInterceptors";
-import { UseLivequeryInterceptor } from "../LivequeryInterceptor";
-import { PathHelper } from "./PathHelper";
+import { applyDecorators, UseInterceptors } from "@nestjs/common";
+import { Datasource, LivequeryDatasourceInterceptors, $__datasource_factory_token } from "../LivequeryDatasourceInterceptors.cjs";
+import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
+import { PathHelper } from "./PathHelper.js";
 
 
 

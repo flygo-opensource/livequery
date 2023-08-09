@@ -1,12 +1,12 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 import { Subject } from "rxjs";
-import { LivequeryInterceptor, RealtimeSubscription } from "./LivequeryInterceptor";
+import { RealtimeSubscription } from "./LivequeryInterceptor.js"; 
 import { randomUUID } from 'crypto'
 import { forwardRef, Inject, Optional } from "@nestjs/common";
-import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair";
+import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
 import { UpdatedData, UpdatedDataType } from "@livequery/types";
-const JWT = require('jsonwebtoken')
+import JWT from 'jsonwebtoken'
 
 
 
@@ -23,10 +23,7 @@ export class LivequeryWebsocketSync {
 
     constructor(
         @Optional() @InjectWebsocketPublicKey() private secret_or_public_key: string,
-        @Optional() @Inject(forwardRef(() => LivequeryInterceptor)) LivequeryInterceptor: LivequeryInterceptor,
-    ) {
-        if (!LivequeryInterceptor && !secret_or_public_key) throw new Error('Missing api-websocket key pair, please use UseWebsocketPublicKey in providers list')
-
+    ) { 
         this.changes.subscribe(({ ref, data, type, ...rest }) => {
             const connections = new Set([
                 ...this.refs.get(ref)?.values() || [],
@@ -48,11 +45,12 @@ export class LivequeryWebsocketSync {
         this.connections.delete(socket.id)
     }
 
-    async sync_db_change<T extends { id: string }>(event: { type: UpdatedDataType, old_data?: T, old_ref: string, new_data?: T, new_ref: string }) {
+    async sync_db_change<T extends { id: string }>(event: { type: UpdatedDataType, old_data?: T, old_ref: string, new_data?: Partial<T>, new_ref: string }) {
 
+        const id = event.old_data.id || event.new_data.id
         if (event.type == 'added') {
             this.changes.next({
-                data: event.new_data,
+                data: { ...event.new_data, id },
                 ref: event.new_ref,
                 type: event.type
             })
@@ -64,19 +62,19 @@ export class LivequeryWebsocketSync {
                 this.changes.next({
                     type: 'modified',
                     ref: event.new_ref,
-                    data: event.new_data
+                    data: { ...event.new_data, id }
                 })
             } else {
                 this.changes.next({
                     type: 'removed',
                     ref: event.old_ref,
-                    data: { id: event.old_data.id }
+                    data: { id }
                 })
 
                 this.changes.next({
                     type: 'added',
                     ref: event.new_ref,
-                    data: { ...event.old_data || {}, ...event.new_data || {}, id: event.old_data.id }
+                    data: { ...event.old_data || {}, ...event.new_data || {}, id }
                 })
             }
             return
@@ -84,7 +82,7 @@ export class LivequeryWebsocketSync {
 
         if (event.type == 'removed') {
             this.changes.next({
-                data: { id: event.old_data.id },
+                data: { id },
                 ref: event.old_ref,
                 type: event.type
             })

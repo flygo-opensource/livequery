@@ -1,4 +1,4 @@
-import { LIVEQUERY_MAGIC_KEY } from "../const"
+import { LIVEQUERY_MAGIC_KEY } from "../const.js"
 
 
 export class PathHelper {
