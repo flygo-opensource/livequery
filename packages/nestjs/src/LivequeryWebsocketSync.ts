@@ -1,11 +1,11 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject } from "rxjs";
+import { Observable, Subject, map, pipe } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { randomUUID } from 'crypto'
 import { forwardRef, Inject, Optional } from "@nestjs/common";
 import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
-import { UpdatedData, UpdatedDataType } from "@livequery/types";
+import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 import JWT from 'jsonwebtoken'
 
 
@@ -14,26 +14,18 @@ type ConnectionID = string
 type Ref = string
 
 
-export type DbChangeEvent<T> = { 
-    type: UpdatedDataType, 
-    old_data?: T, 
-    old_ref: string, 
-    new_data?: Partial<T>, 
-    new_ref: string 
-}
-
 @WebSocketGateway({ path: process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates' })
 export class LivequeryWebsocketSync {
 
     private connections = new Map<ConnectionID, { socket: WebSocket & { id: string }, refs: Set<Ref> }>()
     private refs = new Map<Ref, Map<ConnectionID, { socket: WebSocket & { id: string } }>>()
 
-    private  readonly changes = new Subject<UpdatedData>()
+    private readonly changes = new Subject<UpdatedData>()
 
     constructor(
         @Optional() @InjectWebsocketPublicKey() private secret_or_public_key: string,
     ) {
-        this.changes.subscribe(({ ref, data, type, ...rest }) => { 
+        this.changes.subscribe(({ ref, data, type, ...rest }) => {
             const connections = new Set([
                 ...this.refs.get(ref)?.values() || [],
                 ...this.refs.get(`${ref}/${data.id}`)?.values() || []
@@ -54,61 +46,65 @@ export class LivequeryWebsocketSync {
         this.connections.delete(socket.id)
     }
 
-    async sync_db_change<T extends { id: string }>(event: DbChangeEvent<T>) {
+    pipe2websocket<T extends LivequeryBaseEntity = LivequeryBaseEntity>() {
+        return pipe<Observable<WebsocketSyncPayload<T>>, void>(
+            map((event: WebsocketSyncPayload<T>) => {
+                const id = event.old_data?.id || event.new_data?.id
+                if (!id) return
 
-        const id = event.old_data?.id || event.new_data?.id
-        if (!id) return
-        
-        if (event.type == 'added') {
-            this.changes.next({
-                data: { ...event.new_data, id },
-                ref: event.new_ref,
-                type: event.type
+                if (event.type == 'added') {
+                    this.changes.next({
+                        data: { ...event.new_data, id },
+                        ref: event.new_ref,
+                        type: event.type
+                    })
+                    return
+                }
+
+                if (event.type == 'modified') {
+                    if (event.old_ref == event.new_ref) {
+                        const changes = {
+                            ...Object
+                                .keys(event.new_data)
+                                .filter(key => event.new_data[key] != event.old_data[key])
+                                .reduce(
+                                    (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
+                                ),
+                            id
+                        }
+                        this.changes.next({
+                            type: 'modified',
+                            ref: event.new_ref,
+                            data: changes
+                        })
+                    } else {
+                        this.changes.next({
+                            type: 'removed',
+                            ref: event.old_ref,
+                            data: { id }
+                        })
+
+                        this.changes.next({
+                            type: 'added',
+                            ref: event.new_ref,
+                            data: { ...event.old_data || {}, ...event.new_data || {}, id }
+                        })
+                    }
+                    return
+                }
+
+                if (event.type == 'removed') {
+                    this.changes.next({
+                        data: { id },
+                        ref: event.old_ref,
+                        type: event.type
+                    })
+                    return
+                }
             })
-            return
-        }
-
-        if (event.type == 'modified') {
-            if (event.old_ref == event.new_ref) {
-                const changes = {
-                    ...Object
-                        .keys(event.new_data)
-                        .filter(key => event.new_data[key] != event.old_data[key])
-                        .reduce(
-                            (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
-                        ),
-                    id
-                } 
-                this.changes.next({
-                    type: 'modified',
-                    ref: event.new_ref,
-                    data: changes
-                })
-            } else {
-                this.changes.next({
-                    type: 'removed',
-                    ref: event.old_ref,
-                    data: { id }
-                })
-
-                this.changes.next({
-                    type: 'added',
-                    ref: event.new_ref,
-                    data: { ...event.old_data || {}, ...event.new_data || {}, id }
-                })
-            }
-            return
-        }
-
-        if (event.type == 'removed') {
-            this.changes.next({
-                data: { id },
-                ref: event.old_ref,
-                type: event.type
-            })
-            return
-        }
+        )
     }
+
 
     @SubscribeMessage('start')
     start(
