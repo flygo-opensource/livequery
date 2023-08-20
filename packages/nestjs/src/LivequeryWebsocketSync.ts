@@ -47,7 +47,7 @@ export class LivequeryWebsocketSync {
     }
 
     pipe2websocket<T extends LivequeryBaseEntity = LivequeryBaseEntity>() {
-        return pipe<Observable<WebsocketSyncPayload<T>>, void>(
+        return pipe<Observable<WebsocketSyncPayload<T>>, Observable<void>>(
             map((event: WebsocketSyncPayload<T>) => {
                 const id = event.old_data?.id || event.new_data?.id
                 if (!id) return
