@@ -1,13 +1,15 @@
-import { CallHandler, ExecutionContext, Injectable, Module, NestInterceptor } from '@nestjs/common';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { map } from 'rxjs';
-import { LivequeryRequest } from '@livequery/types';
 import { ModuleRef } from '@nestjs/core'
-
-export type DatasourceOptions<T> = Array<T & { refs: string[] }>
-export type Datasource<T = any> = { query(query: LivequeryRequest): any }
+import { LivequeryDatasource } from './helpers/createDatasourceMapper.js';
 
 
-export const DatasourceList = new Map<{ new(...args): Datasource }, Datasource>()
+
+
+
+
+
+export const LivequeryDatasourceList = new Map<{ new(...args): LivequeryDatasource }, LivequeryDatasource>()
 export const $__datasource_factory_token = Symbol()
 
 
@@ -20,7 +22,7 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
     async intercept(ctx: ExecutionContext, next: CallHandler) {
 
         const token = Reflect.getMetadata($__datasource_factory_token, ctx.getHandler())
-        const datasource = DatasourceList.has(token) ? DatasourceList.get(token) : this.moduleRef.get(token)
+        const datasource = LivequeryDatasourceList.has(token) ? LivequeryDatasourceList.get(token) : this.moduleRef.get(token)
         const req = ctx.switchToHttp().getRequest()
         req.livequery_response = await datasource.query(req.livequery)
         return next.handle().pipe(
@@ -28,4 +30,3 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
         )
     }
 }
- 

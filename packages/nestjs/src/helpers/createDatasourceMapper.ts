@@ -1,23 +1,38 @@
-import { applyDecorators, UseInterceptors } from "@nestjs/common";
-import { Datasource, LivequeryDatasourceInterceptors, $__datasource_factory_token } from "../LivequeryDatasourceInterceptors.js";
+import { applyDecorators, Provider, UseInterceptors } from "@nestjs/common";
+import { LivequeryDatasourceInterceptors, $__datasource_factory_token } from "../LivequeryDatasourceInterceptors.js";
 import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
 import { PathHelper } from "./PathHelper.js";
+import { merge, Observable } from "rxjs";
+import { LivequeryWebsocketSync } from "src/LivequeryWebsocketSync.js";
+import { LivequeryRequest, WebsocketSyncPayload } from "@livequery/types";
+
+export type LivequeryDatasourceOptions<T> = Array<T & { refs: string[] }>
+
+export type LivequeryDatasource<Options = {}, StreamPayload = {}, InjectList extends Array<any> = undefined> = {
+    init(routes: LivequeryDatasourceOptions<Options>, injects: InjectList): Promise<void>
+    query(query: LivequeryRequest): any
+    pipe_realtime?: (stream: Observable<StreamPayload>) => Observable<WebsocketSyncPayload>
+}
 
 
 
-export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(...args): Datasource }) => {
 
+export const createDatasourceMapper = <Options, StreamPayload, InjectList extends Array<any> = undefined>(
+    factory: { new(): LivequeryDatasource<Options, StreamPayload, InjectList> },
+    inject_tokens: Array<symbol | string | any> = [],
+    ...observables: Array<Observable<StreamPayload>>
+) => {
 
-    const RouteConfigList: Array<{ target: any, method: string, options: T }> = [];
+    const observable = merge(...observables)
 
+    const RouteConfigList: Array<{ target: any, method: string, options: Options }> = [];
 
-
-    const decorator = (options: T) => applyDecorators(
+    const decorator = (options: Options) => applyDecorators(
         (target, method) => RouteConfigList.push({ target, method, options }),
         UseLivequeryInterceptor(),
         UseInterceptors(LivequeryDatasourceInterceptors),
-        (target, method, descriptor: PropertyDescriptor) => {
-            Reflect.defineMetadata($__datasource_factory_token, datasource_factory, descriptor.value)
+        (_target, _method, descriptor: PropertyDescriptor) => {
+            Reflect.defineMetadata($__datasource_factory_token, factory, descriptor.value)
         }
     )
 
@@ -25,7 +40,7 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
 
     const getDatasourceMetadatas = () => RouteConfigList.map(config => {
         return {
-            ...(config.options || {}) as T,
+            ...(config.options || {}) as Options,
             refs: PathHelper.join(
                 Reflect.getMetadata('path', config.target.constructor),
                 Reflect.getMetadata('path', config.target[config.method])
@@ -33,5 +48,19 @@ export const createDatasourceMapper = <T extends {}>(datasource_factory: { new(.
         }
     })
 
-    return [decorator, getDatasourceMetadatas] as [typeof decorator, typeof getDatasourceMetadatas]
-}
+    const provider: Provider = {
+        provide: factory,
+        inject: [LivequeryWebsocketSync, ...inject_tokens],
+        useFactory: async (ws: LivequeryWebsocketSync, ...injects: InjectList) => {
+            const ds = new factory()
+            await ds.init(getDatasourceMetadatas(), injects)
+            ds.pipe_realtime?.(observable).subscribe(
+                change => ws.broadcast(change)
+            )
+            return ds
+        }
+    }
+
+
+    return [decorator, provider] as [typeof decorator, typeof provider]
+} 
