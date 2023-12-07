@@ -11,7 +11,7 @@ export type LivequeryDatasourceOptions<T> = Array<T & { refs: string[] }>
 export type LivequeryDatasource<Options = {}, StreamPayload = {}, InjectList extends Array<any> = undefined> = {
     init(routes: LivequeryDatasourceOptions<Options>, injects: InjectList): Promise<void>
     query(query: LivequeryRequest): any
-    pipe_realtime?: (stream: Observable<StreamPayload>) => Observable<WebsocketSyncPayload>
+    enable_realtime?: (stream: Observable<StreamPayload>) => Observable<WebsocketSyncPayload>
 }
 
 
@@ -54,7 +54,7 @@ export const createDatasourceMapper = <Options, StreamPayload, InjectList extend
         useFactory: async (ws: LivequeryWebsocketSync, ...injects: InjectList) => {
             const ds = new factory()
             await ds.init(getDatasourceMetadatas(), injects)
-            ds.pipe_realtime?.(observable).subscribe(
+            ds.enable_realtime?.(observable).subscribe(
                 change => ws.broadcast(change)
             )
             return ds
