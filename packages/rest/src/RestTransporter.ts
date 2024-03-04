@@ -2,7 +2,7 @@ import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, D
 import { of } from 'rxjs';
 import { catchError, finalize, map, mergeMap, tap } from 'rxjs/operators';
 import { merge, Subject } from 'rxjs'
-import { Socket } from './Socket';
+import { Socket } from './Socket.js';
 import { stringify } from 'query-string'
 
 
@@ -12,6 +12,7 @@ export type RestTransporterConfig = {
     websocket_url: () => MaybePromise<string>,
     base_url: () => MaybePromise<string>,
     headers?: () => Promise<{ [key: string]: string }>
+    onResponse?: (data: { url: string, headers: Headers, body: any, status: number }) => void
 }
 
 export class RestTransporter implements Transporter {
@@ -95,14 +96,28 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const result = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
+            const response = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
                 method,
                 headers: headers as any,
                 ...payload ? { body: JSON.stringify(payload) } : {},
-            }).then(r => r.text())
+            })
+
             try {
-                return JSON.parse(result) as Response
+                const body = await response.json()
+                this.config.onResponse?.({
+                    body,
+                    headers: response.headers,
+                    status: response.status,
+                    url
+                })
+                return body as Response
             } catch (e) {
+                this.config.onResponse?.({
+                    body: null,
+                    headers: response.headers,
+                    status: response.status,
+                    url
+                })
                 return null
             }
         } catch (error) {

@@ -1,2 +1,2 @@
-export { RestTransporter } from './RestTransporter'
-export { Socket } from './Socket'
+export { RestTransporter } from './RestTransporter.js'
+export { Socket } from './Socket.js'
