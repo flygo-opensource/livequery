@@ -103,8 +103,8 @@ export class LivequeryWebsocketSync {
 
     @SubscribeMessage('start')
     start(
-        @MessageBody() { id = randomUUID() }: { id: string },
-        @ConnectedSocket() socket: WebSocket & { id: string }
+        @ConnectedSocket() socket: WebSocket & { id: string },
+        @MessageBody() { id = randomUUID() }: { id: string }
     ) {
         if (typeof id == 'string' && id.length < 40) {
             socket.id = id
@@ -115,8 +115,8 @@ export class LivequeryWebsocketSync {
 
     @SubscribeMessage('subscribe')
     async subscribe(
-        @MessageBody() { realtime_token }: { realtime_token: string },
-        @ConnectedSocket() socket: WebSocket & { id: string }
+        @ConnectedSocket() socket: WebSocket & { id: string },
+        @MessageBody() { realtime_token }: { realtime_token: string }
     ) {
         if (realtime_token && this.secret_or_public_key) {
             const options = await new Promise<RealtimeSubscription>(s => JWT.verify(
@@ -132,8 +132,8 @@ export class LivequeryWebsocketSync {
 
     @SubscribeMessage('unsubscribe')
     unsubscribe(
-        @MessageBody() { ref }: { ref: string },
-        @ConnectedSocket() socket: WebSocket & { id: string }
+        @ConnectedSocket() socket: WebSocket & { id: string },
+        @MessageBody() { ref }: { ref: string }
     ) {
         this.connections.get(socket.id)?.refs.delete(ref)
         this.refs.get(ref)?.delete(socket.id)
