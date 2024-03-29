@@ -2,51 +2,85 @@
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
 import { Subject } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
-import { randomUUID } from 'crypto'
 import { Optional } from "@nestjs/common";
-import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
+import { InjectWebsocketPrivateKey, InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
+
 import JWT from 'jsonwebtoken'
+import { Socket } from "dgram";
 
 
-
-type ConnectionID = string
+type SessionID = string
 type Ref = string
+
+export type WebSocketSyncEvent = {
+    event: string
+    session_id: string
+    data?: {
+        changes: UpdatedData[]
+    }
+}
 
 
 @WebSocketGateway({ path: process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates' })
 export class LivequeryWebsocketSync {
 
-    private connections = new Map<ConnectionID, { socket: WebSocket & { id: string }, refs: Set<Ref> }>()
-    private refs = new Map<Ref, Map<ConnectionID, { socket: WebSocket & { id: string } }>>()
+    #sessions = new Map<SessionID, { refs: Set<Ref>, socket: Socket }>()
+    #refs = new Map<Ref, Map<SessionID, Socket>>()
+    #sockets = new Map<Socket, Set<SessionID>>()
 
     private readonly changes = new Subject<UpdatedData>()
+
 
     constructor(
         @Optional() @InjectWebsocketPublicKey() private secret_or_public_key: string,
     ) {
-        this.changes.subscribe(({ ref, data, type, ...rest }) => {
-            const connections = new Set([
-                ...this.refs.get(ref)?.values() || [],
-                ...this.refs.get(`${ref}/${data.id}`)?.values() || []
+        this.changes.subscribe(({ ref, data, type }) => {
+
+            const links = new Set([
+                ...this.#refs.get(ref)?.entries() || [],
+                ...this.#refs.get(`${ref}/${data.id}`)?.entries() || []
             ])
 
-            if (connections.size > 0) {
-                const payload = JSON.stringify({ event: 'sync', data: { changes: [{ ref, data, type }] } })
-                connections.forEach(({ socket }) => socket.OPEN && socket.send(payload))
+            for (const [session_id, socket] of links) {
+                const event: WebSocketSyncEvent = {
+                    event: 'sync',
+                    session_id,
+                    data: { changes: [{ ref, data, type }] }
+                }
+                const payload = JSON.stringify(event)
+                socket.send(payload)
             }
 
+
         })
     }
 
-    private async handleDisconnect(socket: WebSocket & { id: string }) {
-        this.connections.get(socket.id)?.refs.forEach(ref => {
-            this.refs.get(ref)?.delete(socket.id)
-        })
-        this.connections.delete(socket.id)
+    private handleDisconnect(socket: Socket) {
+        const sessions = this.#sockets.get(socket)
+        if (!sessions) return
+        this.#sockets.delete(socket)
+
+        for (const session_id of sessions) {
+            const session = this.#sessions.get(session_id)
+            if (!session) continue
+            this.#sessions.delete(session_id)
+
+            for (const ref of session.refs) {
+                this.#refs.get(ref)?.delete(session_id)
+            }
+
+
+        }
+
     }
 
-    broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>){
+    private handleConnection(socket: Socket) {
+        console.log(`New connection`)
+        this.#sockets.set(socket, new Set())
+    }
+
+    broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
         const id = event.old_data?.id || event.new_data?.id
         if (!id) return
 
@@ -99,58 +133,91 @@ export class LivequeryWebsocketSync {
             })
             return
         }
-    } 
+    }
 
     @SubscribeMessage('start')
     start(
-        @ConnectedSocket() socket: WebSocket & { id: string },
-        @MessageBody() { id = randomUUID() }: { id: string }
+        @ConnectedSocket() socket: Socket,
+        @MessageBody() { id: session_id }: { id: string }
     ) {
-        if (typeof id == 'string' && id.length < 40) {
-            socket.id = id
-            this.connections.set(id, { socket, refs: new Set() })
-        }
 
+        setInterval(() => socket.send(JSON.stringify({ event: 'ping', session_id })), 3000)
+
+        console.log({ start: { session_id } })
+        if (session_id && session_id.length > 32) return
+
+        this.#sockets.get(socket)?.add(session_id)
+        this.#sessions.set(session_id, {
+            refs: new Set(),
+            socket
+        })
+
+    }
+
+
+    @SubscribeMessage('stop')
+    stop(
+        @ConnectedSocket() socket: Socket,
+        @MessageBody() { id: session_id }: { id: string }
+    ) {
+        this.#sockets.get(socket)?.delete(session_id)
+        const session = this.#sessions.get(session_id)
+        if (!session) return
+        this.#sessions.delete(session_id)
+
+        for (const ref of session.refs) {
+            this.#refs.get(ref)?.delete(session_id)
+        }
     }
 
     @SubscribeMessage('subscribe')
     async subscribe(
-        @ConnectedSocket() socket: WebSocket & { id: string },
+        @ConnectedSocket() socket: Socket & { id: string },
         @MessageBody() { realtime_token }: { realtime_token: string }
     ) {
         if (realtime_token && this.secret_or_public_key) {
+
             const options = await new Promise<RealtimeSubscription>(s => JWT.verify(
                 realtime_token,
                 this.secret_or_public_key,
                 {},
                 (error, data: RealtimeSubscription) => s(error ? null : data)
             ))
-            options && this.listen(socket.id, options)
+            if (options) {
+                this.listen(options)
+            }
+
         }
 
     }
 
     @SubscribeMessage('unsubscribe')
     unsubscribe(
-        @ConnectedSocket() socket: WebSocket & { id: string },
-        @MessageBody() { ref }: { ref: string }
+        @ConnectedSocket() socket: Socket,
+        @MessageBody() { ref, id }: { ref: string, id?: string }
     ) {
-        this.connections.get(socket.id)?.refs.delete(ref)
-        this.refs.get(ref)?.delete(socket.id)
-    }
+        const session_ids = id ? [id] : (this.#sockets.get(socket) || [])
+        for (const session_id of session_ids) {
 
-    listen(connection_id: string, subscription: RealtimeSubscription) {
+            this.#refs.get(ref)?.delete(session_id)
+            this.#sockets.get(socket)?.delete(session_id)
 
-        const connection = this.connections.get(connection_id)
-
-        if (connection) {
-            const { collection_ref, doc_id } = subscription
-            const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
-            const { socket, refs } = connection
-            refs.add(ref)
-            !this.refs.has(ref) && this.refs.set(ref, new Map())
-            !this.refs.get(ref).has(connection_id) && this.refs.get(ref).set(connection_id, { socket })
+            const session = this.#sessions.get(session_id)
+            if (!session) continue
+            session.refs.delete(ref)
 
         }
+
+    }
+
+
+    listen({ collection_ref, doc_id, session_id }: RealtimeSubscription) {
+        const session = this.#sessions.get(session_id)
+        if (!session) return
+        const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
+        const { socket, refs } = session
+        refs.add(ref)
+        !this.#refs.has(ref) && this.#refs.set(ref, new Map())
+        !this.#refs.get(ref).has(session_id) && this.#refs.get(ref).set(session_id, socket)
     }
 }

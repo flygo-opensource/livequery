@@ -1,5 +1,5 @@
 import { LivequeryRequest, QueryOption } from "@livequery/types";
-import { CallHandler, ExecutionContext, forwardRef, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
+import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
 import { PathHelper } from "./helpers/PathHelper.js";
 import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
@@ -7,6 +7,7 @@ import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair.js";
 import JWT from 'jsonwebtoken'
 
 export type RealtimeSubscription = {
+    session_id: string
     collection_ref: string,
     doc_id: string
 }
@@ -69,12 +70,18 @@ export class LivequeryInterceptor implements NestInterceptor {
             method: req.method.toLowerCase()
         } as any as LivequeryRequest
 
-        // Allow realtime by default   
-        req.method == 'GET' && req.headers.socket_id && this.LivequeryWebsocketSync?.listen(req.headers.socket_id, { collection_ref, doc_id })
+        // Allow realtime by default    
+        const session_id = req.headers.session_id || req.headers.socket_id
+        req.method == 'GET' && session_id && this.LivequeryWebsocketSync?.listen(
+            {
+                collection_ref,
+                doc_id,
+                session_id
+            })
 
         const realtime_token = await new Promise(s => {
-            if (!this.secret_or_private_key || req.method.toLowerCase() != 'get' ) return s(null)
-            JWT.sign({ collection_ref, doc_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
+            if (!this.secret_or_private_key || req.method.toLowerCase() != 'get') return s(null)
+            JWT.sign({ collection_ref, doc_id, session_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
         })
         return next.handle().pipe(
             map(data => ({ data: { ...data, realtime_token } }))

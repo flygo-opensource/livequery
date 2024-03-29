@@ -25,7 +25,6 @@
         "@livequery/types": "1.0.79",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
-        "@nestjs/websockets": "x",
         "@types/express": "x",
         "@types/jsonwebtoken": "x",
         "@types/node": "x",
@@ -39,5 +38,11 @@
         "test": "echo \"Error: no test specified\" && exit 1",
         "build": "tsc -b .",
         "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    },
+    "dependencies": {
+        "@nestjs/websockets": "^10.3.7",
+        "@types/ws": "^8.5.10",
+        "socket.io": "^4.7.5",
+        "socket.io-client": "^4.7.5"
     }
 }
