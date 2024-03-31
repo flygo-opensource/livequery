@@ -3,12 +3,12 @@ import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from
 import { Subject } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { Optional } from "@nestjs/common";
-import { InjectWebsocketPrivateKey, InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
+import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
 import JWT from 'jsonwebtoken'
 import { Socket } from "dgram";
-
+import WebSocket from 'ws'
 
 type SessionID = string
 type Ref = string
@@ -31,6 +31,7 @@ export class LivequeryWebsocketSync {
 
     private readonly changes = new Subject<UpdatedData>()
 
+    #targets = new Set<WebSocket>()
 
     constructor(
         @Optional() @InjectWebsocketPublicKey() private secret_or_public_key: string,
@@ -53,6 +54,33 @@ export class LivequeryWebsocketSync {
             }
 
 
+        })
+    }
+
+    connect(url: string) {
+        const ws = new WebSocket(url)
+
+        ws.on('message', data => {
+            console.log(data.toString())
+            try {
+                const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
+                parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
+            } catch (e) {
+                console.error(e)
+            }
+        })
+
+        ws.on('open', () => {
+            console.log('Connected')
+            this.#targets.add(ws)
+        })
+
+        ws.on('close', () => {
+            this.#targets.delete(ws)
+        })
+
+        ws.on('error', () => {
+            this.#targets.delete(ws)
         })
     }
 
@@ -140,17 +168,19 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: Socket,
         @MessageBody() { id: session_id }: { id: string }
     ) {
-
-        setInterval(() => socket.send(JSON.stringify({ event: 'ping', session_id })), 3000)
-
-        console.log({ start: { session_id } })
-        if (session_id && session_id.length > 32) return
+ 
+        if (session_id && session_id.length > 36) return
 
         this.#sockets.get(socket)?.add(session_id)
         this.#sessions.set(session_id, {
             refs: new Set(),
             socket
-        })
+        });
+
+        [...this.#targets].forEach(s => s.send(JSON.stringify({
+            event: 'start',
+            data: { id: session_id }
+        })))
 
     }
 
@@ -160,6 +190,11 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: Socket,
         @MessageBody() { id: session_id }: { id: string }
     ) {
+        [...this.#targets].forEach(s => s.send(JSON.stringify({
+            event: 'stop',
+            id: session_id
+        })))
+
         this.#sockets.get(socket)?.delete(session_id)
         const session = this.#sessions.get(session_id)
         if (!session) return
@@ -175,6 +210,12 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: Socket & { id: string },
         @MessageBody() { realtime_token }: { realtime_token: string }
     ) {
+
+        [...this.#targets].forEach(s => s.send(JSON.stringify({
+            event: 'subscribe',
+            realtime_token
+        })))
+
         if (realtime_token && this.secret_or_public_key) {
 
             const options = await new Promise<RealtimeSubscription>(s => JWT.verify(
@@ -198,6 +239,12 @@ export class LivequeryWebsocketSync {
     ) {
         const session_ids = id ? [id] : (this.#sockets.get(socket) || [])
         for (const session_id of session_ids) {
+
+            [...this.#targets].forEach(s => s.send(JSON.stringify({
+                event: 'unsubscribe',
+                ref,
+                id: session_id
+            })))
 
             this.#refs.get(ref)?.delete(session_id)
             this.#sockets.get(socket)?.delete(session_id)

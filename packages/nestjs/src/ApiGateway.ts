@@ -1,83 +1,107 @@
 import { Controller, Delete, Get, Patch, Post, Put, Request, Res, } from '@nestjs/common'
 import * as https from 'http';
 import { Response } from 'express';
-import { createReadStream } from 'fs';
 import { IncomingMessage } from 'http';
 
-export type RefMap = {
-    [path: string]: string | RefMap
-}
 
 
-@Controller('livequery/*')
+export type Routing = Map<string, Partial<{
+    children: Routing
+    methods: Map<string, {
+        hosts: string[]
+        last_index: number
+    }>
+}>>
+
+
+@Controller(`${process.env.API_GATEWAY_PREFIX || 'livequery'}/*`)
 export class ApiGateway {
 
-    #paths = new Map<string, Array<{
-        last_index: number
-        version: number
-        hosts: string[]
-    }>>
-
-
-    constructor() {
-
-    }
-
-    #get_path(ref: string) {
-        return ref.split('/').map(v => v.startsWith(':') ? ':' : v).join('/')
-    }
+    #routing: Routing = new Map()
 
     disconnect(host: string) {
-        for (const [path, versions] of this.#paths) {
-            for (const ver of versions) {
-                if (ver.hosts.includes(host)) {
-                    ver.hosts = ver.hosts.filter(h => h != host)
+        for (
+            let routes = [this.#routing];
+            routes.length > 0;
+            routes = routes.map(c => [...c.values()].map(c => c.children).filter(c => !!c)).flat(2)
+        ) {
+            for (const route of routes) {
+                for (const { methods } of route.values()) {
+                    for (const list of methods.values()) {
+                        if (list?.hosts.includes(host)) {
+                            list.hosts = list?.hosts.filter(h => h != host)
+                        }
+                    }
                 }
             }
-            const updated_versions = versions.filter(ver => ver.hosts.length > 0)
-            this.#paths.set(path, updated_versions)
         }
     }
 
-    connect(host: string, refs: string[], version: number) {
-        for (const ref of refs) {
+    connect(host: string, paths: Array<{ method: string, path: string }>) {
 
-            const path = this.#get_path(ref)
-            !this.#paths.has(path) && this.#paths.set(path, [])
-            const versions = this.#paths.get(path)
+        for (const { method, path } of paths) {
 
+            const refs = path.split('/').map(r => r.startsWith(':') ? ':' : r)
 
-            if (versions.length == 0 || versions[0].version < version) {
-                versions.unshift({
-                    hosts: [host],
-                    last_index: 0,
-                    version
-                })
-                continue
+            for (
+                let routes = this.#routing, ref = refs.shift();
+                refs.length > 0;
+                routes = routes.get(ref).children
+            ) {
+                if (!routes.has(ref)) {
+                    routes.set(ref, {
+                        methods: new Map(),
+                        children: new Map()
+                    })
+                }
+
+                if (refs.length > 0) continue
+
+                const methods = routes.get(ref).methods
+                const metadata = methods.get(method.toUpperCase())
+                if (!metadata) {
+                    methods.set(method.toUpperCase(), {
+                        hosts: [host],
+                        last_index: 0
+                    })
+                    continue
+                }
+
+                metadata[0].hosts.push(host)
+
             }
 
-            if (versions[0].version == version) {
-                versions[0].hosts.push(host)
-                continue
-            }
+        }
+    }
 
-            versions.push({
-                hosts: [host],
-                last_index: 0,
-                version
+    #resolve(path: string, method: string) {
+        const refs = path.split('/')
+        for (
+            let cur = refs.shift(), routes = this.#routing.get(cur) || this.#routing.get(':');
+            refs.length == 0 && routes;
+            cur = refs.shift(), routes = routes.children?.get(cur) || routes.children?.get(':')
+        ) {
+            if (refs.length == 0 && routes) {
+                const metadata = routes.methods?.get(method)?.[0]
+                if (metadata) {
+                    return metadata.hosts[metadata.last_index++ % metadata.hosts.length]
+                }
+            }
+        }
+    }
+
+
+    #proxy(req: IncomingMessage, res: Response) {
+        const hostname = this.#resolve(req.url, req.method.toUpperCase())
+        if (!hostname) {
+            return res.sendStatus(404).json({
+                error: {
+                    code: 'NOT_FOUND'
+                }
             })
-
         }
-    }
-
-    resolve(ref: string) { 
-        return '128.199.217.97'
-    }
-
-
-    async proxy(req: IncomingMessage, res: Response) {
         const options: https.RequestOptions = {
-            hostname: this.resolve(req.url),
+            hostname,
             port: 80,
             path: req.url,
             method: req.method.toUpperCase(),
@@ -102,28 +126,28 @@ export class ApiGateway {
     }
 
     @Get()
-    get(@Request() req: IncomingMessage, @Res() res: Response) {
-        return this.proxy(req, res)
+    private get(@Request() req: IncomingMessage, @Res() res: Response) {
+        return this.#proxy(req, res)
     }
 
     @Post()
-    post(@Request() req: IncomingMessage, @Res() res: Response) {
-        return this.proxy(req, res)
+    private post(@Request() req: IncomingMessage, @Res() res: Response) {
+        return this.#proxy(req, res)
     }
 
     @Patch()
-    patch(@Request() req: IncomingMessage, @Res() res: Response) {
-        return this.proxy(req, res)
+    private patch(@Request() req: IncomingMessage, @Res() res: Response) {
+        return this.#proxy(req, res)
     }
 
     @Put()
-    put(@Request() req: IncomingMessage, @Res() res: Response) {
-        return this.proxy(req, res)
+    private put(@Request() req: IncomingMessage, @Res() res: Response) {
+        return this.#proxy(req, res)
     }
 
     @Delete()
-    del(@Request() req: IncomingMessage, @Res() res: Response) {
-        return this.proxy(req, res)
+    private del(@Request() req: IncomingMessage, @Res() res: Response) {
+        return this.#proxy(req, res)
     }
 
 }
