@@ -1,3 +1,5 @@
+export { listPaths } from './helpers/listPaths.js'
+
 export { LivequeryRequest } from './LivequeryRequest.js'
 export { LivequeryResponse } from './LivequeryResponse.js'
 export { LivequeryInterceptor, RealtimeSubscription, UseLivequeryInterceptor } from './LivequeryInterceptor.js'
@@ -6,4 +8,4 @@ export { createDatasourceMapper, LivequeryDatasourceOptions, LivequeryDatasource
 export { LivequeryDatasourceInterceptors } from './LivequeryDatasourceInterceptors.js'
 export { UseWebsocketPublicKey, UseWebsocketPrivateKey } from './UseWebsocketShareKeyPair.js'
 export { ApiGateway } from './ApiGateway.js'
-
+export { ApiGatewayConnector } from './ApiGatewayConnector.js'

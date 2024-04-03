@@ -21,8 +21,9 @@ export type WebSocketSyncEvent = {
     }
 }
 
+export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates'
 
-@WebSocketGateway({ path: process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates' })
+@WebSocketGateway({ path: WEBSOCKET_PATH })
 export class LivequeryWebsocketSync {
 
     #sessions = new Map<SessionID, { refs: Set<Ref>, socket: Socket }>()
@@ -61,7 +62,6 @@ export class LivequeryWebsocketSync {
         const ws = new WebSocket(url)
 
         ws.on('message', data => {
-            console.log(data.toString())
             try {
                 const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
                 parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
@@ -71,7 +71,6 @@ export class LivequeryWebsocketSync {
         })
 
         ws.on('open', () => {
-            console.log('Connected')
             this.#targets.add(ws)
         })
 
@@ -104,7 +103,6 @@ export class LivequeryWebsocketSync {
     }
 
     private handleConnection(socket: Socket) {
-        console.log(`New connection`)
         this.#sockets.set(socket, new Set())
     }
 
@@ -168,7 +166,7 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: Socket,
         @MessageBody() { id: session_id }: { id: string }
     ) {
- 
+
         if (session_id && session_id.length > 36) return
 
         this.#sockets.get(socket)?.add(session_id)
