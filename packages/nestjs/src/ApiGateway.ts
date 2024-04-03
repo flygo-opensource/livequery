@@ -3,7 +3,7 @@ import * as http from 'http';
 import { Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { Observable, mergeMap, firstValueFrom, from, map, tap, debounceTime, timer, filter, distinctUntilKeyChanged } from 'rxjs'
+import { Observable, mergeMap, firstValueFrom, tap, delay, timer, filter, distinctUntilKeyChanged } from 'rxjs'
 import { ApiGatewayConnector } from './ApiGatewayConnector.js';
 
 
@@ -39,9 +39,11 @@ export type ServiceApiStatus = {
 } | { id: string, online: false }
 
 export type ApiGatewayConnectorService = {
+    $wait_service_online: () => Promise<void>
     $watch: () => Observable<{
         id: string,
         online: boolean,
+        ip_addresses: string[]
     }>
     $node_id: (id: string) => ApiGatewayConnector
 }
@@ -60,8 +62,7 @@ export class ApiGateway {
         ApiGatewayConnector.$watch().pipe(
             tap(node => !node.online && this.#disconnect(node.id)),
             filter(node => node.online),
-            distinctUntilKeyChanged('id'),
-            mergeMap(node => node.online ? this.#join(node.id) : null, 1)
+            mergeMap(node => node.online ? this.#join(node.id, node.ip_addresses) : null, 1)
         ).subscribe()
     }
 
@@ -109,8 +110,9 @@ export class ApiGateway {
         }
     }
 
-    async #join(id: string) {
-        const { ip_addresses, metadata } = await this.ApiGatewayConnector.$node_id(id).list()
+    async #join(id: string, ip_addresses: string[]) {
+        if(this.#services.has(id)) return 
+        const metadata = await this.ApiGatewayConnector.$node_id(id).list()
         const host = await this.#find_api_host(ip_addresses, metadata.port)
         if (!host) return
         this.#services.set(id, { host, metadata })
