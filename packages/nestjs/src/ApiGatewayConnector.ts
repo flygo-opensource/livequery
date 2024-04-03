@@ -1,41 +1,59 @@
-import { Inject, Injectable, Optional, Provider } from "@nestjs/common";
+import { Injectable, Provider } from "@nestjs/common";
 import { LivequeryWebsocketSync, listPaths } from "./index.js";
 import { WEBSOCKET_PATH } from "./LivequeryWebsocketSync.js";
-import { ServiceApiStatusMetadata } from "./ApiGateway.js";
+import { ServiceApiMetadata } from "./ApiGateway.js";
 import { networkInterfaces } from "os";
+import { ReplaySubject, firstValueFrom, mergeMap, interval, takeUntil, tap, timer } from "rxjs";
+import http from 'http'
 
 export const ApiGatewayConnectorConfigKey = Symbol.for(`ApiGatewayConnectorConfigKey`)
-export type ApiGatewayConnectorConfig = Omit<ServiceApiStatusMetadata, 'host' | 'ws_path'>
 
 @Injectable()
 export class ApiGatewayConnector {
 
+    #ready = new ReplaySubject<void>(1)
+
     private constructor(
-        @Inject(ApiGatewayConnectorConfigKey) private metadata: ApiGatewayConnectorConfig,
-        @Optional() @Inject(LivequeryWebsocketSync) private LivequeryWebsocketSync?: LivequeryWebsocketSync
+        private metadata: ServiceApiMetadata
     ) { }
 
-    static link(controllers: any[], port: number) {
 
-        const metadata: ApiGatewayConnectorConfig = {
-            http_paths: listPaths(controllers),
-            port
-        }
+
+    static add(name: string, controllers: any[], port: number) {
+
 
         return {
             provide: ApiGatewayConnector,
-            inject: [ApiGatewayConnectorConfigKey],
-            useFactory: () => metadata
+            inject: [{ token: LivequeryWebsocketSync, optional: true }],
+            useFactory: async (ws: LivequeryWebsocketSync) => (
+                new this(
+                    {
+                        name,
+                        paths: listPaths(controllers),
+                        port,
+                        websocket: ws ? WEBSOCKET_PATH : undefined
+                    }
+                )
+            )
         } as Provider
     }
 
-    list() {
-        const metadata = {
-            ...this.metadata,
-            ws_path: this.LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined,
-            ip_address: networkInterfaces()
+
+    async list() {
+
+        const ip_addresses = (
+            Object.entries(networkInterfaces())
+                .filter(([$interface]) => $interface.startsWith('lo'))
+                .map(([_, list]) => {
+                    return list.map(item => item.address)
+                })
+                .flat(2)
+        )
+
+        return {
+            ip_addresses,
+            metadata: this.metadata
         }
-        return metadata
     }
 
 }

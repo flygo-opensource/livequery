@@ -50,11 +50,11 @@ export const createDatasourceMapper = <Options, StreamPayload, InjectList extend
 
     const provider: Provider = {
         provide: factory,
-        inject: [LivequeryWebsocketSync, ...inject_tokens],
+        inject: [{ token: LivequeryWebsocketSync, optional: true }, ...inject_tokens],
         useFactory: async (ws: LivequeryWebsocketSync, ...injects: InjectList) => {
             const ds = new factory()
             await ds.init(getDatasourceMetadatas(), injects)
-            ds.enable_realtime?.(observable).subscribe(
+            ws && ds.enable_realtime?.(observable).subscribe(
                 change => ws.broadcast(change)
             )
             return ds
