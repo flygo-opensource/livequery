@@ -3,7 +3,7 @@ import * as http from 'http';
 import { Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { Observable, mergeMap, firstValueFrom, tap, delay, timer, filter, distinctUntilKeyChanged } from 'rxjs'
+import { Observable, mergeMap, firstValueFrom, tap, delay, timer, filter, Subject } from 'rxjs'
 import { ApiGatewayConnector } from './ApiGatewayConnector.js';
 
 
@@ -47,8 +47,7 @@ export type ApiGatewayConnectorService = {
     }>
     $node_id: (id: string) => ApiGatewayConnector
 }
-
-
+ 
 @Controller(`*`)
 export class ApiGateway {
 
@@ -120,7 +119,6 @@ export class ApiGateway {
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         metadata.websocket && this.LivequeryWebsocketSync?.connect(`ws://${hostname}${metadata.websocket}`)
-
         for (const { method, path } of metadata.paths) {
 
             const refs = path.split('/').map(r => {
@@ -165,7 +163,7 @@ export class ApiGateway {
             }
 
             await merge({ dpaths: [], children: this.#routing }, refs)
-        }
+        } 
     }
 
     #match(routing: Routing[string], ref: string) {
@@ -179,7 +177,8 @@ export class ApiGateway {
     }
 
     #resolve(path: string, method: string) {
-        const refs = path.split('/').slice(1)
+        
+        const refs = path.split('?')[0].split('/').slice(1)
         for (
             let cur = refs.shift(), routes = this.#match({ dpaths: [], children: this.#routing }, cur);
             cur != undefined && routes;
