@@ -1,4 +1,4 @@
-import { LivequeryRequest, QueryOption } from "@livequery/types";
+import { LivequeryRequest } from "@livequery/types";
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
 import { PathHelper } from "./helpers/PathHelper.js";
@@ -24,18 +24,7 @@ export class LivequeryInterceptor implements NestInterceptor {
     async intercept(context: ExecutionContext, next: CallHandler) {
 
         const req = context.switchToHttp().getRequest()
-        const { _limit = 20, _cursor, _order_by, _sort, _select, ...rest } = req.query as QueryOption<any>
 
-        const filters = Object
-            .keys(rest)
-            .map(key => {
-                const [name, expression] = key.split(':')
-                try {
-                    return [name, expression || 'eq', JSON.parse(rest[key])]
-                } catch (e) {
-                    return [name, expression || 'eq', rest[key]]
-                }
-            })
 
         const {
             ref,
@@ -49,6 +38,7 @@ export class LivequeryInterceptor implements NestInterceptor {
             collection_ref: schema_collection_ref,
             ref: schema_ref
         } = PathHelper.parseHttpRequestPath(req.route.path)
+ 
 
         req.livequery = {
             ref,
@@ -57,18 +47,11 @@ export class LivequeryInterceptor implements NestInterceptor {
             schema_collection_ref,
             is_collection,
             doc_id,
-            filters,
-            options: {
-                _limit: Number(_limit),
-                _cursor,
-                _order_by,
-                _sort,
-                ..._select ? { _select: JSON.parse(_select as any as string) } : {}
-            },
+            options: req.query,
             keys: req.params,
             body: req.body,
             method: req.method.toLowerCase()
-        } as any as LivequeryRequest
+        } as LivequeryRequest
 
         // Allow realtime by default    
         const session_id = req.headers.session_id || req.headers.socket_id
