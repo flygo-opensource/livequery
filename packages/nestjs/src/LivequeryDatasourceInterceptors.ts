@@ -5,10 +5,6 @@ import { LivequeryDatasource } from './helpers/createDatasourceMapper.js';
 
 
 
-
-
-
-
 export const LivequeryDatasourceList = new Map<{ new(...args): LivequeryDatasource }, LivequeryDatasource>()
 export const $__datasource_factory_token = Symbol()
 
@@ -28,5 +24,6 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
         return next.handle().pipe(
             map(rs => rs ?? req.livequery_response)
         )
+        
     }
 }
