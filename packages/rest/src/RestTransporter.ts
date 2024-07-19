@@ -1,9 +1,9 @@
-import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse } from '@livequery/types'
+import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response } from '@livequery/types'
 import { of } from 'rxjs';
 import { catchError, finalize, map, mergeMap, tap } from 'rxjs/operators';
 import { merge, Subject } from 'rxjs'
 import { Socket } from './Socket.js';
-import { stringify } from 'query-string'
+import qs  from 'query-string'
 
 
 type MaybePromise<T> = T | Promise<T>
@@ -30,18 +30,19 @@ export class RestTransporter implements Transporter {
         const $on_reload = new Subject<void>();
         const http_request = merge(of(1), this.socket?.$reconnect || of<void>(), $on_reload)
             .pipe(
-                mergeMap(() => this.call<any, null, QueryData<T>>(ref, 'GET', options)),
+                mergeMap(() => this.call<QueryData<T>>(ref, 'GET', undefined, options)),
                 map(({ data, error }) => {
                     if (error) throw error
-                    data.realtime_token && this.socket?.subscribe(data.realtime_token)
+                    data.subscription_token && this.socket?.subscribe(data.subscription_token)
+
+                    const collection = data as CollectionResponse<T>['data']
 
                     // If collection
-                    const collection = data as CollectionResponse<T>['data']
                     if (collection.items) {
                         return {
                             data: {
                                 changes: collection.items.map(data => ({ data, type: 'added', ref })),
-                                paging: { ...collection.paging, n: 0 }
+                                paging: { ...collection, n: 0 }
                             }
                         } as QueryStream<T>
                     }
@@ -51,7 +52,7 @@ export class RestTransporter implements Transporter {
                     return {
                         data: {
                             changes: [{ data: document.item, type: 'added', ref }],
-                            paging: { n: 0 }
+                            paging: { ...collection, n: 0 }
                         }
                     } as QueryStream<T>
 
@@ -59,7 +60,7 @@ export class RestTransporter implements Transporter {
                 catchError(error => of({ error })),
             )
 
-        const websocket_sync = (!this.socket || options._cursor) ? of<QueryStream<T>>() : (
+        const websocket_sync = (!this.socket || options[':after'] || options[':before'] || options[':around']) ? of<QueryStream<T>>() : (
             this.socket.listen(ref).pipe(
                 map((change) => ({ data: { changes: [change] } } as QueryStream<T>))
             )
@@ -82,10 +83,10 @@ export class RestTransporter implements Transporter {
             [key]: typeof query[key] == 'object' ? JSON.stringify(query[key]) : query[key]
         }), {})
 
-        return `?${stringify(encoded_query)}`
+        return `?${qs.stringify(encoded_query)}`
     }
 
-    private async call<Query = any, Payload = any, Response = void>(url: string, method: string, query: Query = {} as Query, payload?: Payload): Promise<Response> {
+    private async call<Response extends {}>(url: string, method: string, payload?: any,query: any = {}): Promise<Response> {
 
         const headers = {
             ... await this.config.headers?.() || {},
@@ -125,23 +126,23 @@ export class RestTransporter implements Transporter {
         }
     }
 
-    async get<T>(ref: string, query: any = {}) {
-        return await this.call<{}, {}, T>(ref, 'GET', query, null)
+    get<T>(ref: string, query: any = {}) {
+        return this.call<T>(ref, 'GET',  null,query,)
     }
 
-    async add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
-        return await this.call(ref, 'POST', {}, data)
+    add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
+        return this.call(ref, 'POST', data, {})
     }
 
-    async update<T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> {
-        return await this.call(ref, method, {}, data)
+    update<T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> {
+        return this.call(ref, method, data, {})
     }
 
-    async remove(ref: string): Promise<void> {
-        return await this.call(ref, 'DELETE')
+    remove<T>(ref: string) {
+        return this.call<T>(ref, 'DELETE')
     }
 
-    async trigger<Query = any, Payload = any, Response = void>(ref: string, name: string, query: Query, payload: Payload): Promise<Response> {
-        return await this.call<Query, Payload, Response>(`${ref}/~${name}`, 'POST', query, payload)
+    trigger<T extends {}>(ref: string, name: string, payload?: any, query?: any) {
+        return this.call<Response<T>>(`${ref}/~${name}`, 'POST', payload, query)
     }
 }
