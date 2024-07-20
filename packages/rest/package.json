@@ -12,14 +12,14 @@
         "build/**/*"
     ],
     "dependencies": {
-        "@types/uuid": "^8.3.0",
         "query-string": "^7.0.1",
-        "rxjs": "^7.1.0",
-        "typescript": "4.9.5",
         "uuid": "^8.3.2"
     },
     "devDependencies": {
-        "@livequery/types": "1.0.82"
+        "rxjs": "^7.1.0",
+        "typescript": "4.9.5",
+        "@types/uuid": "^8.3.0",
+        "@livequery/types": "2.0.0"
     },
     "peerDependencies": {},
     "scripts": {
