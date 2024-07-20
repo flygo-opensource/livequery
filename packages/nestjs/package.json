@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "2.0.0",
+    "version": "2.0.1",
     "description": "Nestjs decorators for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -22,7 +22,7 @@
     },
     "type": "module",
     "devDependencies": {
-        "@livequery/types": "1.0.79",
+        "@livequery/types": "2.0.0",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
         "@types/express": "x",
@@ -32,7 +32,8 @@
         "reflect-metadata": "x",
         "rxjs": "x",
         "tslib": "^2.6.1",
-        "typescript": "^5.1.6"
+        "typescript": "^5.1.6",
+        "@types/ws": "^8.5.10"
     },
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
@@ -41,7 +42,6 @@
     },
     "dependencies": {
         "@nestjs/websockets": "^10.3.7",
-        "@types/ws": "^8.5.10",
         "socket.io": "^4.7.5",
         "socket.io-client": "^4.7.5"
     }
