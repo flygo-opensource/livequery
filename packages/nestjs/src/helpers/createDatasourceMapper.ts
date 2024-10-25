@@ -8,8 +8,9 @@ import { LivequeryWebsocketSync } from "../LivequeryWebsocketSync.js";
 
 export type LivequeryDatasourceOptions<T> = Array<T & { refs: string[] }>
 
-export type LivequeryDatasource<Options = {}, StreamPayload = {}, InjectList extends Array<any> = undefined> = {
-    init(routes: LivequeryDatasourceOptions<Options>, injects: InjectList): Promise<void>
+
+export type LivequeryDatasource<Options = {}, StreamPayload = {}, Connection = any> = {
+    init(routes: LivequeryDatasourceOptions<Options>, connections: { [name: string]: Connection }): Promise<void>
     query(query: LivequeryRequest): any
     enable_realtime?: (stream: Observable<StreamPayload>) => Observable<WebsocketSyncPayload>
 }
@@ -17,9 +18,9 @@ export type LivequeryDatasource<Options = {}, StreamPayload = {}, InjectList ext
 
 
 
-export const createDatasourceMapper = <Options, StreamPayload, InjectList extends Array<any> = undefined>(
-    factory: { new(): LivequeryDatasource<Options, StreamPayload, InjectList> },
-    inject_tokens: Array<symbol | string | any> = [],
+export const createDatasourceMapper = <Options, StreamPayload, Connection>(
+    factory: { new(): LivequeryDatasource<Options, StreamPayload, Connection> },
+    inject_tokens: { [connection_name: string]: any },
     ...observables: Array<Observable<StreamPayload>>
 ) => {
 
@@ -50,10 +51,11 @@ export const createDatasourceMapper = <Options, StreamPayload, InjectList extend
 
     const provider: Provider = {
         provide: factory,
-        inject: [{ token: LivequeryWebsocketSync, optional: true }, ...inject_tokens],
-        useFactory: async (ws: LivequeryWebsocketSync, ...injects: InjectList) => {
+        inject: [{ token: LivequeryWebsocketSync, optional: true }, ...Object.values(inject_tokens)],
+        useFactory: async (ws: LivequeryWebsocketSync, ... injects) => {
             const ds = new factory()
-            await ds.init(getDatasourceMetadatas(), injects)
+            const map = Object.keys(inject_tokens).reduce((acc, key, i) => ({ ...acc, [key]: injects[i] }), {})
+            await ds.init(getDatasourceMetadatas(), map)
             ws && ds.enable_realtime?.(observable).subscribe(
                 change => ws.broadcast(change)
             )

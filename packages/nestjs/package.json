@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "2.0.1",
+    "version": "2.0.3",
     "description": "Nestjs decorators for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -22,7 +22,7 @@
     },
     "type": "module",
     "devDependencies": {
-        "@livequery/types": "2.0.0",
+        "@livequery/types": "2.0.7",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
         "@types/express": "x",

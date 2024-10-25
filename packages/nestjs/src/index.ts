@@ -8,4 +8,4 @@ export { createDatasourceMapper, LivequeryDatasourceOptions, LivequeryDatasource
 export { LivequeryDatasourceInterceptors } from './LivequeryDatasourceInterceptors.js'
 export { UseWebsocketPublicKey, UseWebsocketPrivateKey } from './UseWebsocketShareKeyPair.js'
 export { ApiGateway } from './ApiGateway.js'
-export { ApiGatewayConnector } from './ApiGatewayConnector.js'
+export { ApiGatewayLinker } from './ApiGatewayLinker.js'

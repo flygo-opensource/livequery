@@ -1,11 +1,12 @@
-import { Controller, Delete, Get, Inject, Optional, Patch, Post, Put, Request, Res, } from '@nestjs/common'
+import { Controller, Delete, Get, Optional, Patch, Post, Put, Request, Res, } from '@nestjs/common'
 import * as http from 'http';
 import { Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { Observable, mergeMap, firstValueFrom, tap, delay, timer, filter, Subject } from 'rxjs'
-import { ApiGatewayConnector } from './ApiGatewayConnector.js';
-
+import { firstValueFrom, timer } from 'rxjs'
+import { API_GATEWAY_NAMESPACE } from './const.js';
+import { RxjsUdp } from './RxjsUdp.js';
+import { mergeMap } from 'rxjs/operators'
 
 
 export type Routing = {
@@ -24,6 +25,10 @@ export type Routing = {
 
 
 export type ServiceApiMetadata = {
+    id: string,
+    namespace: string
+    role: 'service' | 'gateway',
+    host: string,
     name: string
     port: number
     paths: Array<{
@@ -31,6 +36,7 @@ export type ServiceApiMetadata = {
         path: string
     }>
     websocket?: string
+    sig: string
 }
 export type ServiceApiStatus = {
     id: string
@@ -38,41 +44,52 @@ export type ServiceApiStatus = {
     metadata?: ServiceApiMetadata
 } | { id: string, online: false }
 
-export type ApiGatewayConnectorService = {
-    $wait_service_online: () => Promise<void>
-    $watch: () => Observable<{
-        id: string,
-        online: boolean,
-        ip_addresses: string[]
-    }>
-    $node_id: (id: string) => ApiGatewayConnector
+
+export type ApiGatewayClientOptions = {
+    id: string
+    name: string,
+    controllers: any[],
+    port: number
 }
- 
+
 @Controller(`*`)
 export class ApiGateway {
 
-    #services = new Map<string, { host: string, metadata: ServiceApiMetadata }>
+    #services = new Map<string, ServiceApiMetadata>
     #routing: Routing = {}
+    #udp = new RxjsUdp()
 
     constructor(
-        @Inject(ApiGatewayConnector) private ApiGatewayConnector: ApiGatewayConnectorService,
         @Optional() private LivequeryWebsocketSync: LivequeryWebsocketSync
     ) {
-        ApiGatewayConnector.$watch().pipe(
-            tap(node => !node.online && this.#disconnect(node.id)),
-            filter(node => node.online),
-            mergeMap(node => node.online ? this.#join(node.id, node.ip_addresses) : null, 1)
-        ).subscribe()
+        this.#udp.pipe(
+            mergeMap(async ({ host, port }) => {
+                const r: { data: ServiceApiMetadata } = await fetch(`http://${host}:${port}/api-gateway/metadata`).then(r => r.json())
+                r.data && r.data.namespace == API_GATEWAY_NAMESPACE && this.#join(r.data)
+            })
+        )
+        this.#udp.broadcast({
+            namespace: API_GATEWAY_NAMESPACE,
+            host: '',
+            id: '',
+            name: '',
+            paths: [],
+            port: 0,
+            role: 'gateway',
+            sig: ''
+        })
+
     }
+
 
 
     async  #disconnect(id: string) {
         const service = this.#services.get(id)
         if (!service) return
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${service.metadata.name} at ${service.host}:${service.metadata.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API OFFLINE: ${service.metadata.name} at ${service.host}:${service.metadata.port}${service.metadata.websocket}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${service.name} at ${service.host}:${service.port}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API OFFLINE: ${service.name} at ${service.host}:${service.port}${service.websocket}`)
         this.#services.delete(id)
-        const hostname = `${service.host}:${service.metadata.port}`
+        const hostname = `${service.host}:${service.port}`
         for (
             let routes = [this.#routing];
             routes.length > 0;
@@ -90,34 +107,31 @@ export class ApiGateway {
         }
     }
 
-    async  #find_api_host(hosts: string[], port: number, loop: number = 10) {
-        for (let i = 1; i <= loop; i++) {
-            for (const hostname of hosts) {
-                const connected = await new Promise<boolean>(s => {
-                    const request = http.request({
-                        hostname,
-                        port,
-                        method: 'HEAD'
-                    })
-                    request.on('response', () => s(true))
-                    request.on('error', () => s(false))
-                    request.end()
-                })
-                if (connected) return hostname
-                await firstValueFrom(timer(1000))
-            }
-        }
-    }
+    // async  #find_api_host(hosts: string[], port: number, loop: number = 10) {
+    //     for (let i = 1; i <= loop; i++) {
+    //         for (const hostname of hosts) {
+    //             const connected = await new Promise<boolean>(s => {
+    //                 const request = http.request({
+    //                     hostname,
+    //                     port,
+    //                     method: 'HEAD'
+    //                 })
+    //                 request.on('response', () => s(true))
+    //                 request.on('error', () => s(false))
+    //                 request.end()
+    //             })
+    //             if (connected) return hostname
+    //             await firstValueFrom(timer(1000))
+    //         }
+    //     }
+    // }
 
-    async #join(id: string, ip_addresses: string[]) {
-        if(this.#services.has(id)) return 
-        const metadata = await this.ApiGatewayConnector.$node_id(id).list()
-        const host = await this.#find_api_host(ip_addresses, metadata.port)
-        if (!host) return
-        this.#services.set(id, { host, metadata })
-        const hostname = `${host}:${metadata.port}`
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
+    async #join(metadata: ServiceApiMetadata) {
+        if (this.#services.has(metadata.id)) return
+        this.#services.set(metadata.id, metadata)
+        const hostname = `${metadata.host}:${metadata.port}`
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${metadata.host}:${metadata.port}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
         metadata.websocket && this.LivequeryWebsocketSync?.connect(`ws://${hostname}${metadata.websocket}`)
         for (const { method, path } of metadata.paths) {
 
@@ -163,7 +177,7 @@ export class ApiGateway {
             }
 
             await merge({ dpaths: [], children: this.#routing }, refs)
-        } 
+        }
     }
 
     #match(routing: Routing[string], ref: string) {
@@ -177,7 +191,7 @@ export class ApiGateway {
     }
 
     #resolve(path: string, method: string) {
-        
+
         const refs = path.split('?')[0].split('/').slice(1)
         for (
             let cur = refs.shift(), routes = this.#match({ dpaths: [], children: this.#routing }, cur);
