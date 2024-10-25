@@ -110,10 +110,9 @@ export class ApiGateway {
     async #join(metadata: ServiceApiMetadata) {
         if (this.#services.has(metadata.id)) return
         this.#services.set(metadata.id, metadata)
-        console.log(`New service API ${metadata.name} from ${metadata.host}:${metadata.port}`)
         const hostname = `${metadata.host}:${metadata.port}`
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${metadata.host}:${metadata.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
+        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
         metadata.websocket && this.LivequeryWebsocketSync?.connect(`ws://${hostname}${metadata.websocket}`)
         for (const { method, path } of metadata.paths) {
 
