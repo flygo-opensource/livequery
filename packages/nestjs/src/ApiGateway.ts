@@ -3,7 +3,6 @@ import * as http from 'http';
 import { Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { firstValueFrom, timer } from 'rxjs'
 import { API_GATEWAY_NAMESPACE } from './const.js';
 import { RxjsUdp } from './RxjsUdp.js';
 import { mergeMap } from 'rxjs/operators'
@@ -62,12 +61,13 @@ export class ApiGateway {
     constructor(
         @Optional() private LivequeryWebsocketSync: LivequeryWebsocketSync
     ) {
+        this.#udp = new RxjsUdp()
         this.#udp.pipe(
             mergeMap(async ({ host, port }) => {
                 const r: { data: ServiceApiMetadata } = await fetch(`http://${host}:${port}/api-gateway/metadata`).then(r => r.json())
-                r.data && r.data.namespace == API_GATEWAY_NAMESPACE && this.#join(r.data)
+                r.data && r.data.namespace == API_GATEWAY_NAMESPACE && this.#join({ ...r.data, host })
             })
-        )
+        ).subscribe()
         this.#udp.broadcast({
             namespace: API_GATEWAY_NAMESPACE,
             host: '',
@@ -107,28 +107,10 @@ export class ApiGateway {
         }
     }
 
-    // async  #find_api_host(hosts: string[], port: number, loop: number = 10) {
-    //     for (let i = 1; i <= loop; i++) {
-    //         for (const hostname of hosts) {
-    //             const connected = await new Promise<boolean>(s => {
-    //                 const request = http.request({
-    //                     hostname,
-    //                     port,
-    //                     method: 'HEAD'
-    //                 })
-    //                 request.on('response', () => s(true))
-    //                 request.on('error', () => s(false))
-    //                 request.end()
-    //             })
-    //             if (connected) return hostname
-    //             await firstValueFrom(timer(1000))
-    //         }
-    //     }
-    // }
-
     async #join(metadata: ServiceApiMetadata) {
         if (this.#services.has(metadata.id)) return
         this.#services.set(metadata.id, metadata)
+        console.log(`New service API ${metadata.name} from ${metadata.host}:${metadata.port}`)
         const hostname = `${metadata.host}:${metadata.port}`
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${metadata.host}:${metadata.port}`)
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
@@ -235,7 +217,7 @@ export class ApiGateway {
             })
                 .on('error', e => {
                     console.error(e)
-                    res.json({ error: { code: "PROXY_ERROR" } })
+                    res.json({ error: { code: "SERVICE_API_OFFLINE" } })
                 })
                 .on('upgrade', (ireq, socket, head) => {
                 })

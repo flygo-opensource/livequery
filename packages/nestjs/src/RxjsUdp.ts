@@ -7,18 +7,17 @@ import { randomUUID } from "crypto"
 
 export class RxjsUdp extends Observable<ServiceApiMetadata> {
 
-    #id = randomUUID()
+    public readonly id = randomUUID()
 
     #udp = createSocket({
         type: 'udp4',
         reuseAddr: true
     })
 
-    #broadcast_ips = ['255.255.255.255']
+    #broadcast_ips = ['localhost', '255.255.255.255']
 
     constructor() {
         super(o => {
-
             this.#udp.bind({
                 address: '0.0.0.0',
                 port: API_GATEWAY_UDP_PORT,
@@ -26,8 +25,8 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
 
             this.#udp.on('message', async (raw, rinfo) => {
                 try {
-                    const info = JSON.parse(raw.toString('utf-8')) as ServiceApiMetadata
-                    if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.#id) {
+                    const info = JSON.parse(raw.toString('utf-8')) as ServiceApiMetadata 
+                    if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.id) {
                         o.next({ ...info, host: rinfo.address })
                     }
 
@@ -35,7 +34,6 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
                 }
             })
 
-            const broadcast_ips = ['255.255.255.255']
             const network_address = (
                 Object.entries(networkInterfaces())
                     .filter(([i]) => !i.startsWith('lo'))
@@ -48,19 +46,16 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
 
             for (const address of [...network_address, ...env_address]) {
                 const splited = address.split('.')
-                splited.length == 4 && broadcast_ips.push(address)
-                splited.length == 3 && new Array(256).fill(0).map((_, i) => broadcast_ips.push(`${address}.${i}`))
+                splited.length == 4 && this.#broadcast_ips.push(address)
+                splited.length == 3 && new Array(256).fill(0).map((_, i) => this.#broadcast_ips.push(`${address}.${i}`))
             }
         })
-
-
-
     }
 
-    async broadcast(metadata: ServiceApiMetadata) {
+    async broadcast(metadata: ServiceApiMetadata) { 
         for (const host of this.#broadcast_ips) {
             await this.#udp.send(
-                JSON.stringify(metadata),
+                JSON.stringify({...metadata, id: this.id}),
                 API_GATEWAY_UDP_PORT,
                 host
             )
