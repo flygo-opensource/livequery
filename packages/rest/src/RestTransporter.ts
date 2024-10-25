@@ -1,18 +1,20 @@
 import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response } from '@livequery/types'
-import { of } from 'rxjs';
-import { catchError, finalize, map, mergeMap, tap } from 'rxjs/operators';
-import { merge, Subject } from 'rxjs'
+import { of, lastValueFrom } from 'rxjs';
+import { catchError, finalize, map, mergeMap } from 'rxjs/operators';
+import { merge, Subject, Observable, BehaviorSubject } from 'rxjs'
 import { Socket } from './Socket.js';
-import qs  from 'query-string'
+import qs from 'query-string'
 
 
 type MaybePromise<T> = T | Promise<T>
 
+export type Request = { url: RequestInfo | URL | string, options?: RequestInit }
+
 export type RestTransporterConfig = {
     websocket_url: () => MaybePromise<string>,
     base_url: () => MaybePromise<string>,
-    headers?: () => Promise<{ [key: string]: string }>
-    onResponse?: (data: { url: string, headers: Headers, body: any, status: number }) => void
+    headers?: () => Promise<{ [key: string]: string }>,
+    hooks?: (o: Observable<Request>) => Observable<Request>
 }
 
 export class RestTransporter implements Transporter {
@@ -86,7 +88,7 @@ export class RestTransporter implements Transporter {
         return `?${qs.stringify(encoded_query)}`
     }
 
-    private async call<Response extends {}>(url: string, method: string, payload?: any,query: any = {}): Promise<Response> {
+    private async call<Response extends {}>(url: string, method: string, payload?: any, query: any = {}): Promise<Response> {
 
         const headers = {
             ... await this.config.headers?.() || {},
@@ -97,37 +99,26 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const response = await fetch(`${this.config.base_url()}/${url}${this.#encode_query(query)}`, {
-                method,
-                headers: headers as any,
-                ...payload ? { body: JSON.stringify(payload) } : {},
-            })
-
-            try {
-                const body = await response.json()
-                this.config.onResponse?.({
-                    body,
-                    headers: response.headers,
-                    status: response.status,
-                    url
-                })
-                return body as Response
-            } catch (e) {
-                this.config.onResponse?.({
-                    body: null,
-                    headers: response.headers,
-                    status: response.status,
-                    url
-                })
-                return null
+            const request: Request = {
+                url: `${this.config.base_url()}/${url}${this.#encode_query(query)}`,
+                options: {
+                    method,
+                    headers: headers as any,
+                    ...payload ? { body: JSON.stringify(payload) } : {},
+                }
             }
+            const mapped = this.config.hooks ? await lastValueFrom(this.config.hooks(new BehaviorSubject(request))) : request
+            const response = await fetch(mapped.url, mapped.options)
+            const body = await response.json()
+            if (body.error) throw body.error
+            return body as Response
         } catch (error) {
             throw error
         }
     }
 
     get<T>(ref: string, query: any = {}) {
-        return this.call<T>(ref, 'GET',  null,query,)
+        return this.call<T>(ref, 'GET', null, query,)
     }
 
     add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
