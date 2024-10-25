@@ -6,7 +6,7 @@ import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
 import { API_GATEWAY_NAMESPACE } from './const.js';
 import { RxjsUdp } from './RxjsUdp.js';
 import { mergeMap } from 'rxjs/operators'
-
+import { Subscription } from 'rxjs'
 
 export type Routing = {
     [ref: string]: {
@@ -14,7 +14,7 @@ export type Routing = {
         children?: Routing
         methods?: {
             [METHOD: string]: {
-                hosts: string[]
+                hosts: Array<{ uri: string, instance_id: string }>
                 last_requested_index: number
             }
         }
@@ -54,7 +54,7 @@ export type ApiGatewayClientOptions = {
 @Controller(`*`)
 export class ApiGateway {
 
-    #services = new Map<string, ServiceApiMetadata>
+    #services = new Map<string, { metadata: ServiceApiMetadata, subscription?: Subscription }>
     #routing: Routing = {}
     #udp = new RxjsUdp()
 
@@ -81,39 +81,18 @@ export class ApiGateway {
 
     }
 
-
-
-    async  #disconnect(id: string) {
-        const service = this.#services.get(id)
-        if (!service) return
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${service.name} at ${service.host}:${service.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API OFFLINE: ${service.name} at ${service.host}:${service.port}${service.websocket}`)
-        this.#services.delete(id)
-        const hostname = `${service.host}:${service.port}`
-        for (
-            let routes = [this.#routing];
-            routes.length > 0;
-            routes = routes.map(c => [...Object.values(c)].map(c => c.children).filter(c => !!c)).flat(2)
-        ) {
-            for (const route of routes) {
-                for (const { methods } of Object.values(route || {})) {
-                    for (const list of Object.values(methods || {})) {
-                        if (list?.hosts.includes(hostname)) {
-                            list.hosts = list?.hosts.filter(h => h != hostname)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     async #join(metadata: ServiceApiMetadata) {
         if (this.#services.has(metadata.id)) return
-        this.#services.set(metadata.id, metadata)
         const hostname = `${metadata.host}:${metadata.port}`
+
+        const subscription = metadata.websocket ? this.LivequeryWebsocketSync?.connect(
+            `ws://${hostname}${metadata.websocket}`,
+            () => this.#disconnect(metadata.id)
+        ) : undefined
+
+        this.#services.set(metadata.id, { metadata, subscription })
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${metadata.host}:${metadata.port}`)
-        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Websocket API online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
-        metadata.websocket && this.LivequeryWebsocketSync?.connect(`ws://${hostname}${metadata.websocket}`)
+        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
         for (const { method, path } of metadata.paths) {
 
             const refs = path.split('/').map(r => {
@@ -134,12 +113,11 @@ export class ApiGateway {
 
                     if (!methods[METHOD]) {
                         methods[METHOD] = {
-                            hosts: [hostname],
+                            hosts: [],
                             last_requested_index: 0
                         }
-                        return
                     }
-                    methods[METHOD].hosts = [...new Set([...methods[METHOD].hosts, hostname])]
+                    methods[METHOD].hosts.push({ uri: hostname, instance_id: metadata.id })
                     return
                 }
                 const ref = refs[0]
@@ -160,6 +138,32 @@ export class ApiGateway {
             await merge({ dpaths: [], children: this.#routing }, refs)
         }
     }
+
+    async  #disconnect(id: string) {
+        const service = this.#services.get(id)
+        if (!service) return
+        const { metadata, subscription } = service
+        subscription.unsubscribe()
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${metadata.host}:${metadata.port}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
+        this.#services.delete(id)
+        const hostname = `${metadata.host}:${metadata.port}`
+        for (
+            let routes = [this.#routing];
+            routes.length > 0;
+            routes = routes.map(c => [...Object.values(c)].map(c => c.children).filter(c => !!c)).flat(2)
+        ) {
+            for (const route of routes) {
+                for (const { methods } of Object.values(route || {})) {
+                    for (const list of Object.values(methods || {})) {
+                        list.hosts = list.hosts.filter(h => h.uri != hostname)
+                    }
+                }
+            }
+        }
+    }
+
+
 
     #match(routing: Routing[string], ref: string) {
         const xm = routing.children[ref]
@@ -199,7 +203,7 @@ export class ApiGateway {
                 }
             })
         }
-        const [host, port] = target.split(':')
+        const [host, port] = target.uri.split(':')
         const options: http.RequestOptions = {
             host,
             port: Number(port || 80),
@@ -214,8 +218,8 @@ export class ApiGateway {
             http.request(options, (response) => {
                 response.pipe(res)
             })
-                .on('error', e => {
-                    console.error(e)
+                .on('error', (e: NodeJS.ErrnoException) => {
+                    e.code == 'ECONNREFUSED' && this.#disconnect(target.instance_id)
                     res.json({ error: { code: "SERVICE_API_OFFLINE" } })
                 })
                 .on('upgrade', (ireq, socket, head) => {

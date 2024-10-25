@@ -9,6 +9,7 @@ import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@liveque
 import JWT from 'jsonwebtoken'
 import { Socket } from "dgram";
 import WebSocket from 'ws'
+import { of, retry, fromEvent, map, finalize, mergeMap, merge, catchError, EMPTY } from 'rxjs'
 
 type SessionID = string
 type Ref = string
@@ -58,29 +59,28 @@ export class LivequeryWebsocketSync {
         })
     }
 
-    connect(url: string) {
-        const ws = new WebSocket(url)
+    connect(url: string, ondisconect?: Function) {
+        return of(1).pipe(
+            map(() => new WebSocket(url)),
+            mergeMap(ws => merge(
+                fromEvent(ws, 'close').pipe(map(e => { throw e })),
+                fromEvent(ws, 'error').pipe(map(e => { throw e })),
+                fromEvent(ws, 'message').pipe(
+                    map(data => {
+                        try {
+                            const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
+                            parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
+                        } catch (e) {
+                            console.error(e)
+                        }
+                    })
+                )
+            )),
+            retry({ count: 3, delay: 500, resetOnSuccess: true }),
+            catchError(() => EMPTY),
+            finalize(() => ondisconect?.())
+        ).subscribe()
 
-        ws.on('message', data => {
-            try {
-                const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
-                parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
-            } catch (e) {
-                console.error(e)
-            }
-        })
-
-        ws.on('open', () => {
-            this.#targets.add(ws)
-        })
-
-        ws.on('close', () => {
-            this.#targets.delete(ws)
-        })
-
-        ws.on('error', () => {
-            this.#targets.delete(ws)
-        })
     }
 
     private handleDisconnect(socket: Socket) {
