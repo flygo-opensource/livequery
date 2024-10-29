@@ -194,7 +194,18 @@ export class ApiGateway {
         }
     }
 
-    #proxy(req: IncomingMessage, res: Response) {
+    #proxy(req: IncomingMessage & { rawBody: Buffer }, res: Response) {
+
+        if (!req.rawBody) {
+            return res.json({
+                error: {
+                    code: "MISISNG_API_GATEWAY_RAW_BODY",
+                    message: `Please enable rawBody = true in NestFactory.create(`
+                }
+            });
+        }
+
+
         const target = this.#resolve(req.url, req.method.toUpperCase())
         if (!target) {
             return res.json({
@@ -213,43 +224,47 @@ export class ApiGateway {
             insecureHTTPParser: true
         }
 
-
-        req.pipe(
-            http.request(options, (response) => {
-                response.pipe(res)
+        const proxy_request = http.request(options, (response) => {
+            for (const [k, v] of Object.entries(response.headers)) {
+                res.setHeader(k, v)
+            }
+            response.pipe(res)
+        });
+        proxy_request
+            .on('error', (e: NodeJS.ErrnoException) => {
+                e.code == 'ECONNREFUSED' && this.#disconnect(target.instance_id);
+                res.json({ error: { code: "SERVICE_API_OFFLINE" } });
             })
-                .on('error', (e: NodeJS.ErrnoException) => {
-                    e.code == 'ECONNREFUSED' && this.#disconnect(target.instance_id)
-                    res.json({ error: { code: "SERVICE_API_OFFLINE" } })
-                })
-                .on('upgrade', (ireq, socket, head) => {
-                })
-        )
+            .on('upgrade', (ireq, socket, head) => {
+            })
+
+        proxy_request.write(req.rawBody)
+
     }
 
 
     @Get()
-    private get(@Request() req: IncomingMessage, @Res() res: Response) {
+    private get(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {
         return this.#proxy(req, res)
     }
 
     @Post()
-    private post(@Request() req: IncomingMessage, @Res() res: Response) {
+    private post(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {
         return this.#proxy(req, res)
     }
 
     @Patch()
-    private patch(@Request() req: IncomingMessage, @Res() res: Response) {
+    private patch(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {
         return this.#proxy(req, res)
     }
 
     @Put()
-    private put(@Request() req: IncomingMessage, @Res() res: Response) {
+    private put(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {
         return this.#proxy(req, res)
     }
 
     @Delete()
-    private del(@Request() req: IncomingMessage, @Res() res: Response) {
+    private del(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {
         return this.#proxy(req, res)
     }
 
