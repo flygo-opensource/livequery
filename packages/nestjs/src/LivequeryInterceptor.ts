@@ -38,7 +38,7 @@ export class LivequeryInterceptor implements NestInterceptor {
             collection_ref: schema_collection_ref,
             ref: schema_ref
         } = PathHelper.parseHttpRequestPath(req.route.path)
- 
+
 
         req.livequery = {
             ref,
@@ -67,7 +67,17 @@ export class LivequeryInterceptor implements NestInterceptor {
             JWT.sign({ collection_ref, doc_id, session_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
         })
         return next.handle().pipe(
-            map(data => ({ data: { ...data, realtime_token } }))
+            map(data => {
+                if (data.item && !data.item.id) {
+                    data.item.id = data.item._id?.toString()
+                }
+                return {
+                    data: {
+                        ...data,
+                        realtime_token
+                    }
+                }
+            })
         )
     }
 }
