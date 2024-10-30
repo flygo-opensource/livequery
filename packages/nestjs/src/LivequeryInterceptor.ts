@@ -68,8 +68,17 @@ export class LivequeryInterceptor implements NestInterceptor {
         })
         return next.handle().pipe(
             map(data => {
-                if (data.item && !data.item.id) {
-                    data.item.id = data.item._id?.toString()
+                if (data.item) {
+                    return {
+                        data: {
+                            ...data,
+                            item: {
+                                ...data.item,
+                                id: data.item.id?.toString() || data.item._id?.toString()
+                            },
+                            realtime_token
+                        }
+                    }
                 }
                 return {
                     data: {
