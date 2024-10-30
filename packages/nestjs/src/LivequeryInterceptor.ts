@@ -73,7 +73,7 @@ export class LivequeryInterceptor implements NestInterceptor {
                         data: {
                             ...data,
                             item: {
-                                ...data.item,
+                                ...data.item.toJSON ? data.item.toJSON() : data.item,
                                 id: data.item.id?.toString() || data.item._id?.toString()
                             },
                             realtime_token
