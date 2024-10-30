@@ -194,9 +194,9 @@ export class ApiGateway {
         }
     }
 
-    #proxy(req: IncomingMessage & { rawBody: Buffer }, res: Response) {
+    #proxy(req: IncomingMessage & { rawBody: Buffer, body?: any }, res: Response) {
 
-        if (!req.rawBody) {
+        if (Number(req.headers['content-length'] || 0) > 0 && !req.rawBody) {
             return res.json({
                 error: {
                     code: "MISISNG_API_GATEWAY_RAW_BODY",
@@ -238,7 +238,7 @@ export class ApiGateway {
             .on('upgrade', (ireq, socket, head) => {
             })
 
-        proxy_request.write(req.rawBody)
+        proxy_request.write(req.rawBody || Buffer.alloc(0))
 
     }
 
