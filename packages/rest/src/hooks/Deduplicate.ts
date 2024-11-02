@@ -1,0 +1,37 @@
+import { pipe, mergeMap, map, Subject, BehaviorSubject, tap, firstValueFrom, of, filter, first } from "rxjs"
+import { ApiRequest } from "../RestTransporter"
+
+const requests = new Map<string, { time: number, response: BehaviorSubject<any> }>()
+
+export const Deduplicate = (ms: number = 1000) => next => {
+
+    return pipe(
+        mergeMap(async (r: ApiRequest) => {
+
+            const url = r.url.toString()
+            const cached = requests.get(url)
+
+            if (cached && cached.time > Date.now() - ms) {
+                return cached.response.pipe(
+                    filter(Boolean),
+                    first()
+                )
+            }
+
+            requests.set(url, {
+                response: new BehaviorSubject(undefined),
+                time: Date.now()
+            })
+
+
+            return of(r).pipe(
+                next(),
+                tap(response => {
+                    requests.get(url)?.response.next(response)
+                    requests.delete(url)
+                })
+            )
+        }),
+        mergeMap($ => $)
+    )
+}

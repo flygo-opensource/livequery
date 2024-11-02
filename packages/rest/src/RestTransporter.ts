@@ -1,21 +1,21 @@
-import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response } from '@livequery/types'
-import { of, lastValueFrom } from 'rxjs';
-import { catchError, finalize, map, mergeMap } from 'rxjs/operators';
-import { merge, Subject, Observable, BehaviorSubject } from 'rxjs'
+import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response as ApiResponse, TransporterHook } from '@livequery/types'
+import { of, firstValueFrom } from 'rxjs';
+import { catchError, map, mergeMap } from 'rxjs/operators';
+import { merge, pipe,tap } from 'rxjs'
 import { Socket } from './Socket.js';
 import qs from 'query-string'
 
 
 type MaybePromise<T> = T | Promise<T>
 
-export type Request = { url: RequestInfo | URL | string, options?: RequestInit }
+export type ApiRequest = { url: RequestInfo | URL | string, options?: RequestInit }
+
 
 export type RestTransporterConfig = {
-    websocket_url: () => MaybePromise<string>,
-    base_url: () => MaybePromise<string>,
-    headers?: () => Promise<{ [key: string]: string }>,
-    hooks?: (o: Observable<Request>) => Observable<Request>
+    base_url: () => MaybePromise<string>
+    websocket_url?: () => MaybePromise<string>,
 }
+
 
 export class RestTransporter implements Transporter {
 
@@ -27,12 +27,50 @@ export class RestTransporter implements Transporter {
         config.websocket_url && (this.socket = new Socket(config.websocket_url))
     }
 
+    hook(hook: TransporterHook): RestTransporter {
+
+        return {
+            ...this,
+
+            hook: (next_hook: TransporterHook) => {
+                return this.hook(next => pipe(hook(() => next_hook(next))))
+            },
+
+            get: <T>(ref: string, query: any = {}) => {
+                return this.call<T>(ref, 'GET', null, query, hook)
+            },
+
+            add: <T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> => {
+                return this.call(ref, 'POST', data, {}, hook)
+            },
+
+            update: <T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> => {
+                return this.call(ref, method, data, {}, hook)
+            },
+
+            remove: <T>(ref: string) => {
+                return this.call<T>(ref, 'DELETE', hook)
+            },
+
+            trigger: <T extends {}>(ref: string, name: string, payload?: any, query?: any) => {
+                return this.call<ApiResponse<T>>(`${ref}/~${name}`, 'POST', payload, query, hook)
+            },
+
+            query: <T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) => {
+                return this.#query(ref, options, hook)
+            }
+        }
+    }
 
     query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) {
-        const $on_reload = new Subject<void>();
-        const http_request = merge(of(1), this.socket?.$reconnect || of<void>(), $on_reload)
+        return this.#query(ref, options)
+    }
+
+    #query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>, hook?: TransporterHook) {
+
+        const http_request = merge(of(1), this.socket?.$reconnect || of<void>())
             .pipe(
-                mergeMap(() => this.call<QueryData<T>>(ref, 'GET', undefined, options)),
+                mergeMap(() => this.call<QueryData<T>>(ref, 'GET', undefined, options, hook)),
                 map(({ data, error }) => {
                     if (error) throw error
                     data.subscription_token && this.socket?.subscribe(data.subscription_token)
@@ -68,30 +106,23 @@ export class RestTransporter implements Transporter {
             )
         )
 
-        return Object.assign(
-            merge(http_request, websocket_sync),
-            {
-                reload: () => $on_reload.next()
-            }
-        )
+        return merge(http_request, websocket_sync)
     }
 
-    #encode_query(query: any) {
+    private async call<Response extends {}>(url: string, method: string, payload?: any, query: any = {}, hook?: TransporterHook): Promise<Response> {
+        function encode_query(query: any) {
 
-        if (!query || Object.keys(query || {}).length == 0) return ''
+            if (!query || Object.keys(query || {}).length == 0) return ''
 
-        const encoded_query = Object.keys(query).reduce((o, key) => ({
-            ...o,
-            [key]: typeof query[key] == 'object' ? JSON.stringify(query[key]) : query[key]
-        }), {})
+            const encoded_query = Object.keys(query).reduce((o, key) => ({
+                ...o,
+                [key]: typeof query[key] == 'object' ? JSON.stringify(query[key]) : query[key]
+            }), {})
 
-        return `?${qs.stringify(encoded_query)}`
-    }
-
-    private async call<Response extends {}>(url: string, method: string, payload?: any, query: any = {}): Promise<Response> {
+            return `?${qs.stringify(encoded_query)}`
+        }
 
         const headers = {
-            ... await this.config.headers?.() || {},
             ...payload ? {
                 'Content-Type': 'application/json'
             } : {},
@@ -99,17 +130,26 @@ export class RestTransporter implements Transporter {
         }
 
         try {
-            const request: Request = {
-                url: `${this.config.base_url()}/${url}${this.#encode_query(query)}`,
+            const request: ApiRequest = {
+                url: `${this.config.base_url()}/${url}${encode_query(query)}`,
                 options: {
                     method,
                     headers: headers as any,
                     ...payload ? { body: JSON.stringify(payload) } : {},
                 }
             }
-            const mapped = this.config.hooks ? await lastValueFrom(this.config.hooks(new BehaviorSubject(request))) : request
-            const response = await fetch(mapped.url, mapped.options)
-            const body = await response.json()
+            const next = () => pipe(
+                mergeMap(async (mapped: ApiRequest) => {
+                    const response = await fetch(mapped.url, mapped.options).then(r => r.json())
+                    return {
+                        ...response,
+                        __request: mapped
+                    }
+                })
+            )
+            const body: any = await firstValueFrom(of(request).pipe(
+                hook ? hook(next) : next()
+            ))
             if (body.error) throw body.error
             return body as Response
         } catch (error) {
@@ -134,6 +174,6 @@ export class RestTransporter implements Transporter {
     }
 
     trigger<T extends {}>(ref: string, name: string, payload?: any, query?: any) {
-        return this.call<Response<T>>(`${ref}/~${name}`, 'POST', payload, query)
+        return this.call<ApiResponse<T>>(`${ref}/~${name}`, 'POST', payload, query)
     }
-}
+} 
