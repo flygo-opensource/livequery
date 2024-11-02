@@ -19,7 +19,7 @@
         "rxjs": "^7.8.1",
         "typescript": "5.6.3",
         "@types/uuid": "^8.3.0",
-        "@livequery/types": "2.0.7"
+        "@livequery/types": "2.0.15"
     },
     "peerDependencies": {},
     "scripts": {
