@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject } from "rxjs";
+import { Subject, tap } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { Optional } from "@nestjs/common";
 import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
@@ -60,9 +60,10 @@ export class LivequeryWebsocketSync {
     }
 
     connect(url: string, ondisconect?: Function) {
-        return of(1).pipe(
-            map(() => new WebSocket(url)),
+        const ws = new WebSocket(url)
+        return of(ws).pipe(
             mergeMap(ws => merge(
+                fromEvent(ws, 'open').pipe(tap(() => this.#targets.add(ws))),
                 fromEvent(ws, 'close').pipe(map(e => { throw e })),
                 fromEvent(ws, 'error').pipe(map(e => { throw e })),
                 fromEvent(ws, 'message').pipe(
@@ -78,7 +79,10 @@ export class LivequeryWebsocketSync {
             )),
             retry({ count: 3, delay: 500, resetOnSuccess: true }),
             catchError(() => EMPTY),
-            finalize(() => ondisconect?.())
+            finalize(() => {
+                this.#targets.delete(ws)
+                ondisconect?.()
+            })
         ).subscribe()
 
     }
@@ -166,7 +170,7 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: Socket,
         @MessageBody() { id: session_id }: { id: string }
     ) {
-
+        const id = Date.now()
         if (session_id && session_id.length > 36) return
 
         this.#sockets.get(socket)?.add(session_id)
