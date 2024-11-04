@@ -11,11 +11,15 @@ export const Deduplicate = (ms: number = 1000) => next => {
             const url = r.url.toString()
             const cached = requests.get(url)
 
-            if (cached && cached.time > Date.now() - ms) {
-                return cached.response.pipe(
-                    filter(Boolean),
-                    first()
-                )
+            if (cached) {
+                if (cached.time > Date.now() - ms) {
+                    return cached.response.pipe(
+                        filter(Boolean),
+                        first()
+                    )
+                } else {
+                    requests.delete(url)
+                }
             }
 
             requests.set(url, {
@@ -28,7 +32,6 @@ export const Deduplicate = (ms: number = 1000) => next => {
                 next(),
                 tap(response => {
                     requests.get(url)?.response.next(response)
-                    requests.delete(url)
                 })
             )
         }),
