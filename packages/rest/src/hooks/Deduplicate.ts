@@ -1,4 +1,4 @@
-import { pipe, mergeMap, map, Subject, BehaviorSubject, tap, firstValueFrom, of, filter, first } from "rxjs"
+import { pipe, mergeMap, BehaviorSubject, tap, of, filter, first } from "rxjs"
 import { ApiRequest } from "../RestTransporter"
 
 const requests = new Map<string, { time: number, response: BehaviorSubject<any> }>()
@@ -7,6 +7,8 @@ export const Deduplicate = (ms: number = 1000) => next => {
 
     return pipe(
         mergeMap(async (r: ApiRequest) => {
+
+            if (r.options.method == 'GET') return of(r)
 
             const url = r.url.toString()
             const cached = requests.get(url)
