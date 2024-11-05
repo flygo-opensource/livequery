@@ -8,7 +8,7 @@ export const Deduplicate = (ms: number = 1000) => next => {
     return pipe(
         mergeMap(async (r: ApiRequest) => {
 
-            if (r.options.method == 'GET') return of(r).pipe(
+            if (r.options.method != 'GET') return of(r).pipe(
                 next()
             )
 
