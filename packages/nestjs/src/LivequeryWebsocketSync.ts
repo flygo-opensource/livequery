@@ -67,7 +67,8 @@ export class LivequeryWebsocketSync {
                 fromEvent(ws, 'close').pipe(map(e => { throw e })),
                 fromEvent(ws, 'error').pipe(map(e => { throw e })),
                 fromEvent(ws, 'message').pipe(
-                    map(data => {
+                    map((event: { data: string }) => {
+                        const data = event.data
                         try {
                             const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
                             parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
