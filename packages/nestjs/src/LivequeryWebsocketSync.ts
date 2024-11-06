@@ -71,7 +71,7 @@ export class LivequeryWebsocketSync {
                         const data = event.data
                         try {
                             const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
-                            parsed.session_id && this.#sessions.get(parsed.session_id).socket.send(data.toString())
+                            parsed.session_id && this.#sessions.get(parsed.session_id)?.socket.send(data.toString())
                         } catch (e) {
                             console.error(e)
                         }

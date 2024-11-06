@@ -225,6 +225,7 @@ export class ApiGateway {
         }
 
         const proxy_request = http.request(options, (response) => {
+            res.status(response.statusCode)
             for (const [k, v] of Object.entries(response.headers)) {
                 res.setHeader(k, v)
             }
