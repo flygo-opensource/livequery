@@ -49,16 +49,16 @@ export class RestTransporter implements Transporter {
             },
 
             remove: <T>(ref: string) => {
-                return this.call<T>(ref, 'DELETE', hook)
+                return this.call<T>(ref, 'DELETE', {}, {}, hook)
             },
 
-            trigger: <T extends {}>(ref: string, name: string, payload?: any, query?: any) => {
+            trigger: <T>(ref: string, name: string, payload?: any, query?: any) => {
                 return this.call<ApiResponse<T>>(`${ref}/~${name}`, 'POST', payload, query, hook)
             },
 
             query: <T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) => {
                 return this.#query(ref, options, hook)
-            }
+            }, 
         }
     }
 
