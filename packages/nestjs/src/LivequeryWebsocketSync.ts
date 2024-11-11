@@ -10,6 +10,7 @@ import JWT from 'jsonwebtoken'
 import { Socket } from "dgram";
 import WebSocket from 'ws'
 import { of, retry, fromEvent, map, finalize, mergeMap, merge, catchError, EMPTY } from 'rxjs'
+import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 
 type SessionID = string
 type Ref = string
@@ -114,10 +115,10 @@ export class LivequeryWebsocketSync {
     broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
         const id = event.old_data?.id || event.new_data?.id
         if (!id) return
-
+ 
         if (event.type == 'added') {
             this.changes.next({
-                data: { ...event.new_data, id },
+                data: hidePrivateFields({ ...event.new_data, id }),
                 ref: event.new_ref,
                 type: event.type
             })
@@ -129,7 +130,7 @@ export class LivequeryWebsocketSync {
                 const changes = {
                     ...Object
                         .keys(event.new_data)
-                        .filter(key => event.new_data[key] != event.old_data[key])
+                        .filter(key => !key.startsWith('_') &&  event.new_data[key] != event.old_data[key])
                         .reduce(
                             (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
                         ),
@@ -150,7 +151,7 @@ export class LivequeryWebsocketSync {
                 this.changes.next({
                     type: 'added',
                     ref: event.new_ref,
-                    data: { ...event.old_data || {}, ...event.new_data || {}, id }
+                    data: hidePrivateFields({ ...event.old_data || {}, ...event.new_data || {}, id })
                 })
             }
             return

@@ -5,6 +5,7 @@ import { PathHelper } from "./helpers/PathHelper.js";
 import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
 import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair.js";
 import JWT from 'jsonwebtoken'
+import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 
 export type RealtimeSubscription = {
     session_id: string
@@ -72,10 +73,7 @@ export class LivequeryInterceptor implements NestInterceptor {
                     return {
                         data: {
                             ...data,
-                            item: {
-                                ...data.item.toJSON ? data.item.toJSON() : data.item,
-                                id: data.item.id?.toString() || data.item._id?.toString()
-                            },
+                            item: hidePrivateFields(data.item.toJSON ? data.item.toJSON() : data.item),
                             realtime_token
                         }
                     }

@@ -3,6 +3,7 @@ import { map, mergeMap, Observable } from 'rxjs';
 import { ModuleRef } from '@nestjs/core'
 import { LivequeryDatasource } from './helpers/createDatasourceMapper.js';
 import { LivequeryBaseEntity } from '@livequery/types';
+import { hidePrivateFields } from './helpers/hidePrivateFields.js';
 
 
 
@@ -12,7 +13,7 @@ export const $__datasource_factory_token = Symbol()
 export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
     constructor(public readonly mapper: (item: T) => T) { }
 }
- 
+
 @Injectable()
 export class LivequeryDatasourceInterceptors implements NestInterceptor {
 
@@ -28,7 +29,7 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
             mergeMap(async rs => {
                 const req = ctx.switchToHttp().getRequest()
                 const lrs = await datasource.query(req.livequery)
-                
+
                 if (rs instanceof LivequeryItemMapper) {
                     if (lrs.item) {
                         return {
@@ -45,11 +46,20 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
                     }
                     return lrs
                 }
-                
+
                 if (typeof rs == 'function') {
                     return await rs(lrs)
                 }
                 return rs || lrs
+            }),
+            map(data => { 
+                if (data.items) {
+                    return {
+                        ...data,
+                        items: data.items.map(item => hidePrivateFields(item))
+                    }
+                }
+                return data
             })
         )
 
