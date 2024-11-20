@@ -1,7 +1,7 @@
 import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response as ApiResponse, TransporterHook } from '@livequery/types'
 import { of, firstValueFrom } from 'rxjs';
 import { catchError, map, mergeMap } from 'rxjs/operators';
-import { merge, pipe,tap } from 'rxjs'
+import { merge, pipe, tap } from 'rxjs'
 import { Socket } from './Socket.js';
 import qs from 'query-string'
 
@@ -58,7 +58,7 @@ export class RestTransporter implements Transporter {
 
             query: <T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) => {
                 return this.#query(ref, options, hook)
-            }, 
+            },
         }
     }
 
@@ -81,6 +81,7 @@ export class RestTransporter implements Transporter {
                     if (collection.items) {
                         return {
                             data: {
+                                summary: collection.summary,
                                 changes: collection.items.map(data => ({ data, type: 'added', ref })),
                                 paging: { ...collection, n: 0 }
                             }
@@ -91,6 +92,7 @@ export class RestTransporter implements Transporter {
                     const document = data as DocumentResponse<T>['data']
                     return {
                         data: {
+                            summary: collection.summary,
                             changes: [{ data: document.item, type: 'added', ref }],
                             paging: { ...collection, n: 0 }
                         }
