@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap } from "rxjs";
+import { Subject, tap, switchMap } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { Optional } from "@nestjs/common";
 import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
@@ -61,28 +61,31 @@ export class LivequeryWebsocketSync {
     }
 
     connect(url: string, ondisconect?: Function) {
-        const ws = new WebSocket(url)
-        return of(ws).pipe(
-            mergeMap(ws => merge(
-                fromEvent(ws, 'open').pipe(tap(() => this.#targets.add(ws))),
-                fromEvent(ws, 'close').pipe(map(e => { throw e })),
-                fromEvent(ws, 'error').pipe(map(e => { throw e })),
-                fromEvent(ws, 'message').pipe(
-                    map((event: { data: string }) => {
-                        const data = event.data
-                        try {
-                            const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
-                            parsed.session_id && this.#sessions.get(parsed.session_id)?.socket.send(data.toString())
-                        } catch (e) {
-                            console.error(e)
-                        }
-                    })
+        return of(0).pipe(
+            map(() => new WebSocket(url)),
+            switchMap(ws => {
+                return merge(
+                    fromEvent(ws, 'open').pipe(tap(() => this.#targets.add(ws))),
+                    fromEvent(ws, 'close').pipe(map(e => { throw e })),
+                    fromEvent(ws, 'error').pipe(map(e => { throw e })),
+                    fromEvent(ws, 'message').pipe(
+                        map((event: { data: string }) => {
+                            const data = event.data
+                            try {
+                                const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
+                                parsed.session_id && this.#sessions.get(parsed.session_id)?.socket.send(data.toString())
+                            } catch (e) {
+                                console.error(e)
+                            }
+                        })
+                    )
+                ).pipe(
+                    finalize(() => this.#targets.delete(ws))
                 )
-            )),
-            retry({ count: 3, delay: 500, resetOnSuccess: true }),
+            }),
+            retry({ count: 10, delay: 500, resetOnSuccess: true }),
             catchError(() => EMPTY),
             finalize(() => {
-                this.#targets.delete(ws)
                 ondisconect?.()
             })
         ).subscribe()
@@ -115,7 +118,7 @@ export class LivequeryWebsocketSync {
     broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
         const id = event.old_data?.id || event.new_data?.id
         if (!id) return
- 
+
         if (event.type == 'added') {
             this.changes.next({
                 data: hidePrivateFields({ ...event.new_data, id }),
@@ -130,7 +133,7 @@ export class LivequeryWebsocketSync {
                 const changes = {
                     ...Object
                         .keys(event.new_data)
-                        .filter(key => !key.startsWith('_') &&  event.new_data[key] != event.old_data[key])
+                        .filter(key => !key.startsWith('_') && event.new_data[key] != event.old_data[key])
                         .reduce(
                             (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
                         ),
