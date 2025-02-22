@@ -5,7 +5,8 @@ import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT } 
 import { ServiceApiMetadata } from "./ApiGateway.js"
 import { randomUUID } from "crypto"
 
-export class RxjsUdp extends Observable<ServiceApiMetadata> {
+
+export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
 
     public readonly id = randomUUID()
 
@@ -14,7 +15,7 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
         reuseAddr: true
     })
 
-    #broadcast_ips = ['localhost', '255.255.255.255']
+    #broadcast_ips = ['localhost']
 
     constructor() {
         super(o => {
@@ -25,7 +26,7 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
 
             this.#udp.on('message', async (raw, rinfo) => {
                 try {
-                    const info = JSON.parse(raw.toString('utf-8')) as ServiceApiMetadata 
+                    const info = JSON.parse(raw.toString('utf-8')) as ServiceApiMetadata
                     if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.id) {
                         o.next({ ...info, host: rinfo.address })
                     }
@@ -52,10 +53,13 @@ export class RxjsUdp extends Observable<ServiceApiMetadata> {
         })
     }
 
-    async broadcast(metadata: ServiceApiMetadata) { 
-        for (const host of this.#broadcast_ips) {
+    async broadcast(metadata: ServiceApiMetadata, ip?: string) { 
+        for (const host of [
+            ...this.#broadcast_ips,
+            ... ip ? [ip]:[]
+        ]) {
             await this.#udp.send(
-                JSON.stringify({...metadata, id: this.id}),
+                JSON.stringify({ ...metadata, id: this.id }),
                 API_GATEWAY_UDP_PORT,
                 host
             )

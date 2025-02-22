@@ -8,28 +8,37 @@ import { LivequeryWebsocketSync } from "../LivequeryWebsocketSync.js";
 
 export type LivequeryDatasourceOptions<T> = Array<T & { refs: string[] }>
 
-
-export type LivequeryDatasource<Options = {}, StreamPayload = {}, Connection = any> = {
-    init(routes: LivequeryDatasourceOptions<Options>, connections: { [name: string]: Connection }): Promise<void>
-    query(query: LivequeryRequest): any
-    enable_realtime?: (stream: Observable<StreamPayload>) => Observable<WebsocketSyncPayload>
+export type LivequeryDatasourceProps<OptionsType = {}, RawDataChangeType = {}, InjectType = any> = {
+    routes: LivequeryDatasourceOptions<OptionsType>,
+    deps: { [name: string]: InjectType }
+    rawChanges: Observable<RawDataChangeType>
 }
 
+export type LivequeryDatasource<OptionsType = {}, RawDataChangeType = {}, InjectType = any> = {
+    init(props: LivequeryDatasourceProps<OptionsType, RawDataChangeType, InjectType>)
+    query(query: LivequeryRequest): any
+    $: Observable<WebsocketSyncPayload>
+}
 
-
-
-export const createDatasourceMapper = <Options, StreamPayload, Connection>(
-    factory: { new(): LivequeryDatasource<Options, StreamPayload, Connection> },
-    inject_tokens: { [connection_name: string]: any },
-    ...observables: Array<Observable<StreamPayload>>
+export const createDatasourceMapper = <OptionsType = {}, RawDataChangeType = {}, InjectType = any>(
+    factory: { new(): LivequeryDatasource<OptionsType, RawDataChangeType, InjectType> },
+    injectTokens: { [name: string]: any },
+    rawChanges: Observable<RawDataChangeType>
 ) => {
 
-    const observable = merge(...observables)
 
-    const RouteConfigList: Array<{ target: any, method: string, options: Options }> = [];
+    const RouteConfigList: Array<OptionsType & {
+        refs: string[];
+    }> = [];
 
-    const decorator = (options: Options) => applyDecorators(
-        (target, method) => RouteConfigList.push({ target, method, options }),
+    const decorator = (options: OptionsType) => applyDecorators(
+        (target, method) => RouteConfigList.push({
+            ...(options || {}) as OptionsType,
+            refs: PathHelper.join(
+                Reflect.getMetadata('path', target.constructor),
+                Reflect.getMetadata('path', target[method])
+            ).map(PathHelper.trimLivequeryHotkey)
+        }),
         UseLivequeryInterceptor(),
         UseInterceptors(LivequeryDatasourceInterceptors),
         (_target, _method, descriptor: PropertyDescriptor) => {
@@ -37,28 +46,18 @@ export const createDatasourceMapper = <Options, StreamPayload, Connection>(
         }
     )
 
-
-
-    const getDatasourceMetadatas = () => RouteConfigList.map(config => {
-        return {
-            ...(config.options || {}) as Options,
-            refs: PathHelper.join(
-                Reflect.getMetadata('path', config.target.constructor),
-                Reflect.getMetadata('path', config.target[config.method])
-            ).map(PathHelper.trimLivequeryHotkey)
-        }
-    })
-
     const provider: Provider = {
         provide: factory,
-        inject: [{ token: LivequeryWebsocketSync, optional: true }, ...Object.values(inject_tokens)],
-        useFactory: async (ws: LivequeryWebsocketSync, ... injects) => {
+        inject: [{ token: LivequeryWebsocketSync, optional: true }, ...Object.values(injectTokens)],
+        useFactory: async (ws: LivequeryWebsocketSync, ...injects) => {
+            const deps = Object.keys(injectTokens).reduce((acc, key, i) => ({ ...acc, [key]: injects[i] }), {})
             const ds = new factory()
-            const map = Object.keys(inject_tokens).reduce((acc, key, i) => ({ ...acc, [key]: injects[i] }), {})
-            await ds.init(getDatasourceMetadatas(), map)
-            ws && ds.enable_realtime?.(observable).subscribe(
-                change => ws.broadcast(change)
-            )
+            await ds.init({
+                deps,
+                rawChanges,
+                routes: RouteConfigList
+            })
+            ds.$.subscribe(d => ws.broadcast(d))
             return ds
         }
     }

@@ -1,12 +1,14 @@
 import { Controller, Delete, Get, Optional, Patch, Post, Put, Request, Res, } from '@nestjs/common'
 import * as http from 'http';
-import { Response } from 'express';
+import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
 import { API_GATEWAY_NAMESPACE } from './const.js';
 import { RxjsUdp } from './RxjsUdp.js';
-import { mergeMap } from 'rxjs/operators'
-import { Subscription } from 'rxjs'
+import { mergeMap, filter, debounceTime, groupBy } from 'rxjs/operators'
+import { merge, Subscription, of } from 'rxjs'
+import { generateKeyPairSync } from 'crypto';
+import jwt from 'jsonwebtoken'
 
 export type Routing = {
     [ref: string]: {
@@ -27,7 +29,6 @@ export type ServiceApiMetadata = {
     id: string,
     namespace: string
     role: 'service' | 'gateway',
-    host: string,
     name: string
     port: number
     paths: Array<{
@@ -35,7 +36,10 @@ export type ServiceApiMetadata = {
         path: string
     }>
     websocket?: string
-    sig: string
+    auth: string
+    wsauth?: string
+    linked: string[]
+    target?: string
 }
 export type ServiceApiStatus = {
     id: string
@@ -54,45 +58,88 @@ export type ApiGatewayClientOptions = {
 @Controller(`*`)
 export class ApiGateway {
 
-    #services = new Map<string, { metadata: ServiceApiMetadata, subscription?: Subscription }>
+    #services = new Map<string, { host: string, metadata: ServiceApiMetadata, subscription?: Subscription }>
     #routing: Routing = {}
-    #udp = new RxjsUdp()
+
+    #secret = generateKeyPairSync('ec', {
+        namedCurve: 'P-256', // Dùng P-256 cho ES256
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    })
 
     constructor(
-        @Optional() private LivequeryWebsocketSync: LivequeryWebsocketSync
+        @Optional() private lws: LivequeryWebsocketSync
     ) {
-        this.#udp = new RxjsUdp()
-        this.#udp.pipe(
-            mergeMap(async ({ host, port }) => {
-                const r: { data: ServiceApiMetadata } = await fetch(`http://${host}:${port}/api-gateway/metadata`).then(r => r.json())
-                r.data && r.data.namespace == API_GATEWAY_NAMESPACE && this.#join({ ...r.data, host })
-            })
+        const udp = new RxjsUdp()
+
+        merge(
+            udp,
+            of({
+                host: '',
+                namespace: API_GATEWAY_NAMESPACE,
+                id: udp.id,
+                name: 'seeding-gateway',
+                paths: [],
+                port: 0,
+                role: 'service',
+                linked: [],
+                auth: ''
+            } as ServiceApiMetadata & { host: string })
+        ).pipe(
+            filter(m => m.role == 'service'),
+            filter(m => !this.#services.has(m.id)),
+            groupBy(m => m.id),
+            mergeMap($ => $.pipe(
+                debounceTime(500),
+                mergeMap(async ({ host, ...data }) => {
+                    if (!data.auth) {
+                        const auth = jwt.sign({}, this.#secret.privateKey, {
+                            algorithm: 'ES256',
+                            expiresIn: 3600
+                        })
+
+                        const me: ServiceApiMetadata = {
+                            namespace: API_GATEWAY_NAMESPACE,
+                            id: udp.id,
+                            name: '',
+                            paths: [],
+                            port: 0,
+                            role: 'gateway',
+                            auth,
+                            linked: [... this.#services.keys()]
+                        }
+                        udp.broadcast(me, host || undefined)
+                        return
+                    }
+
+                    try {
+                        jwt.verify(data.auth, this.#secret.publicKey)
+                        await this.#join(host, data)
+                        return
+                    } catch (e) {
+                    }
+
+
+                })
+            ))
         ).subscribe()
-        this.#udp.broadcast({
-            namespace: API_GATEWAY_NAMESPACE,
-            host: '',
-            id: '',
-            name: '',
-            paths: [],
-            port: 0,
-            role: 'gateway',
-            sig: ''
-        })
 
     }
 
-    async #join(metadata: ServiceApiMetadata) {
+
+    async #join(host: string, metadata: ServiceApiMetadata) {
         if (this.#services.has(metadata.id)) return
-        const hostname = `${metadata.host}:${metadata.port}`
 
-        const subscription = metadata.websocket ? this.LivequeryWebsocketSync?.connect(
+        const hostname = `${host}:${metadata.port}`
+        const subscription = metadata.websocket && this.lws?.connect(
             `ws://${hostname}${metadata.websocket}`,
+            metadata.wsauth,
             () => this.#disconnect(metadata.id)
-        ) : undefined
+        )
 
-        this.#services.set(metadata.id, { metadata, subscription })
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${metadata.host}:${metadata.port}`)
-        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
+        this.#services.set(metadata.id, { metadata, subscription, host })
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
+        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         for (const { method, path } of metadata.paths) {
 
             const refs = path.split('/').map(r => {
@@ -142,12 +189,12 @@ export class ApiGateway {
     async  #disconnect(id: string) {
         const service = this.#services.get(id)
         if (!service) return
-        const { metadata, subscription } = service
+        const { metadata, subscription, host } = service
         subscription.unsubscribe()
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${metadata.host}:${metadata.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${metadata.host}:${metadata.port}${metadata.websocket}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${host}:${metadata.port}`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         this.#services.delete(id)
-        const hostname = `${metadata.host}:${metadata.port}`
+        const hostname = `${host}:${metadata.port}`
         for (
             let routes = [this.#routing];
             routes.length > 0;
@@ -162,7 +209,6 @@ export class ApiGateway {
             }
         }
     }
-
 
 
     #match(routing: Routing[string], ref: string) {
@@ -197,10 +243,11 @@ export class ApiGateway {
     #proxy(req: IncomingMessage & { rawBody: Buffer, body?: any }, res: Response) {
 
         if (Number(req.headers['content-length'] || 0) > 0 && !req.rawBody) {
-            return res.json({
+            return res.status(500).json({
                 error: {
+                    status: 500,
                     code: "MISISNG_API_GATEWAY_RAW_BODY",
-                    message: `Please enable rawBody = true in NestFactory.create(`
+                    message: `Please enable rawBody = true in NestFactory.create()`
                 }
             });
         }
@@ -208,41 +255,52 @@ export class ApiGateway {
 
         const target = this.#resolve(req.url, req.method.toUpperCase())
         if (!target) {
-            return res.json({
+            const status = target === null ? 500 : 404
+            return res.sendStatus(status).json({
                 error: {
-                    code: target === null ? 'MICROSERVICE_OFFLINE' : 'SERVICE_NOT_FOUND'
+                    status,
+                    code: status == 500 ? 'MICROSERVICE_OFFLINE' : 'API_NOT_FOUND'
                 }
             })
         }
         const [host, port] = target.uri.split(':')
+        const headers = {
+            ...req.headers,
+            ... this.lws ? {
+                'x-lcid': req.headers['x-lcid'] || req.headers['socket_id'],
+                'x-lgid': req.headers['x-lgid'] || this.lws.id
+            } : {}
+        }
+
         const options: http.RequestOptions = {
             host,
             port: Number(port || 80),
             path: req.url,
             method: req.method.toUpperCase(),
-            headers: req.headers,
-            insecureHTTPParser: true
+            headers
         }
-
-        const proxy_request = http.request(options, (response) => {
-            res.status(response.statusCode)
-            for (const [k, v] of Object.entries(response.headers)) {
-                res.setHeader(k, v)
-            }
-            response.pipe(res)
-        });
+        const proxy_request = http.request(options);
         proxy_request
             .on('error', (e: NodeJS.ErrnoException) => {
                 e.code == 'ECONNREFUSED' && this.#disconnect(target.instance_id);
                 res.json({ error: { code: "SERVICE_API_OFFLINE" } });
             })
             .on('upgrade', (ireq, socket, head) => {
+                console.log('upgrtade')
+            })
+            .on('response', response => {
+                res.status(response.statusCode)
+                for (const [k, v] of Object.entries(response.headers)) {
+                    res.setHeader(k, v)
+                }
+                response.pipe(res)
             })
 
-        proxy_request.write(req.rawBody || Buffer.alloc(0))
+        proxy_request.write(req.rawBody || Buffer.alloc(0), e => {
+            proxy_request.end()
+        })
 
     }
-
 
     @Get()
     private get(@Request() req: IncomingMessage & { rawBody: Buffer }, @Res() res: Response) {

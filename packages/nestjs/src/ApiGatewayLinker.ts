@@ -1,79 +1,74 @@
-import { Controller, Get, Inject, Optional } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ModulesContainer } from "@nestjs/core";
 import { listPaths } from "./helpers/listPaths.js";
 import { ServiceApiMetadata } from "./ApiGateway.js";
 import { LivequeryWebsocketSync, WEBSOCKET_PATH } from "./LivequeryWebsocketSync.js";
-import { BehaviorSubject, merge } from "rxjs";
-import { randomUUID, createHash } from "crypto";
+import { merge, Subject, of, mergeMap, firstValueFrom, timer } from "rxjs";
 import { API_GATEWAY_NAMESPACE } from "./const.js";
-import { filter, tap } from 'rxjs/operators'
+import { filter, tap, combineLatestWith, throttleTime, debounceTime, groupBy } from 'rxjs/operators'
 import { RxjsUdp } from "./RxjsUdp.js";
 
 
-const $METADATA = new BehaviorSubject<ServiceApiMetadata>({
-    namespace: API_GATEWAY_NAMESPACE,
-    role: 'service',
-    host: '',
-    id: randomUUID(),
-    name: '',
-    paths: [],
-    port: 0,
-    sig: ''
-})
 
+// Cơ chế 
+// Service gọi gateway khởi động lần đầu với auth không có gì 
+// Gateway gọi service kèm token xác thực
+// Service gọi lại kèm token xác thực 
+// Gateway ghép nối 
 
-@Controller('/api-gateway')
+@Injectable()
 export class ApiGatewayLinker {
 
-    private static udp = new RxjsUdp()
+    private static $me = new Subject<{ name: string, port: number }>()
 
     constructor(
-        @Optional() @Inject() private LivequeryWebsocketSync: LivequeryWebsocketSync,
+        @Optional() @Inject() LivequeryWebsocketSync: LivequeryWebsocketSync,
         private readonly modulesContainer: ModulesContainer,
     ) {
         const paths = [...this.modulesContainer.values()].map(m => (
             listPaths([...m.controllers.keys()].map(c => c))
         )).flat(2)
-        $METADATA.next({
-            ...$METADATA.getValue(),
-            paths,
-            websocket: this.LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined
-        })
-    }
-
-    onModuleInit() {
-        $METADATA.next({
-            ...$METADATA.getValue(),
-            sig: createHash('md5').update(API_GATEWAY_NAMESPACE).digest('base64')
-        })
-    }
-
-    static async broadcast(name: string, local_api_port: number) {
-
-        $METADATA.next({
-            ...$METADATA.getValue(),
-            name,
-            port: local_api_port
-        })
 
         const $udp = new RxjsUdp()
 
+        const metadata: ServiceApiMetadata = {
+            namespace: API_GATEWAY_NAMESPACE,
+            role: 'service',
+            id: $udp.id,
+            name: 'seeding-service',
+            paths,
+            port: 0,
+            linked: [],
+            auth: '',
+            wsauth: LivequeryWebsocketSync?.auth,
+            websocket: LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined
+        }
+
         merge(
-            $udp.pipe(
-                filter(m => m.role == 'gateway')
-            ),
-            $METADATA.pipe(
-                filter(m => !!m.sig)
-            )
+            $udp,
+            of({ ...metadata, role: 'gateway' })
         ).pipe(
-            tap(() => $udp.broadcast($METADATA.getValue()))
+            filter(m => m.role == 'gateway'),
+            filter(r => !r.linked.includes($udp.id)),
+            combineLatestWith(ApiGatewayLinker.$me),
+            groupBy(([a, b]) => a.id),
+            mergeMap($ => $.pipe(
+                debounceTime(500),
+                mergeMap(async ([a, { name, port }]) => {
+                    const me: ServiceApiMetadata = {
+                        ...metadata,
+                        name,
+                        port,
+                        auth: a.auth
+                    }
+                    $udp.broadcast(me)
+                })
+            ))
         ).subscribe()
     }
 
-    @Get('metadata')
-    metadata() {
-        return {
-            data: $METADATA.getValue()
-        }
+
+    static async broadcast(name: string, port: number) {
+        this.$me.next({ name, port })
     }
 }

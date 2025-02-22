@@ -8,7 +8,8 @@ import JWT from 'jsonwebtoken'
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 
 export type RealtimeSubscription = {
-    session_id: string
+    client_id: string
+    gateway_id: string
     collection_ref: string,
     doc_id: string
 }
@@ -55,18 +56,15 @@ export class LivequeryInterceptor implements NestInterceptor {
         } as LivequeryRequest
 
         // Allow realtime by default    
-        const session_id = req.headers.session_id || req.headers.socket_id
-        req.method == 'GET' && session_id && this.LivequeryWebsocketSync?.listen(
-            {
-                collection_ref,
-                doc_id,
-                session_id
-            })
-
-        const realtime_token = await new Promise(s => {
-            if (!this.secret_or_private_key || req.method.toLowerCase() != 'get') return s(null)
-            JWT.sign({ collection_ref, doc_id, session_id } as RealtimeSubscription, this.secret_or_private_key, {}, (error, data) => s(error ? null : data))
-        })
+        const client_id = req.headers['x-lcid'] || req.headers.socket_id
+        const gateway_id = req.headers['x-lgid'] || this.LivequeryWebsocketSync.id
+        req.method == 'GET' && client_id && this.LivequeryWebsocketSync?.listen([{
+            collection_ref,
+            doc_id,
+            client_id,
+            gateway_id
+        }])
+ 
         return next.handle().pipe(
             map(data => {
                 if (data.item) {
@@ -74,15 +72,11 @@ export class LivequeryInterceptor implements NestInterceptor {
                         data: {
                             ...data,
                             item: hidePrivateFields(data.item.toJSON ? data.item.toJSON() : data.item),
-                            realtime_token
                         }
                     }
                 }
                 return {
-                    data: {
-                        ...data,
-                        realtime_token
-                    }
+                    data 
                 }
             })
         )

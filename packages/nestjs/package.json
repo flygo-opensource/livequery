@@ -25,15 +25,16 @@
         "@livequery/types": "2.0.7",
         "@nestjs/common": "x",
         "@nestjs/core": "x",
+        "@nestjs/platform-express": "^11.0.10",
         "@types/express": "x",
         "@types/jsonwebtoken": "x",
         "@types/node": "x",
+        "@types/ws": "^8.5.10",
         "jsonwebtoken": "x",
         "reflect-metadata": "x",
         "rxjs": "x",
         "tslib": "^2.6.1",
-        "typescript": "^5.1.6",
-        "@types/ws": "^8.5.10"
+        "typescript": "^5.1.6"
     },
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1",
@@ -41,7 +42,10 @@
         "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
     },
     "dependencies": {
+        "@nestjs/platform-socket.io": "^11.0.10",
+        "@nestjs/platform-ws": "^11.0.10",
         "@nestjs/websockets": "^10.3.7",
+        "express": "^4.21.2",
         "socket.io": "^4.7.5",
         "socket.io-client": "^4.7.5"
     }

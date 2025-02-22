@@ -1,55 +1,95 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap } from "rxjs";
+import { Subject, tap, switchMap, retry } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
-import { Optional } from "@nestjs/common";
-import { InjectWebsocketPublicKey } from "./UseWebsocketShareKeyPair.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
-import JWT from 'jsonwebtoken'
-import { Socket } from "dgram";
 import WebSocket from 'ws'
-import { of, retry, fromEvent, map, finalize, mergeMap, merge, catchError, EMPTY } from 'rxjs'
+import { of, fromEvent, map, finalize, merge, catchError, EMPTY, filter, mergeAll } from 'rxjs'
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
+import { randomUUID } from "crypto";
 
-type SessionID = string
-type Ref = string
+
+export type WebSocketHelloEvent = {
+    event: 'hello',
+    gid: string
+}
+
+export type WebSocketUnsubscribeEvent = {
+    event: 'unsubscribe',
+    data: {
+        ref: string
+        client_id: string
+    }
+
+}
+
+export type WebSocketStartEvent = {
+    event: 'start',
+    data: {
+        id: string
+        auth: string
+    }
+}
+
+export type WebSocketSubscribeEvent = RealtimeSubscription & { event: 'subscribe' }
 
 export type WebSocketSyncEvent = {
-    event: string
-    session_id: string
+    event: 'sync'
+    cids: string[]
     data?: {
         changes: UpdatedData[]
     }
 }
+
+export type WebsocketWithMetadata = WebSocket & {
+    gateway: boolean
+    id: string
+    refs: Set<string>
+}
+
+type GatewayId = string
+type Ref = string
+type ClientId = string
+
 
 export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates'
 
 @WebSocketGateway({ path: WEBSOCKET_PATH })
 export class LivequeryWebsocketSync {
 
-    #sessions = new Map<SessionID, { refs: Set<Ref>, socket: Socket }>()
-    #refs = new Map<Ref, Map<SessionID, Socket>>()
-    #sockets = new Map<Socket, Set<SessionID>>()
+    #connections = new Map<GatewayId | ClientId, WebsocketWithMetadata>()
+    #subscriptions = new Map<Ref, Map<ClientId, GatewayId>>()
 
+
+    // NODE METADATA
+    public readonly id = randomUUID()
+    public readonly auth = randomUUID()
     private readonly changes = new Subject<UpdatedData>()
 
-    #targets = new Set<WebSocket>()
 
-    constructor(
-        @Optional() @InjectWebsocketPublicKey() private secret_or_public_key: string,
-    ) {
+
+
+    constructor() {
+        this.changes.pipe()
         this.changes.subscribe(({ ref, data, type }) => {
 
-            const links = new Set([
-                ...this.#refs.get(ref)?.entries() || [],
-                ...this.#refs.get(`${ref}/${data.id}`)?.entries() || []
-            ])
+            const targets = [
+                ... this.#subscriptions.get(ref) || new Map(),
+                ...this.#subscriptions.get(`${ref}/${data.id}`) || new Map()
+            ].reduce((p, [client_id, gateway_id]) => {
+                const connection_id = gateway_id == this.id ? client_id : gateway_id
+                const old = p.get(connection_id)
+                const socket = old ? old.socket : this.#connections.get(connection_id)
+                const cids = [...old ? old.cids : [], client_id]
+                p.set(connection_id, { cids, socket })
+                return p
+            }, new Map<string, { socket: WebSocket, cids: string[] }>())
 
-            for (const [session_id, socket] of links) {
+            for (const [_, { cids, socket }] of targets) {
                 const event: WebSocketSyncEvent = {
                     event: 'sync',
-                    session_id,
+                    cids,
                     data: { changes: [{ ref, data, type }] }
                 }
                 const payload = JSON.stringify(event)
@@ -60,59 +100,63 @@ export class LivequeryWebsocketSync {
         })
     }
 
-    connect(url: string, ondisconect?: Function) {
+    connect(url: string, auth: string, ondisconect?: Function) {
+        console.log({ url })
         return of(0).pipe(
             map(() => new WebSocket(url)),
-            switchMap(ws => {
+            switchMap((ws: WebsocketWithMetadata) => {
                 return merge(
-                    fromEvent(ws, 'open').pipe(tap(() => this.#targets.add(ws))),
-                    fromEvent(ws, 'close').pipe(map(e => { throw e })),
+                    fromEvent(ws, 'open').pipe(tap(() => {
+                        const payload: WebSocketStartEvent = { event: 'start', data: { id: this.id, auth } }
+                        ws.send(JSON.stringify(payload))
+                    })),
+                    fromEvent(ws, 'close').pipe(map(() => { throw 'CLOSED' })),
                     fromEvent(ws, 'error').pipe(map(e => { throw e })),
                     fromEvent(ws, 'message').pipe(
                         map((event: { data: string }) => {
                             const data = event.data
                             try {
-                                const parsed = JSON.parse(data.toString()) as { event: string, session_id: string, data: any }
-                                parsed.session_id && this.#sessions.get(parsed.session_id)?.socket.send(data.toString())
+                                const parsed = JSON.parse(data.toString()) as WebSocketSyncEvent | WebSocketHelloEvent | WebSocketSubscribeEvent
+
+                                if (parsed.event == 'hello') {
+                                    ws.id = parsed.gid
+                                    this.#connections.set(parsed.gid, ws)
+                                    return
+                                }
+                                if (parsed.event == 'subscribe') {
+                                    this.listen([parsed])
+                                    return
+                                }
+
+                                return parsed
                             } catch (e) {
                                 console.error(e)
                             }
+                        }),
+                        filter(Boolean),
+                        map(({ event, cids, data }) => cids.map(client_id => ({ event, data, client_id }))),
+                        mergeAll(),
+                        tap(({ client_id, ...event }) => {
+                            console.log({ client_id, event })
+                            const socket = this.#connections.get(client_id)
+                            socket && socket.send(JSON.stringify(event))
                         })
                     )
                 ).pipe(
-                    finalize(() => this.#targets.delete(ws))
+                    finalize(() => {
+                        this.#connections.delete(ws.id)
+                    })
                 )
+            }), 
+            // retry({ count: 10, delay: 1000, resetOnSuccess: false }),
+            catchError(() => {
+                return EMPTY
             }),
-            retry({ count: 10, delay: 500, resetOnSuccess: true }),
-            catchError(() => EMPTY),
             finalize(() => {
                 ondisconect?.()
             })
         ).subscribe()
 
-    }
-
-    private handleDisconnect(socket: Socket) {
-        const sessions = this.#sockets.get(socket)
-        if (!sessions) return
-        this.#sockets.delete(socket)
-
-        for (const session_id of sessions) {
-            const session = this.#sessions.get(session_id)
-            if (!session) continue
-            this.#sessions.delete(session_id)
-
-            for (const ref of session.refs) {
-                this.#refs.get(ref)?.delete(session_id)
-            }
-
-
-        }
-
-    }
-
-    private handleConnection(socket: Socket) {
-        this.#sockets.set(socket, new Set())
     }
 
     broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
@@ -172,106 +216,90 @@ export class LivequeryWebsocketSync {
 
     @SubscribeMessage('start')
     start(
-        @ConnectedSocket() socket: Socket,
-        @MessageBody() { id: session_id }: { id: string }
+        @ConnectedSocket() socket: WebsocketWithMetadata,
+        @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
-        const id = Date.now()
-        if (session_id && session_id.length > 36) return
-
-        this.#sockets.get(socket)?.add(session_id)
-        this.#sessions.set(session_id, {
-            refs: new Set(),
-            socket
-        });
-
-        [...this.#targets].forEach(s => s.send(JSON.stringify({
-            event: 'start',
-            data: { id: session_id }
-        })))
-
-    }
-
-
-    @SubscribeMessage('stop')
-    stop(
-        @ConnectedSocket() socket: Socket,
-        @MessageBody() { id: session_id }: { id: string }
-    ) {
-        [...this.#targets].forEach(s => s.send(JSON.stringify({
-            event: 'stop',
-            id: session_id
-        })))
-
-        this.#sockets.get(socket)?.delete(session_id)
-        const session = this.#sessions.get(session_id)
-        if (!session) return
-        this.#sessions.delete(session_id)
-
-        for (const ref of session.refs) {
-            this.#refs.get(ref)?.delete(session_id)
+        console.log({
+            start: id,
+            gateway: auth == this.auth
+        })
+        if(socket.id) return 
+        if (this.#connections.has(id)) {
+            console.log(`Duplicate id`)
+            socket.close()
+            return
         }
-    }
-
-    @SubscribeMessage('subscribe')
-    async subscribe(
-        @ConnectedSocket() socket: Socket & { id: string },
-        @MessageBody() { realtime_token }: { realtime_token: string }
-    ) {
-
-        [...this.#targets].forEach(s => s.send(JSON.stringify({
-            event: 'subscribe',
-            realtime_token
-        })))
-
-        if (realtime_token && this.secret_or_public_key) {
-
-            const options = await new Promise<RealtimeSubscription>(s => JWT.verify(
-                realtime_token,
-                this.secret_or_public_key,
-                {},
-                (error, data: RealtimeSubscription) => s(error ? null : data)
-            ))
-            if (options) {
-                this.listen(options)
-            }
-
-        }
-
+        socket.id = id
+        socket.gateway = auth == this.auth
+        socket.refs = new Set()
+        this.#connections.set(id, socket)
+        const payload: WebSocketHelloEvent = { event: 'hello', gid: this.id }
+        socket.send(JSON.stringify(payload))
     }
 
     @SubscribeMessage('unsubscribe')
     unsubscribe(
-        @ConnectedSocket() socket: Socket,
-        @MessageBody() { ref, id }: { ref: string, id?: string }
+        @ConnectedSocket() socket: WebsocketWithMetadata,
+        @MessageBody() { ref, client_id = socket.id }: { ref: string, client_id?: string }
     ) {
-        const session_ids = id ? [id] : (this.#sockets.get(socket) || [])
-        for (const session_id of session_ids) {
+        const subscriptions = this.#subscriptions.get(ref)
+        if (!subscriptions) return
+        const gateway_id = subscriptions.get(client_id)
+        subscriptions.delete(client_id)
 
-            [...this.#targets].forEach(s => s.send(JSON.stringify({
-                event: 'unsubscribe',
-                ref,
-                id: session_id
-            })))
-
-            this.#refs.get(ref)?.delete(session_id)
-            this.#sockets.get(socket)?.delete(session_id)
-
-            const session = this.#sessions.get(session_id)
-            if (!session) continue
-            session.refs.delete(ref)
-
+        // Is remote unsubscribe
+        if (gateway_id == this.id) {
+            const socket = this.#connections.get(client_id)
+            socket.refs.delete(ref)
+        } else {
+            const gateway = this.#connections.get(gateway_id)
+            const payload: WebSocketUnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
+            gateway && gateway.send(JSON.stringify(payload))
         }
 
     }
 
+    private handleDisconnect(socket: WebsocketWithMetadata) {
+        console.log(`Disconnected`)
+        this.#connections.delete(socket.id)
+        if (socket.gateway) {
+            for (const [ref, map] of this.#subscriptions) {
+                for (const [client_id, gateway_id] of map) {
+                    gateway_id == socket.id && map.delete(client_id)
+                }
+                map.size == 0 && this.#subscriptions.delete(ref)
+            }
+        } else {
+            for (const ref of socket.refs) {
+                const subscriptions = this.#subscriptions.get(ref)
+                if (subscriptions) {
+                    subscriptions.delete(ref)
+                    subscriptions.size == 9 && this.#subscriptions.delete(ref)
+                }
+            }
+        }
+    }
 
-    listen({ collection_ref, doc_id, session_id }: RealtimeSubscription) {
-        const session = this.#sessions.get(session_id)
-        if (!session) return
-        const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
-        const { socket, refs } = session
-        refs.add(ref)
-        !this.#refs.has(ref) && this.#refs.set(ref, new Map())
-        !this.#refs.get(ref).has(session_id) && this.#refs.get(ref).set(session_id, socket)
+
+    listen(e: RealtimeSubscription[]) {
+   
+        for (const { collection_ref, doc_id, client_id, gateway_id } of e) {
+            if (client_id == gateway_id) continue
+            const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
+            const subscriptions = this.#subscriptions.get(ref) || new Map<ClientId, GatewayId>()
+            if(subscriptions.get(client_id) == gateway_id) continue 
+            console.log({listen: {ref, client_id, gateway_id}})
+            subscriptions.set(client_id, gateway_id)
+            this.#subscriptions.set(ref, subscriptions)
+
+            if (gateway_id == this.id) {
+                const socket = this.#connections.get(client_id)
+                socket && socket.refs.add(ref)
+            } else {
+                const gateway = this.#connections.get(gateway_id)
+                const payload: WebSocketSubscribeEvent = { client_id, event: 'subscribe', gateway_id, collection_ref, doc_id }
+                gateway && gateway.send(JSON.stringify(payload))
+            }
+        }
     }
 }
