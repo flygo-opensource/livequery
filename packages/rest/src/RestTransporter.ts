@@ -1,6 +1,6 @@
 import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response as ApiResponse, TransporterHook } from '@livequery/types'
-import { of, firstValueFrom } from 'rxjs';
-import { catchError, map, mergeMap } from 'rxjs/operators';
+import { of, firstValueFrom, EMPTY } from 'rxjs';
+import { catchError, combineLatestWith, filter, map, mergeMap } from 'rxjs/operators';
 import { merge, pipe, tap } from 'rxjs'
 import { Socket } from './Socket.js';
 import qs from 'query-string'
@@ -68,13 +68,12 @@ export class RestTransporter implements Transporter {
 
     #query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>, hook?: TransporterHook) {
 
-        const http_request = merge(of(1), this.socket?.$reconnect || of<void>())
+        const http_request = merge(this.socket?.$reconnect || of(1))
             .pipe(
                 mergeMap(() => this.call<QueryData<T>>(ref, 'GET', undefined, options, hook)),
                 map(({ data, error }) => {
                     if (error) throw error
                     data.subscription_token && this.socket?.subscribe(data.subscription_token)
-
                     const collection = data as CollectionResponse<T>['data']
 
                     // If collection
@@ -112,6 +111,7 @@ export class RestTransporter implements Transporter {
     }
 
     private async call<Response extends {}>(url: string, method: string, payload?: any, query: any = {}, hook?: TransporterHook): Promise<Response> {
+
         function encode_query(query: any) {
 
             if (!query || Object.keys(query || {}).length == 0) return ''
@@ -128,15 +128,21 @@ export class RestTransporter implements Transporter {
             ...payload ? {
                 'Content-Type': 'application/json'
             } : {},
-            ... this.socket ? { socket_id: this.socket.socket_session } : {}
+            ... this.socket ? {
+                socket_id: this.socket.client_id,
+                'x-lcid': this.socket.client_id,
+                'x-lgid': await firstValueFrom(this.socket.$gateway.pipe( 
+                    filter(Boolean),
+                    map(g => g.id)
+                ))
+            } : {}
         }
-
         try {
             const request: ApiRequest = {
                 url: `${this.config.base_url()}/${url}${encode_query(query)}`,
                 options: {
                     method,
-                    headers: headers as any,
+                    headers,
                     ...payload ? { body: JSON.stringify(payload) } : {},
                 }
             }
