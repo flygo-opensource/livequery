@@ -67,9 +67,6 @@ export class LivequeryWebsocketSync {
     public readonly auth = randomUUID()
     private readonly changes = new Subject<UpdatedData>()
 
-
-
-
     constructor() {
         this.changes.pipe()
         this.changes.subscribe(({ ref, data, type }) => {
@@ -101,7 +98,6 @@ export class LivequeryWebsocketSync {
     }
 
     connect(url: string, auth: string, ondisconect?: Function) {
-        console.log({ url })
         return of(0).pipe(
             map(() => new WebSocket(url)),
             switchMap((ws: WebsocketWithMetadata) => {
@@ -137,7 +133,6 @@ export class LivequeryWebsocketSync {
                         map(({ event, cids, data }) => cids.map(client_id => ({ event, data, client_id }))),
                         mergeAll(),
                         tap(({ client_id, ...event }) => {
-                            console.log({ client_id, event })
                             const socket = this.#connections.get(client_id)
                             socket && socket.send(JSON.stringify(event))
                         })
@@ -147,7 +142,7 @@ export class LivequeryWebsocketSync {
                         this.#connections.delete(ws.id)
                     })
                 )
-            }), 
+            }),
             // retry({ count: 10, delay: 1000, resetOnSuccess: false }),
             catchError(() => {
                 return EMPTY
@@ -219,13 +214,12 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebsocketWithMetadata,
         @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
-        console.log({
-            start: id,
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log({
+            new_node: id,
             gateway: auth == this.auth
         })
-        if(socket.id) return 
+        if (socket.id) return
         if (this.#connections.has(id)) {
-            console.log(`Duplicate id`)
             socket.close()
             return
         }
@@ -260,7 +254,7 @@ export class LivequeryWebsocketSync {
     }
 
     private handleDisconnect(socket: WebsocketWithMetadata) {
-        console.log(`Disconnected`)
+        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log({ disconnected: socket.id })
         this.#connections.delete(socket.id)
         if (socket.gateway) {
             for (const [ref, map] of this.#subscriptions) {
@@ -282,13 +276,12 @@ export class LivequeryWebsocketSync {
 
 
     listen(e: RealtimeSubscription[]) {
-   
+
         for (const { collection_ref, doc_id, client_id, gateway_id } of e) {
             if (client_id == gateway_id) continue
             const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
             const subscriptions = this.#subscriptions.get(ref) || new Map<ClientId, GatewayId>()
-            if(subscriptions.get(client_id) == gateway_id) continue 
-            console.log({listen: {ref, client_id, gateway_id}})
+            if (subscriptions.get(client_id) == gateway_id) continue 
             subscriptions.set(client_id, gateway_id)
             this.#subscriptions.set(ref, subscriptions)
 

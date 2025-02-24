@@ -286,7 +286,7 @@ export class ApiGateway {
                 res.json({ error: { code: "SERVICE_API_OFFLINE" } });
             })
             .on('upgrade', (ireq, socket, head) => {
-                console.log('upgrtade')
+                
             })
             .on('response', response => {
                 res.status(response.statusCode)

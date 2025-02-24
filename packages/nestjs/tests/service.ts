@@ -1,10 +1,10 @@
 import { Controller, Get, Module } from "@nestjs/common";
-import { ApiGateway } from "../src/ApiGateway.js";
-import { ApiGatewayLinker } from "../src/ApiGatewayLinker.js";
+import { ApiGateway } from "../src/ApiGateway.js"; 
 import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
 import { UseLivequeryInterceptor } from "../src/LivequeryInterceptor.js";
+import { ApiGatewayLinker } from "../src/index.js";
 
 
 

@@ -8,6 +8,8 @@ import { randomUUID } from "crypto"
 
 export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
 
+    private static  isGateway = false 
+
     public readonly id = randomUUID()
 
     #udp = createSocket({
@@ -17,7 +19,9 @@ export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
 
     #broadcast_ips = ['localhost']
 
-    constructor() {
+    constructor(
+
+    ) {
         super(o => {
             this.#udp.bind({
                 address: '0.0.0.0',
@@ -64,5 +68,10 @@ export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
                 host
             )
         }
+    }
+ 
+
+    forService(){
+
     }
 }
