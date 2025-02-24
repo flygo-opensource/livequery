@@ -78,6 +78,7 @@ export class LivequeryWebsocketSync {
                 const connection_id = gateway_id == this.id ? client_id : gateway_id
                 const old = p.get(connection_id)
                 const socket = old ? old.socket : this.#connections.get(connection_id)
+                if(!socket) return p
                 const cids = [...old ? old.cids : [], client_id]
                 p.set(connection_id, { cids, socket })
                 return p

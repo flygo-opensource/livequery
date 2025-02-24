@@ -27,17 +27,17 @@ export const createDatasourceMapper = <OptionsType = {}, RawDataChangeType = {},
 ) => {
 
 
-    const RouteConfigList: Array<OptionsType & {
-        refs: string[];
+    const RouteConfigList: Array<{
+        options: OptionsType
+        target: any,
+        method: string
     }> = [];
 
     const decorator = (options: OptionsType) => applyDecorators(
         (target, method) => RouteConfigList.push({
-            ...(options || {}) as OptionsType,
-            refs: PathHelper.join(
-                Reflect.getMetadata('path', target.constructor),
-                Reflect.getMetadata('path', target[method])
-            ).map(PathHelper.trimLivequeryHotkey)
+            method,
+            options,
+            target
         }),
         UseLivequeryInterceptor(),
         UseInterceptors(LivequeryDatasourceInterceptors),
@@ -52,10 +52,20 @@ export const createDatasourceMapper = <OptionsType = {}, RawDataChangeType = {},
         useFactory: async (ws: LivequeryWebsocketSync, ...injects) => {
             const deps = Object.keys(injectTokens).reduce((acc, key, i) => ({ ...acc, [key]: injects[i] }), {})
             const ds = new factory()
+            const routes = RouteConfigList.map(({ method, options, target }) => {
+                const refs = PathHelper.join(
+                    Reflect.getMetadata('path', target.constructor),
+                    Reflect.getMetadata('path', target[method])
+                ).map(PathHelper.trimLivequeryHotkey)
+                return {
+                    ...options,
+                    refs
+                }
+            })
             await ds.init({
                 deps,
                 rawChanges,
-                routes: RouteConfigList
+                routes
             })
             ds.$.subscribe(d => ws.broadcast(d))
             return ds

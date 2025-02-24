@@ -2,7 +2,7 @@ import { Controller, Get, Module } from "@nestjs/common";
 import { ApiGateway } from "../src/ApiGateway.js";
 import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
-import {WsAdapter} from '@nestjs/platform-ws'
+import { WsAdapter } from '@nestjs/platform-ws'
 
 @Module({
     controllers: [ApiGateway],

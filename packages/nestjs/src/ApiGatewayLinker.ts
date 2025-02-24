@@ -1,21 +1,15 @@
-import { Inject, Injectable, Optional } from "@nestjs/common";
+import { Controller, Inject, Injectable, Optional } from "@nestjs/common";
 import { ModulesContainer } from "@nestjs/core";
 import { listPaths } from "./helpers/listPaths.js";
 import { ServiceApiMetadata } from "./ApiGateway.js";
 import { LivequeryWebsocketSync, WEBSOCKET_PATH } from "./LivequeryWebsocketSync.js";
-import { merge, Subject, of, mergeMap, firstValueFrom, timer } from "rxjs";
+import { merge, Subject, of, mergeMap } from "rxjs";
 import { API_GATEWAY_NAMESPACE } from "./const.js";
-import { filter, tap, combineLatestWith, throttleTime, debounceTime, groupBy } from 'rxjs/operators'
+import { filter, combineLatestWith, debounceTime, groupBy } from 'rxjs/operators'
 import { RxjsUdp } from "./RxjsUdp.js";
 
-
-
-// Cơ chế 
-// Service gọi gateway khởi động lần đầu với auth không có gì 
-// Gateway gọi service kèm token xác thực
-// Service gọi lại kèm token xác thực 
-// Gateway ghép nối 
-
+ 
+@Controller()
 @Injectable()
 export class ApiGatewayLinker {
 

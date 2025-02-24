@@ -243,7 +243,8 @@ export class ApiGateway {
     #proxy(req: IncomingMessage & { rawBody: Buffer, body?: any }, res: Response) {
 
         if (Number(req.headers['content-length'] || 0) > 0 && !req.rawBody) {
-            return res.status(500).json({
+            res.status(500)
+            return res.json({
                 error: {
                     status: 500,
                     code: "MISISNG_API_GATEWAY_RAW_BODY",
@@ -256,7 +257,8 @@ export class ApiGateway {
         const target = this.#resolve(req.url, req.method.toUpperCase())
         if (!target) {
             const status = target === null ? 500 : 404
-            return res.sendStatus(status).json({
+            res.status(status)
+            return res.json({
                 error: {
                     status,
                     code: status == 500 ? 'MICROSERVICE_OFFLINE' : 'API_NOT_FOUND'

@@ -49,8 +49,8 @@ export class PetCollection {
 
 
 @Module({
-    controllers: [PetCollection],
-    providers: [ApiGatewayLinker, LivequeryWebsocketSync]
+    controllers: [ApiGatewayLinker, PetCollection],
+    providers: [ LivequeryWebsocketSync]
 })
 export class AppModule { }
 
@@ -59,4 +59,4 @@ app.useWebSocketAdapter(new WsAdapter(app))
 await app.listen(8088)
 
 
-ApiGatewayLinker.broadcast('Service API 2', 8088)
+ApiGatewayLinker.broadcast('Service API', 8088)
