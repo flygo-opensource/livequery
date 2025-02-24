@@ -13,7 +13,7 @@ export class PathHelper {
             ?.filter(s => s.length > 0)
             ?.join('/')
 
-        if (!ref) throw 'LIVEQUERY_MAGIC_KEY_NOT_FOUND'
+        if (!ref) throw { code: 'LIVEQUERY_MAGIC_KEY_NOT_FOUND' }
 
         return ref
     }
@@ -27,7 +27,7 @@ export class PathHelper {
             ?.split('/')
             ?.filter(s => s.length > 0)
 
-        if (!refs) throw 'LIVEQUERY_MAGIC_KEY_NOT_FOUND'
+        if (!refs) throw { code: 'LIVEQUERY_MAGIC_KEY_NOT_FOUND' }
 
         const is_collection = refs.length % 2 == 1
         const ref = refs.join('/')

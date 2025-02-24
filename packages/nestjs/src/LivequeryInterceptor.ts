@@ -3,8 +3,6 @@ import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Opt
 import { map } from "rxjs/operators";
 import { PathHelper } from "./helpers/PathHelper.js";
 import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
-import { InjectWebsocketPrivateKey } from "./UseWebsocketShareKeyPair.js";
-import JWT from 'jsonwebtoken'
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 
 export type RealtimeSubscription = {
@@ -18,8 +16,7 @@ export type RealtimeSubscription = {
 export class LivequeryInterceptor implements NestInterceptor {
 
     constructor(
-        @Optional() @Inject(LivequeryWebsocketSync) private LivequeryWebsocketSync: LivequeryWebsocketSync,
-        @Optional() @InjectWebsocketPrivateKey() private secret_or_private_key: string
+        @Optional() @Inject(LivequeryWebsocketSync) private LivequeryWebsocketSync: LivequeryWebsocketSync
     ) {
     }
 
@@ -58,13 +55,14 @@ export class LivequeryInterceptor implements NestInterceptor {
         // Allow realtime by default    
         const client_id = req.headers['x-lcid'] || req.headers.socket_id
         const gateway_id = req.headers['x-lgid'] || this.LivequeryWebsocketSync.id
-        req.method == 'GET' && client_id && this.LivequeryWebsocketSync?.listen([{
+        const cursor = req.query[':after'] || req.query[':before'] || req.query[':around']
+        req.method == 'GET' && !cursor && client_id && this.LivequeryWebsocketSync?.listen([{
             collection_ref,
             doc_id,
             client_id,
             gateway_id
         }])
- 
+
         return next.handle().pipe(
             map(data => {
                 if (data.item) {
@@ -76,7 +74,7 @@ export class LivequeryInterceptor implements NestInterceptor {
                     }
                 }
                 return {
-                    data 
+                    data
                 }
             })
         )

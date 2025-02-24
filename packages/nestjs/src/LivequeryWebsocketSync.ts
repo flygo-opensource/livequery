@@ -215,10 +215,7 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebsocketWithMetadata,
         @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log({
-            new_node: id,
-            gateway: auth == this.auth
-        })
+     
         if (socket.id) return
         if (this.#connections.has(id)) {
             socket.close()
@@ -255,7 +252,6 @@ export class LivequeryWebsocketSync {
     }
 
     private handleDisconnect(socket: WebsocketWithMetadata) {
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log({ disconnected: socket.id })
         this.#connections.delete(socket.id)
         if (socket.gateway) {
             for (const [ref, map] of this.#subscriptions) {

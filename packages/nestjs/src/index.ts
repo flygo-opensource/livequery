@@ -5,5 +5,4 @@ export { LivequeryInterceptor, type RealtimeSubscription, UseLivequeryIntercepto
 export { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js'
 export { createDatasourceMapper, type LivequeryDatasourceOptions,type LivequeryDatasource } from './helpers/createDatasourceMapper.js'
 export { LivequeryDatasourceInterceptors, LivequeryItemMapper } from './LivequeryDatasourceInterceptors.js'
-export { UseWebsocketPublicKey, UseWebsocketPrivateKey } from './UseWebsocketShareKeyPair.js'
 export { ApiGateway } from './ApiGateway.js'  
