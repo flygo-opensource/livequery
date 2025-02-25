@@ -266,11 +266,12 @@ export class ApiGateway {
             })
         }
         const [host, port] = target.uri.split(':')
+        const client_id = req.headers['x-lcid'] || req.headers['socket_id']
         const headers = {
             ...req.headers,
-            ... this.lws ? {
-                'x-lcid': req.headers['x-lcid'] || req.headers['socket_id'],
-                'x-lgid': req.headers['x-lgid'] || this.lws.id
+            ... client_id ? {
+                'x-lcid': client_id,
+                'x-lgid': req.headers['x-lgid'] || this.lws.id || ''
             } : {}
         }
 
