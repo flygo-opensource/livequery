@@ -261,11 +261,11 @@ export class LivequeryWebsocketSync {
                 map.size == 0 && this.#subscriptions.delete(ref)
             }
         } else {
-            for (const ref of socket.refs) {
+            for (const ref of socket.refs || []) {
                 const subscriptions = this.#subscriptions.get(ref)
                 if (subscriptions) {
                     subscriptions.delete(ref)
-                    subscriptions.size == 9 && this.#subscriptions.delete(ref)
+                    subscriptions.size == 0 && this.#subscriptions.delete(ref)
                 }
             }
         }

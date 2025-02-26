@@ -140,7 +140,7 @@ export class ApiGateway {
         this.#services.set(metadata.id, { metadata, subscription, host })
         process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
         metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
-        for (const { method, path } of metadata.paths) {
+        for (const { method, path } of metadata.paths || []) {
 
             const refs = path.split('/').map(r => {
                 if (r.includes(':')) {
@@ -269,7 +269,7 @@ export class ApiGateway {
         const client_id = req.headers['x-lcid'] || req.headers['socket_id']
         const headers = {
             ...req.headers,
-            ... client_id ? {
+            ...client_id ? {
                 'x-lcid': client_id,
                 'x-lgid': req.headers['x-lgid'] || this.lws.id || ''
             } : {}
@@ -289,11 +289,11 @@ export class ApiGateway {
                 res.json({ error: { code: "SERVICE_API_OFFLINE" } });
             })
             .on('upgrade', (ireq, socket, head) => {
-                
+
             })
             .on('response', response => {
                 res.status(response.statusCode)
-                for (const [k, v] of Object.entries(response.headers)) {
+                for (const [k, v] of Object.entries(response.headers || {})) {
                     res.setHeader(k, v)
                 }
                 response.pipe(res)
