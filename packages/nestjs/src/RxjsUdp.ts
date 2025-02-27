@@ -1,34 +1,44 @@
 import { createSocket } from "dgram"
 import { Observable } from "rxjs"
-import { networkInterfaces } from 'os'
 import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT } from "./const.js"
-import { ServiceApiMetadata } from "./ApiGateway.js"
 import { randomUUID } from "crypto"
 
+export type UdpHello<T> = T & { id: string, host: string, namespace: string }
 
-export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
+export class RxjsUdp<T> extends Observable<UdpHello<T>> {
 
     public readonly id = randomUUID()
 
     #udp = createSocket({
-        type: 'udp4',
+        type: 'udp6',
         reuseAddr: true
     })
 
-    #broadcast_ips = ['localhost']
+    #whitelist_ips = [
+        '127.0.0.1',
+        ...API_GATEWAY_UDP_ADDRESS.split(',').map(a => {
+            const s = a.trim().split('.')
+            if (s.length == 4) return [a.trim()]
+            if (s.length == 3) return new Array(255).fill(0).map((_, i) => [...s, i].join('.'))
+            return []
+        }).flat(2)
+    ]
 
     constructor(
-
+        private port: number
     ) {
         super(o => {
+
+
             this.#udp.bind({
                 address: '0.0.0.0',
-                port: API_GATEWAY_UDP_PORT,
+                port,
             }, () => this.#udp.setBroadcast(true))
 
             this.#udp.on('message', async (raw, rinfo) => {
                 try {
-                    const info = JSON.parse(raw.toString('utf-8')) as ServiceApiMetadata
+                    if (!this.#whitelist_ips.includes(rinfo.address)) return
+                    const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
                     if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.id) {
                         o.next({ ...info, host: rinfo.address })
                     }
@@ -36,40 +46,25 @@ export class RxjsUdp extends Observable<ServiceApiMetadata & { host: string }> {
                 } catch (e) {
                 }
             })
-
-            const network_address = (
-                Object.entries(networkInterfaces())
-                    .filter(([i]) => !i.startsWith('lo'))
-                    .map(e => e[1])
-                    .flat(2)
-                    .filter(d => d.family == 'IPv4')
-                    .map(d => d.address.split('.').slice(0, 3).join('.') + '.255')
-            )
-            const env_address = API_GATEWAY_UDP_ADDRESS.split(',').map(a => a.trim()).filter(a => !!a)
-
-            for (const address of [...network_address, ...env_address]) {
-                const splited = address.split('.')
-                splited.length == 4 && this.#broadcast_ips.push(address)
-                splited.length == 3 && new Array(256).fill(0).map((_, i) => this.#broadcast_ips.push(`${address}.${i}`))
-            }
         })
     }
 
-    async broadcast(metadata: ServiceApiMetadata, ip?: string) { 
-        for (const host of [
-            ...this.#broadcast_ips,
-            ... ip ? [ip]:[]
-        ]) {
-            await this.#udp.send(
-                JSON.stringify({ ...metadata, id: this.id }),
-                API_GATEWAY_UDP_PORT,
-                host
-            )
+    async broadcast({ payload, port, host }: { port: number, payload: T, host?: string }) {
+        const hosts = host ? [host] : this.#whitelist_ips
+        const data = JSON.stringify({
+            namespace: API_GATEWAY_NAMESPACE,
+            id: this.id,
+            ...payload,
+        })
+        for (const host of hosts) {
+            await new Promise(s => {
+                this.#udp.send(
+                    data,
+                    port,
+                    host,
+                    s
+                )
+            })
         }
-    }
- 
-
-    forService(){
-
     }
 }

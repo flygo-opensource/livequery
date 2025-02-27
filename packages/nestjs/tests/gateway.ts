@@ -13,4 +13,4 @@ export class AppModule { }
 
 const app = await NestFactory.create(AppModule, { rawBody: true })
 app.useWebSocketAdapter(new WsAdapter(app))
-await app.listen(8081)
+await app.listen(process.argv[2] || 8000)

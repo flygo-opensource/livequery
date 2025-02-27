@@ -3,9 +3,9 @@ import * as http from 'http';
 import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { API_GATEWAY_NAMESPACE } from './const.js';
-import { RxjsUdp } from './RxjsUdp.js';
-import { mergeMap, filter, debounceTime, groupBy } from 'rxjs/operators'
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT, LIVEQUERY_API_GATEWAY_DEBUG, SERVICE_API_UDP_PORT } from './const.js';
+import { RxjsUdp, UdpHello } from './RxjsUdp.js';
+import { mergeMap, filter, debounceTime, groupBy, tap } from 'rxjs/operators'
 import { merge, Subscription, of } from 'rxjs'
 import { generateKeyPairSync } from 'crypto';
 import jwt from 'jsonwebtoken'
@@ -26,8 +26,6 @@ export type Routing = {
 
 
 export type ServiceApiMetadata = {
-    id: string,
-    namespace: string
     role: 'service' | 'gateway',
     name: string
     port: number
@@ -36,7 +34,6 @@ export type ServiceApiMetadata = {
         path: string
     }>
     websocket?: string
-    auth: string
     wsauth?: string
     linked: string[]
     target?: string
@@ -61,76 +58,47 @@ export class ApiGateway {
     #services = new Map<string, { host: string, metadata: ServiceApiMetadata, subscription?: Subscription }>
     #routing: Routing = {}
 
-    #secret = generateKeyPairSync('ec', {
-        namedCurve: 'P-256', // Dùng P-256 cho ES256
-        publicKeyEncoding: { type: 'spki', format: 'pem' },
-        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    })
 
     constructor(
         @Optional() private lws: LivequeryWebsocketSync
     ) {
-        const udp = new RxjsUdp()
+        const udp = new RxjsUdp<ServiceApiMetadata>(API_GATEWAY_UDP_PORT)
 
-        merge(
-            udp,
-            of({
-                host: '',
-                namespace: API_GATEWAY_NAMESPACE,
-                id: udp.id,
-                name: 'seeding-gateway',
-                paths: [],
-                port: 0,
-                role: 'service',
-                linked: [],
-                auth: ''
-            } as ServiceApiMetadata & { host: string })
-        ).pipe(
+        udp.pipe(
             filter(m => m.role == 'service'),
             filter(m => !this.#services.has(m.id)),
             groupBy(m => m.id),
             mergeMap($ => $.pipe(
-                debounceTime(500),
-                mergeMap(async ({ host, ...data }) => {
-                    if (!data.auth) {
-                        const auth = jwt.sign({}, this.#secret.privateKey, {
-                            algorithm: 'ES256',
-                            expiresIn: 3600
-                        })
-
-                        const me: ServiceApiMetadata = {
-                            namespace: API_GATEWAY_NAMESPACE,
-                            id: udp.id,
-                            name: '',
-                            paths: [],
-                            port: 0,
-                            role: 'gateway',
-                            auth,
-                            linked: [... this.#services.keys()]
-                        }
-                        udp.broadcast(me, host || undefined)
-                        return
-                    }
-
-                    try {
-                        jwt.verify(data.auth, this.#secret.publicKey)
-                        await this.#join(host, data)
-                        return
-                    } catch (e) {
-                    }
-
-
+                debounceTime(1000),
+                mergeMap(async e => {
+                    await this.#join(e)
                 })
             ))
         ).subscribe()
 
+        setTimeout(() => {
+            udp.broadcast({
+                port: SERVICE_API_UDP_PORT,
+                payload: {
+                    name: 'API gateway',
+                    paths: [],
+                    port: 0,
+                    role: 'gateway',
+                    linked: [... this.#services.keys()]
+                }
+            })
+        }, 1000)
+
     }
 
 
-    async #join(host: string, metadata: ServiceApiMetadata) {
-        if (this.#services.has(metadata.id)) return
+    async #join(metadata: UdpHello<ServiceApiMetadata>) {
+        const host = metadata.host
 
         const hostname = `${host}:${metadata.port}`
+
+
+
         const subscription = metadata.websocket && this.lws?.connect(
             `ws://${hostname}${metadata.websocket}`,
             metadata.wsauth,
@@ -138,8 +106,8 @@ export class ApiGateway {
         )
 
         this.#services.set(metadata.id, { metadata, subscription, host })
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
-        metadata.websocket && process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
+        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
+        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         for (const { method, path } of metadata.paths || []) {
 
             const refs = path.split('/').map(r => {
@@ -191,8 +159,8 @@ export class ApiGateway {
         if (!service) return
         const { metadata, subscription, host } = service
         subscription.unsubscribe()
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${host}:${metadata.port}`)
-        process.env.LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
+        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${host}:${metadata.port}`)
+        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         this.#services.delete(id)
         const hostname = `${host}:${metadata.port}`
         for (

@@ -3,12 +3,12 @@ import { ModulesContainer } from "@nestjs/core";
 import { listPaths } from "./helpers/listPaths.js";
 import { ServiceApiMetadata } from "./ApiGateway.js";
 import { LivequeryWebsocketSync, WEBSOCKET_PATH } from "./LivequeryWebsocketSync.js";
-import { merge, Subject, of, mergeMap } from "rxjs";
-import { API_GATEWAY_NAMESPACE } from "./const.js";
+import { Subject, mergeMap } from "rxjs";
+import { API_GATEWAY_UDP_PORT, SERVICE_API_UDP_PORT } from "./const.js";
 import { filter, combineLatestWith, debounceTime, groupBy } from 'rxjs/operators'
 import { RxjsUdp } from "./RxjsUdp.js";
 
- 
+
 @Controller()
 @Injectable()
 export class ApiGatewayLinker {
@@ -23,42 +23,53 @@ export class ApiGatewayLinker {
             listPaths([...m.controllers.keys()].map(c => c))
         )).flat(2)
 
-        const $udp = new RxjsUdp()
+        const $udp = new RxjsUdp<ServiceApiMetadata>(SERVICE_API_UDP_PORT)
 
-        const metadata: ServiceApiMetadata = {
-            namespace: API_GATEWAY_NAMESPACE,
-            role: 'service',
-            id: $udp.id,
-            name: 'seeding-service',
-            paths,
-            port: 0,
-            linked: [],
-            auth: '',
-            wsauth: LivequeryWebsocketSync?.auth,
-            websocket: LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined
-        }
 
-        merge(
-            $udp,
-            of({ ...metadata, role: 'gateway' })
-        ).pipe(
+        $udp.pipe(
             filter(m => m.role == 'gateway'),
             filter(r => !r.linked.includes($udp.id)),
             combineLatestWith(ApiGatewayLinker.$me),
             groupBy(([a, b]) => a.id),
             mergeMap($ => $.pipe(
-                debounceTime(500),
-                mergeMap(async ([a, { name, port }]) => {
-                    const me: ServiceApiMetadata = {
-                        ...metadata,
+                debounceTime(1000),
+                mergeMap(async ([{ host }, { name, port }]) => {
+                    const payload: ServiceApiMetadata = {
+                        role: 'service',
+                        paths,
+                        linked: [],
+                        wsauth: LivequeryWebsocketSync?.auth,
+                        websocket: LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined,
                         name,
                         port,
-                        auth: a.auth
                     }
-                    $udp.broadcast(me)
+                    $udp.broadcast({
+                        payload,
+                        port: API_GATEWAY_UDP_PORT,
+                        host
+                    })
                 })
             ))
         ).subscribe()
+
+        combineLatestWith(ApiGatewayLinker.$me)
+
+        ApiGatewayLinker.$me.subscribe(({ name, port }) => {
+            $udp.broadcast({
+                port: API_GATEWAY_UDP_PORT,
+                payload: {
+                    name,
+                    port,
+                    role: 'service',
+                    paths,
+                    linked: [],
+                    wsauth: LivequeryWebsocketSync?.auth,
+                    websocket: LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined
+                }
+            })
+        })
+
+
     }
 
 
