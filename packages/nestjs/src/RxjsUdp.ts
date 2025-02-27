@@ -1,6 +1,6 @@
 import { createSocket } from "dgram"
 import { Observable } from "rxjs"
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT } from "./const.js"
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT, LIVEQUERY_API_GATEWAY_RAW_DEBUG } from "./const.js"
 import { randomUUID } from "crypto"
 
 export type UdpHello<T> = T & { id: string, host: string, namespace: string }
@@ -10,7 +10,7 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
     public readonly id = randomUUID()
 
     #udp = createSocket({
-        type: 'udp6',
+        type: 'udp4',
         reuseAddr: true
     })
 
@@ -37,6 +37,7 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
 
             this.#udp.on('message', async (raw, rinfo) => {
                 try {
+                    LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ rinfo, data: raw.toString('utf8') })
                     if (!this.#whitelist_ips.includes(rinfo.address)) return
                     const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
                     if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.id) {
@@ -56,6 +57,7 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
             id: this.id,
             ...payload,
         })
+        LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ broadcast: hosts, port, data })
         for (const host of hosts) {
             await new Promise(s => {
                 this.#udp.send(
