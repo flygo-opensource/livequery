@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap, retry } from "rxjs";
+import { Subject, tap, switchMap, retry, delay, MonoTypeOperatorFunction, pipe, Observable, timer } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
@@ -78,7 +78,7 @@ export class LivequeryWebsocketSync {
                 const connection_id = gateway_id == this.id ? client_id : gateway_id
                 const old = p.get(connection_id)
                 const socket = old ? old.socket : this.#connections.get(connection_id)
-                if(!socket) return p
+                if (!socket) return p
                 const cids = [...old ? old.cids : [], client_id]
                 p.set(connection_id, { cids, socket })
                 return p
@@ -144,9 +144,10 @@ export class LivequeryWebsocketSync {
                     })
                 )
             }),
-            // retry({ count: 10, delay: 1000, resetOnSuccess: false }),
-            catchError(() => {
-                return EMPTY
+            retry({
+                count: 5,
+                delay: 500,
+                resetOnSuccess: true
             }),
             finalize(() => {
                 ondisconect?.()
@@ -215,7 +216,7 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebsocketWithMetadata,
         @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
-     
+
         if (socket.id) return
         if (this.#connections.has(id)) {
             socket.close()
@@ -278,7 +279,7 @@ export class LivequeryWebsocketSync {
             if (client_id == gateway_id) continue
             const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
             const subscriptions = this.#subscriptions.get(ref) || new Map<ClientId, GatewayId>()
-            if (subscriptions.get(client_id) == gateway_id) continue 
+            if (subscriptions.get(client_id) == gateway_id) continue
             subscriptions.set(client_id, gateway_id)
             this.#subscriptions.set(ref, subscriptions)
 
