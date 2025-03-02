@@ -149,6 +149,7 @@ export class LivequeryWebsocketSync {
                 delay: 500,
                 resetOnSuccess: true
             }),
+            catchError(e => EMPTY),
             finalize(() => {
                 ondisconect?.()
             })
