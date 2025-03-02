@@ -3,7 +3,7 @@ import * as http from 'http';
 import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT, LIVEQUERY_API_GATEWAY_DEBUG, SERVICE_API_UDP_PORT } from './const.js';
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_DEBUG } from './const.js';
 import { RxjsUdp, UdpHello } from './RxjsUdp.js';
 import { mergeMap, filter, debounceTime, groupBy, tap } from 'rxjs/operators'
 import { merge, Subscription, of } from 'rxjs'
@@ -62,7 +62,7 @@ export class ApiGateway {
     constructor(
         @Optional() private lws: LivequeryWebsocketSync
     ) {
-        const udp = new RxjsUdp<ServiceApiMetadata>(API_GATEWAY_UDP_PORT)
+        const udp = new RxjsUdp<ServiceApiMetadata>()
 
         udp.pipe(
             filter(m => m.role == 'service'),
@@ -78,7 +78,6 @@ export class ApiGateway {
 
         setTimeout(() => {
             udp.broadcast({
-                port: SERVICE_API_UDP_PORT,
                 payload: {
                     name: 'API gateway',
                     paths: [],
@@ -171,7 +170,7 @@ export class ApiGateway {
             for (const route of routes) {
                 for (const { methods } of Object.values(route || {})) {
                     for (const list of Object.values(methods || {})) {
-                        list.hosts = list.hosts.filter(h => h.uri != hostname)
+                        list.hosts = list.hosts.filter(h => h.instance_id != id || h.uri != hostname)
                     }
                 }
             }

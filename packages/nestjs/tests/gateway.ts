@@ -3,6 +3,7 @@ import { ApiGateway } from "../src/ApiGateway.js";
 import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
+import { distinctUntilChanged, skip, Subject } from "rxjs";
 
 @Module({
     controllers: [ApiGateway],
@@ -13,4 +14,4 @@ export class AppModule { }
 
 const app = await NestFactory.create(AppModule, { rawBody: true })
 app.useWebSocketAdapter(new WsAdapter(app))
-await app.listen(process.argv[2] || 8000)
+await app.listen(process.argv[2] || 8000) 

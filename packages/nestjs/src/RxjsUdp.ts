@@ -1,21 +1,33 @@
 import { createSocket } from "dgram"
 import { Observable } from "rxjs"
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG } from "./const.js"
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG, UDP_PRIVATE_PORT, UDP_PUBLIC_PORT } from "./const.js"
 import { randomUUID } from "crypto"
+import { networkInterfaces } from "os"
 
 export type UdpHello<T> = T & { id: string, host: string, namespace: string }
 
+LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({LIVEQUERY_API_GATEWAY_RAW_DEBUG: 'ON'})
+
 export class RxjsUdp<T> extends Observable<UdpHello<T>> {
 
-    public readonly id = randomUUID()
+    public static readonly id = randomUUID()
 
-    #udp = createSocket({
-        type: 'udp4',
-        reuseAddr: true
-    })
+
+    #udp = {
+        public: createSocket({
+            type: 'udp4',
+            reuseAddr: true
+        }),
+        local: createSocket({
+            type: 'udp4',
+            reuseAddr: true
+        })
+    }
+
+    #local_addresses = Object.values(networkInterfaces()).map(a => a.map(q => q.address)).flat(2)
 
     #whitelist_ips = [
-        '255.255.255.255',
+        '127.0.0.1',
         ...API_GATEWAY_UDP_ADDRESS.split(',').map(a => {
             const s = a.trim().split('.')
             if (s.length == 4) return [a.trim()]
@@ -24,43 +36,45 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
         }).flat(2)
     ]
 
-    constructor(port: number) {
+    constructor() {
         super(o => {
 
 
-            this.#udp.on('message', async (raw, rinfo) => {
-                try {
-                    LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ rinfo, data: raw.toString('utf8') })
-                    if (!this.#whitelist_ips.includes(rinfo.address)) return
-                    const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
-                    if (info.namespace == API_GATEWAY_NAMESPACE && info.id != this.id) {
-                        o.next({ ...info, host: rinfo.address })
-                    }
 
-                } catch (e) {
+            this.#udp.public.on('message', (raw, rinfo) => {
+                if (!this.#whitelist_ips.includes(rinfo.address)) return
+                const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
+                info.host = rinfo.address
+                this.#udp.public.send(Buffer.from(JSON.stringify(info)), UDP_PRIVATE_PORT, '255.255.255.255')
+            })
+
+            this.#udp.local.on('message', (raw, rinfo) => {
+                if (!this.#local_addresses.includes(rinfo.address)) return
+                const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
+                LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ receive: info })
+                if (info.namespace == API_GATEWAY_NAMESPACE && info.id != RxjsUdp.id) {
+                    o.next(info)
                 }
             })
 
-            this.#udp.bind({
-                address: '0.0.0.0',
-                port,
-            }, () => this.#udp.setBroadcast(true))
+            this.#udp.public.bind(UDP_PUBLIC_PORT, '0.0.0.0', () => this.#udp.public.setBroadcast(true))
+            this.#udp.local.bind(UDP_PRIVATE_PORT, '0.0.0.0', () => this.#udp.local.setBroadcast(true))
         })
     }
 
-    async broadcast({ payload, port, host }: { port: number, payload: T, host?: string }) {
+    async broadcast({ payload, host }: { payload: T, host?: string }) {
         const hosts = host ? [host] : this.#whitelist_ips
         const data = JSON.stringify({
             namespace: API_GATEWAY_NAMESPACE,
-            id: this.id,
+            id: RxjsUdp.id,
             ...payload,
         })
-        LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ broadcast: hosts, port, data })
+        LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ broadcast: hosts, data, port: UDP_PUBLIC_PORT })
         for (const host of hosts) {
             await new Promise(s => {
-                this.#udp.send(
+                this.#udp.public.send(
                     data,
-                    port,
+                    UDP_PUBLIC_PORT,
                     host,
                     s
                 )

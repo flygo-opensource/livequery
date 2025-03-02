@@ -56,7 +56,7 @@ export class AppModule { }
 
 const app = await NestFactory.create(AppModule)
 app.useWebSocketAdapter(new WsAdapter(app))
-await app.listen(3000)
+await app.listen(3001)
 
 
-ApiGatewayLinker.broadcast('Service API', 3000)
+ApiGatewayLinker.broadcast('Service API', 3001)

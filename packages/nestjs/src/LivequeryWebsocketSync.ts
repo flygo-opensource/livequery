@@ -1,13 +1,14 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap, retry, delay, MonoTypeOperatorFunction, pipe, Observable, timer } from "rxjs";
+import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
 import WebSocket from 'ws'
-import { of, fromEvent, map, finalize, merge, catchError, EMPTY, filter, mergeAll } from 'rxjs'
+import { of, fromEvent, map, finalize, merge, EMPTY, filter, mergeAll } from 'rxjs'
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 import { randomUUID } from "crypto";
+import { RxjsUdp } from "./RxjsUdp.js";
 
 
 export type WebSocketHelloEvent = {
@@ -52,6 +53,7 @@ type GatewayId = string
 type Ref = string
 type ClientId = string
 
+const ENDPOINT_RESTARTED = 'ENDPOINT_RESTARTED'
 
 export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates'
 
@@ -63,12 +65,11 @@ export class LivequeryWebsocketSync {
 
 
     // NODE METADATA
-    public readonly id = randomUUID()
+    public readonly id = RxjsUdp.id
     public readonly auth = randomUUID()
     private readonly changes = new Subject<UpdatedData>()
 
-    constructor() {
-        this.changes.pipe()
+    constructor( ) {  
         this.changes.subscribe(({ ref, data, type }) => {
 
             const targets = [
@@ -99,7 +100,9 @@ export class LivequeryWebsocketSync {
     }
 
     connect(url: string, auth: string, ondisconect?: Function) {
+        const gateway$ = new BehaviorSubject({ id: '', stop: false })
         return of(0).pipe(
+            takeWhile(() => !gateway$.getValue().stop),
             map(() => new WebSocket(url)),
             switchMap((ws: WebsocketWithMetadata) => {
                 return merge(
@@ -112,23 +115,27 @@ export class LivequeryWebsocketSync {
                     fromEvent(ws, 'message').pipe(
                         map((event: { data: string }) => {
                             const data = event.data
-                            try {
-                                const parsed = JSON.parse(data.toString()) as WebSocketSyncEvent | WebSocketHelloEvent | WebSocketSubscribeEvent
+                            const parsed = JSON.parse(data.toString()) as WebSocketSyncEvent | WebSocketHelloEvent | WebSocketSubscribeEvent
 
-                                if (parsed.event == 'hello') {
-                                    ws.id = parsed.gid
-                                    this.#connections.set(parsed.gid, ws)
-                                    return
+                            if (parsed.event == 'hello') {
+                                ws.id = parsed.gid
+                                const old_id = gateway$.getValue().id
+                                if (old_id == '') {
+                                    gateway$.next({ id: ws.id, stop: false })
                                 }
-                                if (parsed.event == 'subscribe') {
-                                    this.listen([parsed])
-                                    return
+                                if (old_id != '' && old_id != ws.id) {
+                                    gateway$.next({ id: ws.id, stop: true }) 
+                                    throw ENDPOINT_RESTARTED
                                 }
-
-                                return parsed
-                            } catch (e) {
-                                console.error(e)
+                                this.#connections.set(parsed.gid, ws)
+                                return
                             }
+                            if (parsed.event == 'subscribe') {
+                                this.listen([parsed])
+                                return
+                            }
+
+                            return parsed
                         }),
                         filter(Boolean),
                         map(({ event, cids, data }) => cids.map(client_id => ({ event, data, client_id }))),
@@ -145,11 +152,11 @@ export class LivequeryWebsocketSync {
                 )
             }),
             retry({
-                count: 5,
-                delay: 500,
-                resetOnSuccess: true
-            }),
-            catchError(e => EMPTY),
+                delay: (e, n) => { 
+                    if(n>=5 || e == ENDPOINT_RESTARTED) return EMPTY
+                    return timer(2000)
+                } 
+            }), 
             finalize(() => {
                 ondisconect?.()
             })
@@ -217,8 +224,11 @@ export class LivequeryWebsocketSync {
         @ConnectedSocket() socket: WebsocketWithMetadata,
         @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
-
         if (socket.id) return
+        if(auth && auth != this.auth) {
+            socket.close()
+            return 
+        }
         if (this.#connections.has(id)) {
             socket.close()
             return
