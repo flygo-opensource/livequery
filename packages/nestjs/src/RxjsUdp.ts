@@ -1,6 +1,6 @@
 import { createSocket } from "dgram"
 import { Observable } from "rxjs"
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, API_GATEWAY_UDP_PORT, LIVEQUERY_API_GATEWAY_RAW_DEBUG } from "./const.js"
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG } from "./const.js"
 import { randomUUID } from "crypto"
 
 export type UdpHello<T> = T & { id: string, host: string, namespace: string }
@@ -15,7 +15,7 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
     })
 
     #whitelist_ips = [
-        '127.0.0.1',
+        '255.255.255.255',
         ...API_GATEWAY_UDP_ADDRESS.split(',').map(a => {
             const s = a.trim().split('.')
             if (s.length == 4) return [a.trim()]
@@ -24,16 +24,9 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
         }).flat(2)
     ]
 
-    constructor(
-        private port: number
-    ) {
+    constructor(port: number) {
         super(o => {
 
-
-            this.#udp.bind({
-                address: '0.0.0.0',
-                port,
-            }, () => this.#udp.setBroadcast(true))
 
             this.#udp.on('message', async (raw, rinfo) => {
                 try {
@@ -47,6 +40,11 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
                 } catch (e) {
                 }
             })
+
+            this.#udp.bind({
+                address: '0.0.0.0',
+                port,
+            }, () => this.#udp.setBroadcast(true))
         })
     }
 
