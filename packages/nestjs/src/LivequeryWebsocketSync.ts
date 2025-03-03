@@ -69,7 +69,7 @@ export class LivequeryWebsocketSync {
     public readonly auth = randomUUID()
     private readonly changes = new Subject<UpdatedData>()
 
-    constructor( ) {  
+    constructor() {
         this.changes.subscribe(({ ref, data, type }) => {
 
             const targets = [
@@ -124,7 +124,7 @@ export class LivequeryWebsocketSync {
                                     gateway$.next({ id: ws.id, stop: false })
                                 }
                                 if (old_id != '' && old_id != ws.id) {
-                                    gateway$.next({ id: ws.id, stop: true }) 
+                                    gateway$.next({ id: ws.id, stop: true })
                                     throw ENDPOINT_RESTARTED
                                 }
                                 this.#connections.set(parsed.gid, ws)
@@ -152,11 +152,11 @@ export class LivequeryWebsocketSync {
                 )
             }),
             retry({
-                delay: (e, n) => { 
-                    if(n>=5 || e == ENDPOINT_RESTARTED) return EMPTY
-                    return timer(2000)
-                } 
-            }), 
+                delay: (e, n) => {
+                    if (n >= 5 || e == ENDPOINT_RESTARTED) return EMPTY
+                    return timer(1000)
+                }
+            }),
             finalize(() => {
                 ondisconect?.()
             })
@@ -225,9 +225,9 @@ export class LivequeryWebsocketSync {
         @MessageBody() { id, auth }: WebSocketStartEvent['data']
     ) {
         if (socket.id) return
-        if(auth && auth != this.auth) {
+        if (auth && auth != this.auth) {
             socket.close()
-            return 
+            return
         }
         if (this.#connections.has(id)) {
             socket.close()

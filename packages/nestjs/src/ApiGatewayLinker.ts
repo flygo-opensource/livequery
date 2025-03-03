@@ -29,7 +29,7 @@ export class ApiGatewayLinker {
             filter(m => m.role == 'gateway'),
             filter(r => !r.linked.includes(RxjsUdp.id)),
             combineLatestWith(ApiGatewayLinker.$me),
-            groupBy(([a, b]) => a.id),
+            groupBy(([a, b]) => a.sender_id),
             mergeMap($ => $.pipe(
                 debounceTime(1000),
                 mergeMap(async ([{ host }, { name, port }]) => {

@@ -1,12 +1,17 @@
-import { createSocket } from "dgram"
-import { Observable } from "rxjs"
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG, UDP_PRIVATE_PORT, UDP_PUBLIC_PORT } from "./const.js"
+import { createSocket, RemoteInfo } from "dgram"
+import { EMPTY, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, Observable, of, retry, tap, timer } from "rxjs"
+import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG, UDP_MULTICAST_ADDRESS, UDP_LOCAL_PORT, UDP_PUBLIC_PORT } from "./const.js"
 import { randomUUID } from "crypto"
 import { networkInterfaces } from "os"
 
-export type UdpHello<T> = T & { id: string, host: string, namespace: string }
+export type UdpHello<T = {}> = T & {
+    sender_id: string,
+    relay_id: string
+    host: string,
+    namespace: string
+}
 
-LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({LIVEQUERY_API_GATEWAY_RAW_DEBUG: 'ON'})
+LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ LIVEQUERY_API_GATEWAY_RAW_DEBUG: 'ON' })
 
 export class RxjsUdp<T> extends Observable<UdpHello<T>> {
 
@@ -39,36 +44,70 @@ export class RxjsUdp<T> extends Observable<UdpHello<T>> {
     constructor() {
         super(o => {
 
+            LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ 'IAM': RxjsUdp.id })
+
+            this.#udp.local.bind(UDP_LOCAL_PORT, '0.0.0.0', () => {
+                this.#udp.local.addMembership(UDP_MULTICAST_ADDRESS);
+            });
+
+            this.#udp.public.bind(UDP_PUBLIC_PORT, '0.0.0.0');
 
 
-            this.#udp.public.on('message', (raw, rinfo) => {
-                if (!this.#whitelist_ips.includes(rinfo.address)) return
-                const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
-                info.host = rinfo.address
-                this.#udp.public.send(Buffer.from(JSON.stringify(info)), UDP_PRIVATE_PORT, '255.255.255.255')
-            })
+            const subscription = merge(
+                fromEvent(this.#udp.public, 'message').pipe(
+                    map(([raw, rinfo]: [Buffer, RemoteInfo]) => {
+                        if (!this.#whitelist_ips.includes(rinfo.address)) return
+                        const msg = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
+                        msg.relay_id = RxjsUdp.id
+                        msg.host = rinfo.address;
+                        return { msg, public: true }
+                    })
+                ),
+                fromEvent(this.#udp.local, 'message').pipe(
+                    map(([raw, rinfo]: [Buffer, RemoteInfo]) => {
+                        if (!this.#local_addresses.includes(rinfo.address)) return
+                        const msg: UdpHello<T> = JSON.parse(raw.toString('utf-8'))
+                        if (msg.relay_id == RxjsUdp.id) return
+                        return { msg, public: false }
+                    })
+                )
+            ).pipe(
+                filter(Boolean),
+                filter(({ msg }) => msg.namespace == API_GATEWAY_NAMESPACE),
+                tap(msg => LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log(msg)),
+                tap(({ msg }) => msg.sender_id != RxjsUdp.id && o.next(msg)),
+                filter(from => from.public),
+                mergeMap(({ msg }) => {
+                    const buffer = Buffer.from(JSON.stringify(msg))
+                    return of(0).pipe(
+                        mergeMap(() => new Promise<void>((s, r) => {
+                            this.#udp.public.send(buffer, UDP_LOCAL_PORT, UDP_MULTICAST_ADDRESS, (e, b) => {
+                                e ? r(e) : s()
+                            })
+                        })),
+                        retry({
+                            delay: (e, n) => {
+                                // e && console.error(e)
+                                return n < 10 ? timer(n * 100) : EMPTY
+                            }
+                        })
+                    )
+                })
+            ).subscribe()
 
-            this.#udp.local.on('message', (raw, rinfo) => {
-                if (!this.#local_addresses.includes(rinfo.address)) return
-                const info = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
-                LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ receive: info })
-                if (info.namespace == API_GATEWAY_NAMESPACE && info.id != RxjsUdp.id) {
-                    o.next(info)
-                }
-            })
-
-            this.#udp.public.bind(UDP_PUBLIC_PORT, '0.0.0.0', () => this.#udp.public.setBroadcast(true))
-            this.#udp.local.bind(UDP_PRIVATE_PORT, '0.0.0.0', () => this.#udp.local.setBroadcast(true))
-        })
+            return () => subscription.unsubscribe()
+        });
     }
 
     async broadcast({ payload, host }: { payload: T, host?: string }) {
         const hosts = host ? [host] : this.#whitelist_ips
         const data = JSON.stringify({
             namespace: API_GATEWAY_NAMESPACE,
-            id: RxjsUdp.id,
+            relay_id: '',
+            host: '',
+            sender_id: RxjsUdp.id,
             ...payload,
-        })
+        } as UdpHello<T>)
         LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ broadcast: hosts, data, port: UDP_PUBLIC_PORT })
         for (const host of hosts) {
             await new Promise(s => {

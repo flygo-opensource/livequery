@@ -1,10 +1,9 @@
-import { Controller, Get, Module } from "@nestjs/common";
-import { ApiGateway } from "../src/ApiGateway.js"; 
 import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
 import { UseLivequeryInterceptor } from "../src/LivequeryInterceptor.js";
 import { ApiGatewayLinker } from "../src/index.js";
+import { Controller, Get, Module } from "@nestjs/common";
 
 
 
@@ -55,8 +54,8 @@ export class PetCollection {
 export class AppModule { }
 
 const app = await NestFactory.create(AppModule)
-app.useWebSocketAdapter(new WsAdapter(app))
-await app.listen(3001)
+app.useWebSocketAdapter(new WsAdapter(app)) 
+await app.listen(3003)
 
 
-ApiGatewayLinker.broadcast('Service API', 3001)
+ApiGatewayLinker.broadcast('Service API', 3003)

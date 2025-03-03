@@ -66,8 +66,8 @@ export class ApiGateway {
 
         udp.pipe(
             filter(m => m.role == 'service'),
-            filter(m => !this.#services.has(m.id)),
-            groupBy(m => m.id),
+            filter(m => !this.#services.has(m.sender_id)),
+            groupBy(m => m.sender_id),
             mergeMap($ => $.pipe(
                 debounceTime(1000),
                 mergeMap(async e => {
@@ -101,12 +101,12 @@ export class ApiGateway {
         const subscription = metadata.websocket && this.lws?.connect(
             `ws://${hostname}${metadata.websocket}`,
             metadata.wsauth,
-            () => this.#disconnect(metadata.id)
+            () => this.#disconnect(metadata.sender_id)
         )
 
-        this.#services.set(metadata.id, { metadata, subscription, host })
-        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API online: ${metadata.name} at ${host}:${metadata.port}`)
-        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
+        this.#services.set(metadata.sender_id, { metadata, subscription, host })
+        LIVEQUERY_API_GATEWAY_DEBUG && console.info(`[${new Date().toLocaleString()}] Service API online: ${metadata.name} at ${host}:${metadata.port}`)
+        // LIVEQUERY_API_GATEWAY_DEBUG && console.info(`[${new Date().toLocaleString()}] Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         for (const { method, path } of metadata.paths || []) {
 
             const refs = path.split('/').map(r => {
@@ -131,7 +131,7 @@ export class ApiGateway {
                             last_requested_index: 0
                         }
                     }
-                    methods[METHOD].hosts.push({ uri: hostname, instance_id: metadata.id })
+                    methods[METHOD].hosts.push({ uri: hostname, instance_id: metadata.sender_id })
                     return
                 }
                 const ref = refs[0]
@@ -158,8 +158,8 @@ export class ApiGateway {
         if (!service) return
         const { metadata, subscription, host } = service
         subscription.unsubscribe()
-        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service API OFFLINE: ${metadata.name} at ${host}:${metadata.port}`)
-        LIVEQUERY_API_GATEWAY_DEBUG && console.log(`Service websocket OFFLINE: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
+        LIVEQUERY_API_GATEWAY_DEBUG && console.error(`[${new Date().toLocaleString()}] Service API OFFLINE: ${metadata.name} at ${host}:${metadata.port}`)
+        // LIVEQUERY_API_GATEWAY_DEBUG && console.error(`Service websocket OFFLINE: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         this.#services.delete(id)
         const hostname = `${host}:${metadata.port}`
         for (

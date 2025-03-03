@@ -1,13 +1,12 @@
-import { Controller, Get, Module } from "@nestjs/common";
+import { Logger, Module } from "@nestjs/common";
 import { ApiGateway } from "../src/ApiGateway.js";
 import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
-import { distinctUntilChanged, skip, Subject } from "rxjs";
 
 @Module({
     controllers: [ApiGateway],
-    providers: [LivequeryWebsocketSync]
+    providers: [LivequeryWebsocketSync,Logger]
 })
 export class AppModule { }
 
