@@ -19,7 +19,8 @@ export type WebSocketHelloEvent = {
 export type WebSocketUnsubscribeEvent = {
     event: 'unsubscribe',
     data: {
-        ref: string
+        ref?: string
+        refs?: string
         client_id: string
     }
 
@@ -49,6 +50,8 @@ export type WebsocketWithMetadata = WebSocket & {
     refs: Set<string>
 }
 
+export type SubscriptionMetadata = { gateway_id: string, listener_node_id: string }
+
 type GatewayId = string
 type Ref = string
 type ClientId = string
@@ -61,7 +64,8 @@ export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/liveq
 export class LivequeryWebsocketSync {
 
     #connections = new Map<GatewayId | ClientId, WebsocketWithMetadata>()
-    #subscriptions = new Map<Ref, Map<ClientId, GatewayId>>()
+    #subscriptions = new Map<Ref, Map<ClientId, SubscriptionMetadata>>()
+    #unsubscribers = new Map<ClientId, Map<Ref, Subject<void>>>()
 
 
     // NODE METADATA
@@ -73,9 +77,9 @@ export class LivequeryWebsocketSync {
         this.changes.subscribe(({ ref, data, type }) => {
 
             const targets = [
-                ... this.#subscriptions.get(ref) || new Map(),
-                ...this.#subscriptions.get(`${ref}/${data.id}`) || new Map()
-            ].reduce((p, [client_id, gateway_id]) => {
+                ... this.#subscriptions.get(ref) || new Map<ClientId, SubscriptionMetadata>(),
+                ...this.#subscriptions.get(`${ref}/${data.id}`) || new Map<ClientId, SubscriptionMetadata>()
+            ].reduce((p, [client_id, { gateway_id }]) => {
                 const connection_id = gateway_id == this.id ? client_id : gateway_id
                 const old = p.get(connection_id)
                 const socket = old ? old.socket : this.#connections.get(connection_id)
@@ -241,67 +245,114 @@ export class LivequeryWebsocketSync {
         socket.send(JSON.stringify(payload))
     }
 
+
     @SubscribeMessage('unsubscribe')
     unsubscribe(
         @ConnectedSocket() socket: WebsocketWithMetadata,
-        @MessageBody() { ref, client_id = socket.id }: { ref: string, client_id?: string }
+        @MessageBody() body: { ref?: string, client_id?: string, refs?: string[] }
     ) {
-        const subscriptions = this.#subscriptions.get(ref)
-        if (!subscriptions) return
-        const gateway_id = subscriptions.get(client_id)
-        subscriptions.delete(client_id)
+        const client_id = body.client_id || socket.id
+        const refs = [
+            ...body.ref ? [body.ref] : [],
+            ...body.refs || []
+        ]
+        
+        for (const ref of refs) {
 
-        // Is remote unsubscribe
-        if (gateway_id == this.id) {
-            const socket = this.#connections.get(client_id)
-            socket.refs.delete(ref)
-        } else {
-            const gateway = this.#connections.get(gateway_id)
-            const payload: WebSocketUnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
-            gateway && gateway.send(JSON.stringify(payload))
+            const map = this.#subscriptions.get(ref)
+            if (!map) return
+            const routing = map.get(client_id)
+            map.delete(client_id)
+            map.size == 0 && this.#subscriptions.delete(ref)
+
+            this.#connections.get(client_id)?.refs?.delete(ref)
+            this.#unsubscribers.get(client_id)?.get(ref)?.next()
+
+
+            // Need remote unsubscribe
+            if (routing.listener_node_id != this.id) {
+                const gateway = this.#connections.get(routing.listener_node_id)
+                if (gateway) {
+                    const payload: WebSocketUnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
+                    gateway && gateway.send(JSON.stringify(payload))
+                }
+            }
         }
-
     }
 
     private handleDisconnect(socket: WebsocketWithMetadata) {
-        this.#connections.delete(socket.id)
+
         if (socket.gateway) {
             for (const [ref, map] of this.#subscriptions) {
-                for (const [client_id, gateway_id] of map) {
-                    gateway_id == socket.id && map.delete(client_id)
+                for (const [client_id, { gateway_id }] of map) {
+                    if(gateway_id == socket.id) {
+                        map.delete(client_id)
+                        this.#unsubscribers.get(client_id)?.get(ref)?.next()
+                    }
+
                 }
                 map.size == 0 && this.#subscriptions.delete(ref)
             }
         } else {
-            for (const ref of socket.refs || []) {
-                const subscriptions = this.#subscriptions.get(ref)
-                if (subscriptions) {
-                    subscriptions.delete(ref)
-                    subscriptions.size == 0 && this.#subscriptions.delete(ref)
-                }
-            }
+            const refs = [...socket.refs || []]
+            refs.length > 0 && this.unsubscribe(socket, { refs })
         }
+        this.#connections.delete(socket.id)
+
     }
 
 
-    listen(e: RealtimeSubscription[]) {
+    listen(e: Array<RealtimeSubscription>) {
 
-        for (const { collection_ref, doc_id, client_id, gateway_id } of e) {
+        for (const { ref, client_id, gateway_id, listener_node_id } of e) {
             if (client_id == gateway_id) continue
-            const ref = `${collection_ref}${doc_id ? `/${doc_id}` : ''}`
-            const subscriptions = this.#subscriptions.get(ref) || new Map<ClientId, GatewayId>()
-            if (subscriptions.get(client_id) == gateway_id) continue
-            subscriptions.set(client_id, gateway_id)
-            this.#subscriptions.set(ref, subscriptions)
+            if (gateway_id == this.id && !this.#connections.has(client_id)) {
+                if (listener_node_id != this.id) { 
+                    const target = this.#connections.get(listener_node_id)
+                    if (target) {
+                        const e: WebSocketUnsubscribeEvent = {
+                            event: 'unsubscribe',
+                            data: { client_id, ref }
+                        }
+                        target.send(JSON.stringify(e))
+                    }
+                }
+                continue
+            }
+            const map = this.#subscriptions.get(ref) || new Map<ClientId, SubscriptionMetadata>()
+            if (map.has(client_id)) continue
+            map.set(client_id, { gateway_id, listener_node_id })
+            this.#subscriptions.set(ref, map)
+            this.#connections.get(client_id)?.refs?.add(ref)
 
-            if (gateway_id == this.id) {
-                const socket = this.#connections.get(client_id)
-                socket && socket.refs.add(ref)
-            } else {
-                const gateway = this.#connections.get(gateway_id)
-                const payload: WebSocketSubscribeEvent = { client_id, event: 'subscribe', gateway_id, collection_ref, doc_id }
-                gateway && gateway.send(JSON.stringify(payload))
+            if (gateway_id != this.id) {
+                const target = this.#connections.get(gateway_id)
+                if (target) {
+                    const payload: WebSocketSubscribeEvent = {
+                        client_id,
+                        event: 'subscribe',
+                        gateway_id,
+                        ref,
+                        listener_node_id
+                    }
+                    target.send(JSON.stringify(payload))
+                }
+
             }
         }
     }
+
+    wait(e: RealtimeSubscription) {
+        const map = this.#unsubscribers.get(e.client_id) || new Map<string, Subject<void>>()
+        const $ = map.get(e.ref) || new Subject()
+        map.set(e.ref, $)
+        this.#unsubscribers.set(e.client_id, map)
+        return $.pipe(
+            tap(() => {
+                map.delete(e.ref)
+                map.size == 0 && this.#unsubscribers.delete(e.client_id)
+            })
+        )
+    }
+
 }

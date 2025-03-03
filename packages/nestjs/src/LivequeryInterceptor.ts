@@ -1,16 +1,21 @@
 import { LivequeryRequest } from "@livequery/types";
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
-import { map } from "rxjs/operators";
+import { map, takeUntil } from "rxjs/operators";
 import { PathHelper } from "./helpers/PathHelper.js";
 import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
+import { EMPTY, Observable, Subject } from "rxjs";
+import { ObservableResponse } from "./ObservableResponse.js";
 
 export type RealtimeSubscription = {
+    ref: string,
     client_id: string
     gateway_id: string
-    collection_ref: string,
-    doc_id: string
+    listener_node_id: string
+
 }
+
+
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
@@ -56,25 +61,41 @@ export class LivequeryInterceptor implements NestInterceptor {
         const client_id = req.headers['x-lcid'] || req.headers.socket_id
         const gateway_id = req.headers['x-lgid'] || this.LivequeryWebsocketSync.id
         const cursor = req.query[':after'] || req.query[':before'] || req.query[':around']
-        req.method == 'GET' && !cursor && client_id && this.LivequeryWebsocketSync?.listen([{
-            collection_ref,
-            doc_id,
+        const e = {
             client_id,
-            gateway_id
-        }])
+            gateway_id,
+            ref: req.livequery.ref,
+            listener_node_id: this.LivequeryWebsocketSync.id
+        }
+        req.method == 'GET' && !cursor && client_id ? this.LivequeryWebsocketSync?.listen([e]) : null
 
         return next.handle().pipe(
-            map(data => {
-                if (data.item) {
+            map(response => {
+                if (response instanceof ObservableResponse && this.LivequeryWebsocketSync) {
+                    const unsubcribe$ = this.LivequeryWebsocketSync.wait(e)
+                    const handled = response.handler({
+                        on: { unsubcribe$ },
+                        ref: req.livequery.ref,
+                        req: req.livequery
+                    })
+                    handled.observable.pipe(takeUntil(handled.autoStop == false ? EMPTY : unsubcribe$)).subscribe(
+                        e => this.LivequeryWebsocketSync.broadcast(e)
+                    )
+                    return handled.first
+                }
+                return response
+            }),
+            map(response => {
+                if (response.item) {
                     return {
                         data: {
-                            ...data,
-                            item: hidePrivateFields(data.item.toJSON ? data.item.toJSON() : data.item),
+                            ...response,
+                            item: hidePrivateFields(response.item.toJSON ? response.item.toJSON() : response.item),
                         }
                     }
                 }
                 return {
-                    data
+                    data: response || {}
                 }
             })
         )
