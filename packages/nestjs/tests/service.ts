@@ -2,62 +2,47 @@ import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
 import { UseLivequeryInterceptor } from "../src/LivequeryInterceptor.js";
-import { ApiGatewayLinker, ObservableResponse } from "../src/index.js";
+import { ApiGatewayLinker } from "../src/index.js";
 import { Controller, Get, Module } from "@nestjs/common";
-import { finalize, interval, map } from "rxjs";
-import { WebsocketSyncPayload } from "@livequery/types";
+import { EMPTY, finalize, interval, map } from "rxjs";
+import { UpdatedData, WebsocketSyncPayload } from "@livequery/types";
 
 
 
 @Controller('livequery/pets')
 export class PetCollection {
 
+    constructor(private ws: LivequeryWebsocketSync) { }
+
+    #n = 0
 
     @Get()
     @UseLivequeryInterceptor()
     list() {
-        console.log('Activated')
-        return new ObservableResponse(ctx => {
-            return {
-                first: {
-                    items: [
-                        {
-                            id: '123',
-                            name: 'ijiji'
-                        }
-                    ]
-                },
-                observable: interval(1000).pipe(
-                    map((_, i) => {
-                        const e: WebsocketSyncPayload<{ id: string, length: number }> = {
-                            type: 'modified',
-                            old_ref: 'pets',
-                            new_ref: 'pets',
-                            old_data: {
-                                id: '123',
-                                length: i
-                            },
-                            new_data: {
-                                id: '123',
-                                length: ++i
-                            }
-                        }
-                        return e
-                    }),
-                    finalize(() => {
-                        console.log(`User cancel hahaha`)
-                    })
-                )
-            }
-        })
-        // return {
-        //     items: [
-        //         {
-        //             id: '123',
-        //             legnth: 0
-        //         }
-        //     ]
-        // }
+        console.log(`Pipe`)
+        type Comment = { id: string, text: string }
+        const n = ++this.#n
+        this.ws.pipe<Comment>('pets', o => interval(2000).pipe(
+            map(i => {
+                const e: UpdatedData<Comment> = {
+                    data: { id: '123', text: `[${n}] Comment at ${new Date().toLocaleTimeString()}` },
+                    ref: 'pets',
+                    type: 'added'
+                }
+                console.log(e)
+                return e
+            }),
+            finalize(() => console.log('All un-subscribed'))
+        ))
+
+        return {
+            items: [
+                {
+                    id: '123',
+                    name: 'ijiji'
+                }
+            ]
+        }
     }
 }
 
@@ -70,7 +55,8 @@ export class AppModule { }
 
 const app = await NestFactory.create(AppModule)
 app.useWebSocketAdapter(new WsAdapter(app))
-await app.listen(3003)
+const PORT = Number(process.argv[2] || 3000)
+await app.listen(PORT)
 
 
-ApiGatewayLinker.broadcast('Service API', 3003)
+ApiGatewayLinker.broadcast('Service API', PORT)

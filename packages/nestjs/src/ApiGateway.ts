@@ -236,9 +236,9 @@ export class ApiGateway {
         const client_id = req.headers['x-lcid'] || req.headers['socket_id']
         const headers = {
             ...req.headers,
-            ...client_id ? {
+            ...client_id && this.lws ? {
                 'x-lcid': client_id,
-                'x-lgid': req.headers['x-lgid'] || this.lws.id || ''
+                'x-lgid': req.headers['x-lgid'] || this.lws?.id || ''
             } : {}
         }
 

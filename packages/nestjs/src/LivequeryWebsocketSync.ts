@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile } from "rxjs";
+import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile, Observable, Subscription } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
@@ -51,6 +51,7 @@ export type WebsocketWithMetadata = WebSocket & {
 }
 
 export type SubscriptionMetadata = { gateway_id: string, listener_node_id: string }
+export type SubscriberMetadata = Map<Ref, Subject<'STOP'>>
 
 type GatewayId = string
 type Ref = string
@@ -65,7 +66,7 @@ export class LivequeryWebsocketSync {
 
     #connections = new Map<GatewayId | ClientId, WebsocketWithMetadata>()
     #subscriptions = new Map<Ref, Map<ClientId, SubscriptionMetadata>>()
-    #unsubscribers = new Map<ClientId, Map<Ref, Subject<void>>>()
+    #pipes = new Map<Ref, { o: Observable<any>, s: Subscription }>()
 
 
     // NODE METADATA
@@ -100,6 +101,19 @@ export class LivequeryWebsocketSync {
             }
 
 
+        })
+    }
+
+
+    pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Observable<UpdatedData<T>> | undefined | void) {
+        if(!this.#subscriptions.has(ref)) return 
+        const m = this.#pipes.get(ref)
+        const merged = handler(m?.o)
+        if (!merged) return
+        m?.s.unsubscribe()
+        this.#pipes.set(ref, {
+            o: merged,
+            s: merged.subscribe(this.changes)
         })
     }
 
@@ -256,17 +270,21 @@ export class LivequeryWebsocketSync {
             ...body.ref ? [body.ref] : [],
             ...body.refs || []
         ]
-        
         for (const ref of refs) {
 
             const map = this.#subscriptions.get(ref)
             if (!map) return
             const routing = map.get(client_id)
             map.delete(client_id)
-            map.size == 0 && this.#subscriptions.delete(ref)
+
+            if (map.size == 0) {
+                const $ = this.#pipes.get(ref)
+                $?.s?.unsubscribe()
+                this.#subscriptions.delete(ref)
+            }
 
             this.#connections.get(client_id)?.refs?.delete(ref)
-            this.#unsubscribers.get(client_id)?.get(ref)?.next()
+            // this.#subscribers.get(client_id)?.get(ref)?.next('STOP')
 
 
             // Need remote unsubscribe
@@ -277,7 +295,8 @@ export class LivequeryWebsocketSync {
                     gateway && gateway.send(JSON.stringify(payload))
                 }
             }
-        }
+        } 
+
     }
 
     private handleDisconnect(socket: WebsocketWithMetadata) {
@@ -285,13 +304,15 @@ export class LivequeryWebsocketSync {
         if (socket.gateway) {
             for (const [ref, map] of this.#subscriptions) {
                 for (const [client_id, { gateway_id }] of map) {
-                    if(gateway_id == socket.id) {
-                        map.delete(client_id)
-                        this.#unsubscribers.get(client_id)?.get(ref)?.next()
+                    if (gateway_id == socket.id) {
+                        map.delete(client_id) 
                     }
-
                 }
-                map.size == 0 && this.#subscriptions.delete(ref)
+                if (map.size == 0) {
+                    const $ = this.#pipes.get(ref)
+                    $?.s?.unsubscribe()
+                    this.#subscriptions.delete(ref)
+                }
             }
         } else {
             const refs = [...socket.refs || []]
@@ -306,8 +327,9 @@ export class LivequeryWebsocketSync {
 
         for (const { ref, client_id, gateway_id, listener_node_id } of e) {
             if (client_id == gateway_id) continue
-            if (gateway_id == this.id && !this.#connections.has(client_id)) {
-                if (listener_node_id != this.id) { 
+            const socket = this.#connections.get(client_id)
+            if (gateway_id == this.id && (!socket || socket.refs?.has(ref))) {
+                if (listener_node_id != this.id) {
                     const target = this.#connections.get(listener_node_id)
                     if (target) {
                         const e: WebSocketUnsubscribeEvent = {
@@ -342,17 +364,5 @@ export class LivequeryWebsocketSync {
         }
     }
 
-    wait(e: RealtimeSubscription) {
-        const map = this.#unsubscribers.get(e.client_id) || new Map<string, Subject<void>>()
-        const $ = map.get(e.ref) || new Subject()
-        map.set(e.ref, $)
-        this.#unsubscribers.set(e.client_id, map)
-        return $.pipe(
-            tap(() => {
-                map.delete(e.ref)
-                map.size == 0 && this.#unsubscribers.delete(e.client_id)
-            })
-        )
-    }
 
 }
