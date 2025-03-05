@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile, Observable, Subscription } from "rxjs";
+import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile, Observable, Subscription, mergeMap } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
@@ -105,15 +105,16 @@ export class LivequeryWebsocketSync {
     }
 
 
-    pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Observable<UpdatedData<T>> | undefined | void) {
-        if(!this.#subscriptions.has(ref)) return 
+    pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Promise<Observable<UpdatedData<T>>> | Observable<UpdatedData<T>> | undefined | void) {
+        if (!this.#subscriptions.has(ref)) return
         const m = this.#pipes.get(ref)
         const merged = handler(m?.o)
         if (!merged) return
         m?.s.unsubscribe()
+        const o = merged instanceof Promise ? of(1).pipe(mergeMap(() => merged), switchMap($ => $)) : merged
         this.#pipes.set(ref, {
-            o: merged,
-            s: merged.subscribe(this.changes)
+            o,
+            s: o.subscribe(this.changes)
         })
     }
 
@@ -295,7 +296,7 @@ export class LivequeryWebsocketSync {
                     gateway && gateway.send(JSON.stringify(payload))
                 }
             }
-        } 
+        }
 
     }
 
@@ -305,7 +306,7 @@ export class LivequeryWebsocketSync {
             for (const [ref, map] of this.#subscriptions) {
                 for (const [client_id, { gateway_id }] of map) {
                     if (gateway_id == socket.id) {
-                        map.delete(client_id) 
+                        map.delete(client_id)
                     }
                 }
                 if (map.size == 0) {

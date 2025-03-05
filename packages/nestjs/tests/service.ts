@@ -4,36 +4,50 @@ import { WsAdapter } from '@nestjs/platform-ws'
 import { UseLivequeryInterceptor } from "../src/LivequeryInterceptor.js";
 import { ApiGatewayLinker } from "../src/index.js";
 import { Controller, Get, Module } from "@nestjs/common";
-import { EMPTY, finalize, interval, map } from "rxjs";
-import { UpdatedData, WebsocketSyncPayload } from "@livequery/types";
+import { interval, mergeAll, mergeMap } from "rxjs";
+import { UpdatedData } from "@livequery/types";
 
 
+type Comment = { id: string, text: string }
+
+
+async function getDatabaseClient() {
+    return {
+        async getData(n: number) {
+            const comments: Array<UpdatedData<Comment>> = [{
+                data: { id: '123', text: `[${n}] Comment at ${new Date().toLocaleTimeString()}` },
+                ref: 'pets',
+                type: 'added'
+            }]
+            return comments
+        }
+    }
+}
 
 @Controller('livequery/pets')
 export class PetCollection {
 
     constructor(private ws: LivequeryWebsocketSync) { }
 
-    #n = 0
 
     @Get()
     @UseLivequeryInterceptor()
     list() {
         console.log(`Pipe`)
-        type Comment = { id: string, text: string }
-        const n = ++this.#n
-        this.ws.pipe<Comment>('pets', o => interval(2000).pipe(
-            map(i => {
-                const e: UpdatedData<Comment> = {
-                    data: { id: '123', text: `[${n}] Comment at ${new Date().toLocaleTimeString()}` },
-                    ref: 'pets',
-                    type: 'added'
-                }
-                console.log(e)
-                return e
-            }),
-            finalize(() => console.log('All un-subscribed'))
-        ))
+
+        this.ws.pipe<Comment>('pets', async o => {
+
+            if (o) return
+            const client = await getDatabaseClient()
+
+            return interval(2000).pipe(
+                mergeMap(async n => {
+                    const comments = await client.getData(n)
+                    return comments
+                }),
+                mergeAll()
+            )
+        })
 
         return {
             items: [
