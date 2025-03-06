@@ -2,7 +2,7 @@ import { NestFactory } from "@nestjs/core";
 import { LivequeryWebsocketSync } from "../src/LivequeryWebsocketSync.js";
 import { WsAdapter } from '@nestjs/platform-ws'
 import { UseLivequeryInterceptor } from "../src/LivequeryInterceptor.js";
-import { ApiGatewayLinker } from "../src/index.js";
+import { ApiGatewayLinker, LivequeryRequest } from "../src/index.js";
 import { Controller, Get, Module } from "@nestjs/common";
 import { interval, mergeAll, mergeMap } from "rxjs";
 import { UpdatedData } from "@livequery/types";
@@ -24,7 +24,7 @@ async function getDatabaseClient() {
     }
 }
 
-@Controller('livequery/pets')
+@Controller('livequery/comments')
 export class PetCollection {
 
     constructor(private ws: LivequeryWebsocketSync) { }
@@ -32,16 +32,24 @@ export class PetCollection {
 
     @Get()
     @UseLivequeryInterceptor()
-    list() {
+    list(@LivequeryRequest() req: LivequeryRequest) {
         console.log(`Pipe`)
 
-        this.ws.pipe<Comment>('pets', async o => {
+        this.ws.pipe<Comment>(req.ref, async o => {
 
+            // Nếu đã có Observable rồi thì bỏ qua 
+            // không làm gì cả 
             if (o) return
+
+            // Nếu chưa có gì, tạo mới Observable
+            // Giả sử cần thực hiện vài tác vụ async
+            // ví dụ gọi API hoặc gọi ra ngoài chẳng hạn 
             const client = await getDatabaseClient()
 
-            return interval(2000).pipe(
+            // Trả về Observable
+            return interval(1000).pipe(
                 mergeMap(async n => {
+                    // Gọi DB hoặc gọi ra ngoài 
                     const comments = await client.getData(n)
                     return comments
                 }),

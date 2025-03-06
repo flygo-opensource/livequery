@@ -2,7 +2,7 @@ import { applyDecorators, Provider, UseInterceptors } from "@nestjs/common";
 import { LivequeryDatasourceInterceptors, $__datasource_factory_token } from "../LivequeryDatasourceInterceptors.js";
 import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
 import { PathHelper } from "./PathHelper.js";
-import { merge, Observable } from "rxjs";
+import { Observable } from "rxjs";
 import { LivequeryRequest, WebsocketSyncPayload } from "@livequery/types";
 import { LivequeryWebsocketSync } from "../LivequeryWebsocketSync.js";
 

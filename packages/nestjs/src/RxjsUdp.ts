@@ -1,5 +1,5 @@
 import { createSocket, RemoteInfo } from "dgram"
-import { EMPTY, filter, finalize, firstValueFrom, fromEvent, map, merge, mergeMap, Observable, of, retry, tap, timer } from "rxjs"
+import { EMPTY, filter, fromEvent, map, merge, mergeMap, Observable, of, retry, tap, timer } from "rxjs"
 import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG, UDP_MULTICAST_ADDRESS, UDP_LOCAL_PORT, UDP_PUBLIC_PORT } from "./const.js"
 import { randomUUID } from "crypto"
 import { networkInterfaces } from "os"

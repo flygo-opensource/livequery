@@ -3,12 +3,10 @@ import * as http from 'http';
 import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_DEBUG } from './const.js';
+import { LIVEQUERY_API_GATEWAY_DEBUG } from './const.js';
 import { RxjsUdp, UdpHello } from './RxjsUdp.js';
-import { mergeMap, filter, debounceTime, groupBy, tap } from 'rxjs/operators'
-import { merge, Subscription, of } from 'rxjs'
-import { generateKeyPairSync } from 'crypto';
-import jwt from 'jsonwebtoken'
+import { mergeMap, filter, debounceTime, groupBy } from 'rxjs/operators'
+import { Subscription } from 'rxjs'
 
 export type Routing = {
     [ref: string]: {

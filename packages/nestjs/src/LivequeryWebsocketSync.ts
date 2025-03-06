@@ -109,7 +109,7 @@ export class LivequeryWebsocketSync {
         if (!this.#subscriptions.has(ref)) return
         const m = this.#pipes.get(ref)
         const merged = handler(m?.o)
-        if (!merged) return
+        if (!merged || merged == m?.o) return
         m?.s.unsubscribe()
         const o = merged instanceof Promise ? of(1).pipe(mergeMap(() => merged), switchMap($ => $)) : merged
         this.#pipes.set(ref, {
