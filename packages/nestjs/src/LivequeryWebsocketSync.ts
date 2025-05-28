@@ -105,17 +105,22 @@ export class LivequeryWebsocketSync {
     }
 
 
-    pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Promise<Observable<UpdatedData<T>>> | Observable<UpdatedData<T>> | undefined | void) {
-        if (!this.#subscriptions.has(ref)) return
-        const m = this.#pipes.get(ref)
-        const merged = handler(m?.o)
-        if (!merged || merged == m?.o) return
-        m?.s.unsubscribe()
-        const o = merged instanceof Promise ? of(1).pipe(mergeMap(() => merged), switchMap($ => $)) : merged
+    async pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Promise<Observable<UpdatedData<T>>> | Observable<UpdatedData<T>> | undefined | void) {
+        if (!this.#subscriptions.has(ref)) return;
+        const m = this.#pipes.get(ref);
+        const merged = handler(m?.o);
+        const newO = merged instanceof Promise ? await merged : merged
+        if (!newO || newO == m?.o) return
+        m?.s.unsubscribe();
         this.#pipes.set(ref, {
-            o,
-            s: o.subscribe(this.changes)
-        })
+            o: newO,
+            s: newO.pipe(
+                tap(d => console.log({ ...d, time: Date.now() })),
+                finalize(() => {
+                    this.#pipes.delete(ref)
+                })
+            ).subscribe(data => this.changes.next(data))
+        });
     }
 
     connect(url: string, auth: string, ondisconect?: Function) {
