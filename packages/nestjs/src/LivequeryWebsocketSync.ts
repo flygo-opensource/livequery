@@ -109,13 +109,12 @@ export class LivequeryWebsocketSync {
         if (!this.#subscriptions.has(ref)) return;
         const m = this.#pipes.get(ref);
         const merged = handler(m?.o);
-        const newO = merged instanceof Promise ? await merged : merged
-        if (!newO || newO == m?.o) return
+        const o = merged instanceof Promise ? await merged : merged
+        if (!o || o == m?.o) return
         m?.s.unsubscribe();
         this.#pipes.set(ref, {
-            o: newO,
-            s: newO.pipe(
-                tap(d => console.log({ ...d, time: Date.now() })),
+            o,
+            s: o.pipe(
                 finalize(() => {
                     this.#pipes.delete(ref)
                 })
