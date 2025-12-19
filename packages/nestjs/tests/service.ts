@@ -76,7 +76,7 @@ export class PetCollection {
 export class AppModule { }
 
 const app = await NestFactory.create(AppModule)
-app.useWebSocketAdapter(new WsAdapter(app))
+app.useWebSocketAdapter(new WsAdapter(app) as any )
 const PORT = Number(process.argv[2] || 3000)
 await app.listen(PORT)
 

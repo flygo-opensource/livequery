@@ -1,14 +1,11 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
-import { map, mergeMap, Observable } from 'rxjs';
-import { ModuleRef } from '@nestjs/core'
-import { LivequeryDatasource } from './helpers/createDatasourceMapper.js';
+import { map, mergeMap } from 'rxjs';
+import { ModuleRef, Reflector } from '@nestjs/core'
 import { LivequeryBaseEntity } from '@livequery/types';
 import { hidePrivateFields } from './helpers/hidePrivateFields.js';
+import { DatatasourceConnectionMetadata } from './helpers/createDatasourceMapper.js';
+import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
 
-
-
-export const LivequeryDatasourceList = new Map<{ new(...args): LivequeryDatasource }, LivequeryDatasource>()
-export const $__datasource_factory_token = Symbol()
 
 export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
     constructor(public readonly mapper: (item: T) => T) { }
@@ -17,18 +14,26 @@ export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
 @Injectable()
 export class LivequeryDatasourceInterceptors implements NestInterceptor {
 
-    constructor(private moduleRef: ModuleRef) { }
+    constructor(
+        private moduleRef: ModuleRef,
+        private reflector: Reflector,
+        private ws: LivequeryWebsocketSync
+    ) { }
 
     async intercept(ctx: ExecutionContext, next: CallHandler) {
-
-        const token = Reflect.getMetadata($__datasource_factory_token, ctx.getHandler())
-        const datasource = LivequeryDatasourceList.has(token) ? LivequeryDatasourceList.get(token) : this.moduleRef.get(token)
-
 
         return next.handle().pipe(
             mergeMap(async rs => {
                 const req = ctx.switchToHttp().getRequest()
-                const lrs = await datasource.query(req.livequery)
+                const { factory, options } = await this.reflector.get(LivequeryDatasourceInterceptors, ctx.getHandler()) as {
+                    factory: Function
+                    options: DatatasourceConnectionMetadata
+                }
+                const datasource = await this.moduleRef.get(factory)
+                this.ws.link(datasource)
+                const connection_token = typeof options.connection === 'function' ? await options.connection(req.livequery) : options.connection
+                const connection = await this.moduleRef.get(connection_token, { strict: false })
+                const lrs = await datasource.query(req.livequery, options, connection)
 
                 if (rs instanceof LivequeryItemMapper) {
                     if (lrs.item) {
@@ -52,7 +57,7 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
                 }
                 return rs || lrs
             }),
-            map(data => { 
+            map(data => {
                 if (data.items) {
                     return {
                         ...data,
