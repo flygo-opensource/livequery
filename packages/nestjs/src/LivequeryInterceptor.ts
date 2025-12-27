@@ -71,15 +71,11 @@ export class LivequeryInterceptor implements NestInterceptor {
             map(response => {
                 if (response.item) {
                     return {
-                        data: {
-                            ...response,
-                            item: hidePrivateFields(response.item.toJSON ? response.item.toJSON() : response.item),
-                        }
+                        ...response,
+                        item: hidePrivateFields(response.item.toJSON ? response.item.toJSON() : response.item),
                     }
                 }
-                return {
-                    data: response || {}
-                }
+                return response
             })
         )
     }
