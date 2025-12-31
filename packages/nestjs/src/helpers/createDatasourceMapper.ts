@@ -1,31 +1,23 @@
 import { applyDecorators, SetMetadata, UseInterceptors } from "@nestjs/common";
-import { LivequeryDatasourceInterceptors } from "../LivequeryDatasourceInterceptors.js";
+import { DatatasourceRouteMetadata, LivequeryDatasourceInterceptors, LivequeryDatasourceOptions } from "../LivequeryDatasourceInterceptors.js";
 import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
-import { LivequeryRequest, WebsocketSyncPayload } from "@livequery/types";
-import { Subject } from "rxjs/internal/Subject";
 
-export type DatatasourceConnectionMetadata = {
-    connection: string | symbol | (
-        (req: LivequeryRequest) => symbol | string | Promise<symbol | string>
+
+export const createDatasourceMapper = <Config, RouteOptions>(
+    { config, resolver, watcher }: LivequeryDatasourceOptions<Config, RouteOptions>
+) => (options: RouteOptions) => {
+    const metadata: DatatasourceRouteMetadata<Config, RouteOptions> = {
+        options,
+        resolver 
+    }
+    LivequeryDatasourceInterceptors.setConfig(resolver, {
+        config,
+        resolver,
+        watcher
+    })
+    return applyDecorators(
+        UseLivequeryInterceptor(),
+        UseInterceptors(LivequeryDatasourceInterceptors),
+        SetMetadata(LivequeryDatasourceInterceptors, metadata)
     )
 }
-
-export type LivequeryDatasource<T> = Subject<WebsocketSyncPayload<any>> & {
-    query(query: LivequeryRequest, options: T, connection: any): any
-}
-
-
-export const createDatasourceMapper = <A>(
-    factory: { new(...args: any[]): LivequeryDatasource<A> },
-    defaultOptions: Partial<A> & DatatasourceConnectionMetadata
-) => (options: A) => applyDecorators(
-    UseLivequeryInterceptor(),
-    UseInterceptors(LivequeryDatasourceInterceptors),
-    SetMetadata(LivequeryDatasourceInterceptors, {
-        factory,
-        options: {
-            ...defaultOptions,
-            ...options
-        }
-    })
-)

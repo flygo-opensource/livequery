@@ -1,6 +1,6 @@
 
 import { ConnectedSocket, MessageBody, SubscribeMessage, WebSocketGateway } from "@nestjs/websockets";
-import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile, Observable, Subscription, mergeMap } from "rxjs";
+import { Subject, tap, switchMap, retry, timer, BehaviorSubject, takeWhile, Observable, Subscription } from "rxjs";
 import { RealtimeSubscription } from "./LivequeryInterceptor.js";
 import { UpdatedData, WebsocketSyncPayload, LivequeryBaseEntity } from "@livequery/types";
 
@@ -8,8 +8,8 @@ import WebSocket from 'ws'
 import { of, fromEvent, map, finalize, merge, EMPTY, filter, mergeAll } from 'rxjs'
 import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 import { randomUUID } from "crypto";
-import { RxjsUdp } from "./RxjsUdp.js";
-import { LivequeryDatasource } from "./helpers/createDatasourceMapper.js";
+import { RxjsUdp } from "./RxjsUdp.js"; 
+import { LivequeryDatasource } from "./LivequeryDatasourceInterceptors.js";
 
 
 export type WebSocketHelloEvent = {
@@ -371,8 +371,8 @@ export class LivequeryWebsocketSync {
     }
 
 
-    #linkded = new Map<LivequeryDatasource<any>, Subscription>()
-    link(ds: LivequeryDatasource<any>) {
+    #linkded = new Map<LivequeryDatasource<any,any>, Subscription>()
+    link(ds: LivequeryDatasource<any,any>) {
         if (this.#linkded.has(ds)) return
         this.#linkded.set(ds,
             ds.pipe(

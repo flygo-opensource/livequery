@@ -5,13 +5,18 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "2.0.50",
+    "version": "2.0.52",
     "description": "Nestjs decorators for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
     "files": [
         "build/**/*"
     ],
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "build": "tsc -b .",
+        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    },
     "exports": {
         ".": {
             "import": {
@@ -23,30 +28,19 @@
     "type": "module",
     "devDependencies": {
         "@livequery/types": "2.0.7",
-        "@nestjs/common": "^11.0.11",
-        "@nestjs/core": "x",
-        "@nestjs/platform-express": "^11.0.10",
         "@types/express": "x",
-        "@types/jsonwebtoken": "x",
         "@types/node": "x",
         "@types/ws": "^8.5.10",
-        "jsonwebtoken": "x",
-        "reflect-metadata": "^0.2.2",
         "rxjs": "x",
         "tslib": "^2.6.1",
         "typescript": "^5.1.6"
     },
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "build": "tsc -b .",
-        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
-    },
-    "dependencies": {
-        "@nestjs/platform-socket.io": "^11.0.10",
+    "peerDependencies": {
+        "reflect-metadata": "x",
+        "@nestjs/core": "*",
+        "@nestjs/common": "*",
         "@nestjs/platform-ws": "^11.0.10",
         "@nestjs/websockets": "^10.3.7",
-        "express": "^4.21.2",
-        "socket.io": "^4.7.5",
-        "socket.io-client": "^4.7.5"
+        "express": "^4.21.2" 
     }
 }
