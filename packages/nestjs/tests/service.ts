@@ -32,8 +32,7 @@ export class PetCollection {
 
     @Get()
     @UseLivequeryInterceptor()
-    list(@LivequeryRequest() req: LivequeryRequest) {
-        console.log(`Pipe`)
+    list(@LivequeryRequest() req: LivequeryRequest) { 
 
         this.ws.pipe<Comment>(req.ref, async o => {
 
