@@ -1,5 +1,5 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
-import { map, mergeMap, Observable } from 'rxjs';
+import { map, mergeMap, Subject } from 'rxjs';
 import { DiscoveryService, ModuleRef, Reflector } from '@nestjs/core'
 import { LivequeryBaseEntity, LivequeryRequest, WebsocketSyncPayload } from '@livequery/types';
 import { hidePrivateFields } from './helpers/hidePrivateFields.js';
@@ -11,15 +11,14 @@ export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
 
 
 
-export type LivequeryDatasource<RouteOptions> = Observable<WebsocketSyncPayload<LivequeryBaseEntity>> & {
-    init: (routes: Array<{ path: string, options: RouteOptions }>) => any
-    query?: (query: LivequeryRequest, options: RouteOptions) => any
+export type LivequeryDatasource<Config, RouteOptions> = Subject<WebsocketSyncPayload<LivequeryBaseEntity>> & {
+    init(config: Config, routes: Array<{ path: string, method: number, options: RouteOptions }>): Promise<void>
+    query: (query: LivequeryRequest, options: RouteOptions) => Promise<any>
 }
-
 
 export type DatatasourceRouteMetadata<RouteOptions> = {
     datasource: Symbol,
-    options: RouteOptions,
+    options: RouteOptions
 }
 
 
@@ -34,15 +33,14 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
     ) { }
 
 
-
-    getRoutes<Options>(token: Symbol) {
+    getRoutes<Options>(token?: Symbol) {
         const controllers = this.discovery.getControllers()
         return controllers.map(controller => {
-            const methods = Object.getOwnPropertyNames(controller.metatype.prototype) || []
-            return methods.map(method => {
-                const fn = controller.metatype.prototype[method]
-                const options = this.reflector.get(LivequeryDatasourceInterceptors, fn) as DatatasourceRouteMetadata<Options>
-                if (!options || options.datasource != token) return []
+            const names = Object.getOwnPropertyNames(controller.metatype.prototype) || []
+            return names.map(name => {
+                const fn = controller.metatype.prototype[name]
+                const metadata = this.reflector.get(LivequeryDatasourceInterceptors, fn) as DatatasourceRouteMetadata<Options>
+                if (!metadata || (token && metadata.datasource != token)) return []
                 const cpaths = [Reflect.getMetadata('path', controller.metatype)].flat(2)
                 const mpaths = [Reflect.getMetadata('path', fn)].flat(2)
                 const paths = cpaths.map(a => mpaths.map(b => {
@@ -51,9 +49,12 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
                     if (x == '' || y == '') return `${x}${y}`
                     return `${x}/${y}`
                 })).flat(2)
-
-
-                return paths.map(path => ({ path, options: options.options }))
+                const method = Reflect.getMetadata('method', controller.metatype.prototype[name])
+                return paths.map(path => ({
+                    path,
+                    options: metadata.options,
+                    method
+                }))
             })
         }).flat(2)
     }
@@ -66,7 +67,7 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
                 const { options, datasource } = await this.reflector.get(LivequeryDatasourceInterceptors, ctx.getHandler()) as (
                     DatatasourceRouteMetadata<{}>
                 )
-                const ds = await this.moduleRef.get(datasource as any ) as LivequeryDatasource<any>
+                const ds = await this.moduleRef.get(datasource as any) as LivequeryDatasource<any, any>
                 const lrs = await ds.query(req.livequery, options)
                 if (rs instanceof LivequeryItemMapper) {
                     if (lrs.item) {

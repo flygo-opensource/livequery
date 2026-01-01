@@ -370,15 +370,11 @@ export class LivequeryWebsocketSync {
         }
     }
 
-
-    #linkded = new Map<LivequeryDatasource<any>, Subscription>()
-    link(ds: LivequeryDatasource<any>) {
-        if (this.#linkded.has(ds)) return
-        this.#linkded.set(ds,
-            ds.pipe(
-                tap(event => this.broadcast(event))
-            ).subscribe()
-        )
+ 
+    link($: Observable< WebsocketSyncPayload<LivequeryBaseEntity>>) {
+        return $.pipe(
+            tap(event => this.broadcast(event))
+        ).subscribe()
     }
 
 
