@@ -63,7 +63,7 @@ const ENDPOINT_RESTARTED = 'ENDPOINT_RESTARTED'
 export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates'
 
 @WebSocketGateway({ path: WEBSOCKET_PATH })
-export class LivequeryWebsocketSync {
+export class LivequeryWebsocketSync extends Subject<UpdatedData> {
 
     #connections = new Map<GatewayId | ClientId, WebsocketWithMetadata>()
     #subscriptions = new Map<Ref, Map<ClientId, SubscriptionMetadata>>()
@@ -72,11 +72,11 @@ export class LivequeryWebsocketSync {
 
     // NODE METADATA
     public readonly id = RxjsUdp.id
-    public readonly auth = randomUUID()
-    private readonly changes = new Subject<UpdatedData>()
+    public readonly auth = randomUUID() 
 
     constructor() {
-        this.changes.subscribe(({ ref, data, type }) => {
+        super()
+        this.subscribe(({ ref, data, type }) => {
 
             const targets = [
                 ... this.#subscriptions.get(ref) || new Map<ClientId, SubscriptionMetadata>(),
@@ -106,7 +106,7 @@ export class LivequeryWebsocketSync {
     }
 
 
-    async pipe<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Promise<Observable<UpdatedData<T>>> | Observable<UpdatedData<T>> | undefined | void) {
+    async link<T extends LivequeryBaseEntity>(ref: string, handler: (o?: Observable<UpdatedData<T>>) => Promise<Observable<UpdatedData<T>>> | Observable<UpdatedData<T>> | undefined | void) {
         if (!this.#subscriptions.has(ref)) return;
         const m = this.#pipes.get(ref);
         const merged = handler(m?.o);
@@ -119,7 +119,7 @@ export class LivequeryWebsocketSync {
                 finalize(() => {
                     this.#pipes.delete(ref)
                 })
-            ).subscribe(data => this.changes.next(data))
+            ).subscribe(data => this.next(data))
         });
     }
 
@@ -188,60 +188,60 @@ export class LivequeryWebsocketSync {
 
     }
 
-    broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
-        const id = event.old_data?.id || event.new_data?.id
-        if (!id) return
+    // broadcast<T extends LivequeryBaseEntity = LivequeryBaseEntity>(event: WebsocketSyncPayload<T>) {
+    //     const id = event.old_data?.id || event.new_data?.id
+    //     if (!id) return
 
-        if (event.type == 'added') {
-            this.changes.next({
-                data: hidePrivateFields({ ...event.new_data, id }),
-                ref: event.new_ref,
-                type: event.type
-            })
-            return
-        }
+    //     if (event.type == 'added') {
+    //         this.changes.next({
+    //             data: hidePrivateFields({ ...event.new_data, id }),
+    //             ref: event.new_ref,
+    //             type: event.type
+    //         })
+    //         return
+    //     }
 
-        if (event.type == 'modified') {
-            if (event.old_ref == event.new_ref) {
-                const changes = {
-                    ...Object
-                        .keys(event.new_data)
-                        .filter(key => !key.startsWith('_') && event.new_data[key] != event.old_data[key])
-                        .reduce(
-                            (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
-                        ),
-                    id
-                }
-                this.changes.next({
-                    type: 'modified',
-                    ref: event.new_ref,
-                    data: changes
-                })
-            } else {
-                this.changes.next({
-                    type: 'removed',
-                    ref: event.old_ref,
-                    data: { id }
-                })
+    //     if (event.type == 'modified') {
+    //         if (event.old_ref == event.new_ref) {
+    //             const changes = {
+    //                 ...Object
+    //                     .keys(event.new_data)
+    //                     .filter(key => !key.startsWith('_') && event.new_data[key] != event.old_data[key])
+    //                     .reduce(
+    //                         (p, key) => ({ ...p || {}, [key]: event.new_data[key] }), {}
+    //                     ),
+    //                 id
+    //             }
+    //             this.changes.next({
+    //                 type: 'modified',
+    //                 ref: event.new_ref,
+    //                 data: changes
+    //             })
+    //         } else {
+    //             this.changes.next({
+    //                 type: 'removed',
+    //                 ref: event.old_ref,
+    //                 data: { id }
+    //             })
 
-                this.changes.next({
-                    type: 'added',
-                    ref: event.new_ref,
-                    data: hidePrivateFields({ ...event.old_data || {}, ...event.new_data || {}, id })
-                })
-            }
-            return
-        }
+    //             this.changes.next({
+    //                 type: 'added',
+    //                 ref: event.new_ref,
+    //                 data: hidePrivateFields({ ...event.old_data || {}, ...event.new_data || {}, id })
+    //             })
+    //         }
+    //         return
+    //     }
 
-        if (event.type == 'removed') {
-            this.changes.next({
-                data: { id },
-                ref: event.old_ref,
-                type: event.type
-            })
-            return
-        }
-    }
+    //     if (event.type == 'removed') {
+    //         this.changes.next({
+    //             data: { id },
+    //             ref: event.old_ref,
+    //             type: event.type
+    //         })
+    //         return
+    //     }
+    // }
 
     @SubscribeMessage('start')
     start(
@@ -267,7 +267,7 @@ export class LivequeryWebsocketSync {
 
 
     @SubscribeMessage('unsubscribe')
-    unsubscribe(
+    unref(
         @ConnectedSocket() socket: WebsocketWithMetadata,
         @MessageBody() body: { ref?: string, client_id?: string, refs?: string[] }
     ) {
@@ -322,7 +322,7 @@ export class LivequeryWebsocketSync {
             }
         } else {
             const refs = [...socket.refs || []]
-            refs.length > 0 && this.unsubscribe(socket, { refs })
+            refs.length > 0 && this.unref(socket, { refs })
         }
         this.#connections.delete(socket.id)
 
@@ -369,14 +369,7 @@ export class LivequeryWebsocketSync {
             }
         }
     }
-
  
-    link($: Observable< WebsocketSyncPayload<LivequeryBaseEntity>>) {
-        return $.pipe(
-            tap(event => this.broadcast(event))
-        ).subscribe()
-    }
-
 
 
 }

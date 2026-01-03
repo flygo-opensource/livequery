@@ -34,7 +34,7 @@ export class PetCollection {
     @UseLivequeryInterceptor()
     list(@LivequeryRequest() req: LivequeryRequest) { 
 
-        this.ws.pipe<Comment>(req.ref, async o => {
+        this.ws.link<Comment>(req.ref, async o => {
 
             // Nếu đã có Observable rồi thì bỏ qua 
             // không làm gì cả 

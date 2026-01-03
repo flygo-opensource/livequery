@@ -3,6 +3,7 @@ import { map, mergeMap, Subject } from 'rxjs';
 import { DiscoveryService, ModuleRef, Reflector } from '@nestjs/core'
 import { LivequeryBaseEntity, LivequeryRequest, WebsocketSyncPayload } from '@livequery/types';
 import { hidePrivateFields } from './helpers/hidePrivateFields.js';
+import { PathHelper } from './helpers/PathHelper.js';
 
 
 export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
@@ -46,8 +47,9 @@ export class LivequeryDatasourceInterceptors implements NestInterceptor {
                 const paths = cpaths.map(a => mpaths.map(b => {
                     const x = (a || '').trim().replace(/^\/+|\/+$/g, '')
                     const y = (b || '').trim().replace(/^\/+|\/+$/g, '')
-                    if (x == '' || y == '') return `${x}${y}`
-                    return `${x}/${y}`
+                    const joined = (x == '' || y == '') ? `${x}${y}` : `${x}/${y}`
+                    const { ref } = PathHelper.parseHttpRequestPath(joined)
+                    return ref
                 })).flat(2)
                 const method = Reflect.getMetadata('method', controller.metatype.prototype[name])
                 return paths.map(path => ({

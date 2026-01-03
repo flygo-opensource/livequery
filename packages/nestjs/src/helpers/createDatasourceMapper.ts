@@ -4,7 +4,7 @@ import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
 import { RouterOptions } from "express";
 import { Observable } from 'rxjs'
 import { ModuleRef } from "@nestjs/core";
-import { WebsocketSyncPayload } from "@livequery/types";
+import { UpdatedData } from "@livequery/types";
 import { LivequeryWebsocketSync } from "../LivequeryWebsocketSync.js";
 
 export type ResolverRoutes = Array<{
@@ -21,7 +21,7 @@ export type LivequeryDatasourceWatcher<Config, RouteOptions> = {
         config: Config,
         routes: Array<{ path: string, method: number, options: RouteOptions }>,
         ds: LivequeryDatasource<Config, RouteOptions>
-    ): Observable<WebsocketSyncPayload<any>>
+    ): Observable<UpdatedData<any>>
 }
 
 export type LivequeryDatasourceWatcherFactory<Config, RouteOptions> = {
@@ -67,7 +67,11 @@ export const createDatasourceMapper = <Config, RouteOptions>({
             await ds.init(config, routes)
             if (watcher) {
                 const w = await moduleRef.create<LivequeryDatasourceWatcher<Config, RouteOptions>>(watcher)
-                ws.link(w.watch(config, routes, ds))
+                w.watch(config, routes, ds).subscribe({
+                    next(value) {
+                        ws.next(value)
+                    },
+                })
             }
             return ds
         }
