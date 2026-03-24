@@ -3,10 +3,11 @@ import * as http from 'http';
 import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
-import { LIVEQUERY_API_GATEWAY_DEBUG } from './const.js';
-import { RxjsUdp, UdpHello } from './RxjsUdp.js';
 import { mergeMap, filter, debounceTime, groupBy } from 'rxjs/operators'
-import { Subscription } from 'rxjs'
+import { BehaviorSubject, Subscription, of, tap } from 'rxjs'
+import { NodeMetadata, RxjsUdp } from './RxjsUdp.js';
+import { randomUUID } from 'crypto';
+import { API_GATEWAY_NAMESPACE, LIVEQUERY_API_GATEWAY_DEBUG, NODE_ID } from './const.js';
 
 export type Routing = {
     [ref: string]: {
@@ -23,7 +24,7 @@ export type Routing = {
 
 
 
-export type ServiceApiMetadata = {
+export type ServiceApiMetadata = NodeMetadata<{
     role: 'service' | 'gateway',
     name: string
     port: number
@@ -35,7 +36,9 @@ export type ServiceApiMetadata = {
     wsauth?: string
     linked: string[]
     target?: string
-}
+}>
+
+
 export type ServiceApiStatus = {
     id: string
     online: boolean
@@ -56,16 +59,24 @@ export class ApiGateway {
     #services = new Map<string, { host: string, metadata: ServiceApiMetadata, subscription?: Subscription }>
     #routing: Routing = {}
 
-
     constructor(
         @Optional() private lws: LivequeryWebsocketSync
     ) {
         const udp = new RxjsUdp<ServiceApiMetadata>()
 
-        udp.pipe(
+        udp.link(new BehaviorSubject<ServiceApiMetadata>({
+            name: 'API gateway',
+            paths: [],
+            port: 0,
+            role: 'gateway',
+            linked: [... this.#services.keys()],
+            host: '',
+            node_id: NODE_ID,
+            namespace: API_GATEWAY_NAMESPACE
+        })).pipe( 
             filter(m => m.role == 'service'),
-            filter(m => !this.#services.has(m.sender_id)),
-            groupBy(m => m.sender_id),
+            filter(m => !this.#services.has(m.node_id)),
+            groupBy(m => m.node_id),
             mergeMap($ => $.pipe(
                 debounceTime(1000),
                 mergeMap(async e => {
@@ -74,22 +85,10 @@ export class ApiGateway {
             ))
         ).subscribe()
 
-        setTimeout(() => {
-            udp.broadcast({
-                payload: {
-                    name: 'API gateway',
-                    paths: [],
-                    port: 0,
-                    role: 'gateway',
-                    linked: [... this.#services.keys()]
-                }
-            })
-        }, 1000)
-
     }
 
 
-    async #join(metadata: UdpHello<ServiceApiMetadata>) {
+    async #join(metadata: ServiceApiMetadata) {
         const host = metadata.host
 
         const hostname = `${host}:${metadata.port}`
@@ -99,10 +98,10 @@ export class ApiGateway {
         const subscription = metadata.websocket && this.lws?.connect(
             `ws://${hostname}${metadata.websocket}`,
             metadata.wsauth,
-            () => this.#disconnect(metadata.sender_id)
+            () => this.#disconnect(metadata.node_id)
         )
 
-        this.#services.set(metadata.sender_id, { metadata, subscription, host })
+        this.#services.set(metadata.node_id, { metadata, subscription, host })
         LIVEQUERY_API_GATEWAY_DEBUG && console.info(`[${new Date().toLocaleString()}] Service API online: ${metadata.name} at ${host}:${metadata.port}`)
         // LIVEQUERY_API_GATEWAY_DEBUG && console.info(`[${new Date().toLocaleString()}] Service websocket online: ${metadata.name} at ${host}:${metadata.port}${metadata.websocket}`)
         for (const { method, path } of metadata.paths || []) {
@@ -129,7 +128,7 @@ export class ApiGateway {
                             last_requested_index: 0
                         }
                     }
-                    methods[METHOD].hosts.push({ uri: hostname, instance_id: metadata.sender_id })
+                    methods[METHOD].hosts.push({ uri: hostname, instance_id: metadata.node_id })
                     return
                 }
                 const ref = refs[0]

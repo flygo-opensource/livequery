@@ -1,123 +1,123 @@
-import { createSocket, RemoteInfo } from "dgram"
-import { EMPTY, filter, fromEvent, map, merge, mergeMap, Observable, of, retry, tap, timer } from "rxjs"
-import { API_GATEWAY_NAMESPACE, API_GATEWAY_UDP_ADDRESS, LIVEQUERY_API_GATEWAY_RAW_DEBUG, UDP_MULTICAST_ADDRESS, UDP_LOCAL_PORT, UDP_PUBLIC_PORT } from "./const.js"
-import { randomUUID } from "crypto"
-import { networkInterfaces } from "os"
+import { createSocket } from "dgram";
+import { networkInterfaces } from "os";
+import { API_GATEWAY_WHITELIST_ADDRESS, API_GATEWAY_MULTICAST_PORT, API_GATEWAY_MULTICAST_ADDRESS } from "./const.js";
+import { BehaviorSubject, debounceTime, from, map, Observable, ReplaySubject } from "rxjs";
+import { firstValueFrom, fromEvent } from "rxjs";
+import { switchMap, mergeMap, filter } from "rxjs/operators";
+import { unpack, pack } from 'msgpackr'
 
-export type UdpHello<T = {}> = T & {
-    sender_id: string,
-    relay_id: string
-    host: string,
+export type NodeMetadata<T = {}> = T & {
+    host: string
+    node_id: string
     namespace: string
 }
 
-LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ LIVEQUERY_API_GATEWAY_RAW_DEBUG: 'ON' })
+export type MdnsMessage<T extends NodeMetadata> = {
+    hi: boolean
+    node: T
+    sender_id: string
+    forwarder_id?: string
+    receiver_id?: string
+}
 
-export class RxjsUdp<T> extends Observable<UdpHello<T>> {
 
-    public static readonly id = randomUUID()
+export class RxjsUdp<T extends NodeMetadata> {
 
+    #udp4 = createSocket({
+        type: 'udp4',
+        reuseAddr: true
+    })
 
-    #udp = {
-        public: createSocket({
-            type: 'udp4',
-            reuseAddr: true
-        }),
-        local: createSocket({
-            type: 'udp4',
-            reuseAddr: true
-        })
-    }
-
-    #local_addresses = Object.values(networkInterfaces()).map(a => a.map(q => q.address)).flat(2)
-
-    #whitelist_ips = [
-        '127.0.0.1',
-        ...API_GATEWAY_UDP_ADDRESS.split(',').map(a => {
-            const s = a.trim().split('.')
-            if (s.length == 4) return [a.trim()]
-            if (s.length == 3) return new Array(255).fill(0).map((_, i) => [...s, i].join('.'))
+    #localAddress = new Set(
+        Object.values(networkInterfaces()).flat(2).map(e => e?.address).filter(Boolean)
+    )
+    #broadcastAddress = new Set([
+        API_GATEWAY_MULTICAST_ADDRESS,
+        ...(API_GATEWAY_WHITELIST_ADDRESS || '').split(',').map(e => {
+            const ppps = e.trim().split('.')
+            if (ppps.length == 4) return e.trim()
+            if (ppps.length == 3) return new Array(256).fill(0).map((h, index) => {
+                return `${e.trim()}.${index}`
+            })
             return []
         }).flat(2)
-    ]
+    ])
 
     constructor() {
-        super(o => {
-
-            LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ 'IAM': RxjsUdp.id })
-
-            this.#udp.local.bind(UDP_LOCAL_PORT, '0.0.0.0', () => {
-                this.#udp.local.addMembership(UDP_MULTICAST_ADDRESS);
-            });
-
-            this.#udp.public.bind(UDP_PUBLIC_PORT, '0.0.0.0');
-
-
-            const subscription = merge(
-                fromEvent(this.#udp.public, 'message').pipe(
-                    map(([raw, rinfo]: [Buffer, RemoteInfo]) => {
-                        if (!this.#whitelist_ips.includes(rinfo.address)) return
-                        const msg = JSON.parse(raw.toString('utf-8')) as UdpHello<T>
-                        msg.relay_id = RxjsUdp.id
-                        msg.host = rinfo.address;
-                        return { msg, public: true }
-                    })
-                ),
-                fromEvent(this.#udp.local, 'message').pipe(
-                    map(([raw, rinfo]: [Buffer, RemoteInfo]) => {
-                        if (!this.#local_addresses.includes(rinfo.address)) return
-                        const msg: UdpHello<T> = JSON.parse(raw.toString('utf-8'))
-                        if (msg.relay_id == RxjsUdp.id) return
-                        return { msg, public: false }
-                    })
-                )
-            ).pipe(
-                filter(Boolean),
-                filter(({ msg }) => msg.namespace == API_GATEWAY_NAMESPACE),
-                tap(msg => LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log(msg)),
-                tap(({ msg }) => msg.sender_id != RxjsUdp.id && o.next(msg)),
-                filter(from => from.public),
-                mergeMap(({ msg }) => {
-                    const buffer = Buffer.from(JSON.stringify(msg))
-                    return of(0).pipe(
-                        mergeMap(() => new Promise<void>((s, r) => {
-                            this.#udp.public.send(buffer, UDP_LOCAL_PORT, UDP_MULTICAST_ADDRESS, (e, b) => {
-                                e ? r(e) : s()
-                            })
-                        })),
-                        retry({
-                            delay: (e, n) => {
-                                // e && console.error(e)
-                                return n < 10 ? timer(n * 100) : EMPTY
-                            }
-                        })
-                    )
-                })
-            ).subscribe()
-
-            return () => subscription.unsubscribe()
-        });
+        this.#udp4.on('listening', () => {
+            this.#udp4.setMulticastInterface("127.0.0.1");
+            this.#udp4.addMembership(API_GATEWAY_MULTICAST_ADDRESS, "127.0.0.1");
+        })
+        this.#udp4.on('error', (e) => {
+            throw e
+        })
+        this.#udp4.bind(API_GATEWAY_MULTICAST_PORT, '0.0.0.0')
     }
 
-    async broadcast({ payload, host }: { payload: T, host?: string }) {
-        const hosts = host ? [host] : this.#whitelist_ips
-        const data = JSON.stringify({
-            namespace: API_GATEWAY_NAMESPACE,
-            relay_id: '',
-            host: '',
-            sender_id: RxjsUdp.id,
-            ...payload,
-        } as UdpHello<T>)
-        LIVEQUERY_API_GATEWAY_RAW_DEBUG && console.log({ broadcast: hosts, data, port: UDP_PUBLIC_PORT })
-        for (const host of hosts) {
-            await new Promise(s => {
-                this.#udp.public.send(
-                    data,
-                    UDP_PUBLIC_PORT,
-                    host,
-                    s
-                )
+    async broadcast<T extends NodeMetadata>(data: MdnsMessage<T>, ips: string[] = [...this.#broadcastAddress]) {
+        const msg = pack(data)
+        for (const ip of ips) {
+            this.#udp4.send(msg, 0, msg.length, API_GATEWAY_MULTICAST_PORT, ip, e => {
+                e && console.error('UDP Broadcast error', e)
             })
         }
     }
+
+
+    link<T extends NodeMetadata>(metadata$: BehaviorSubject<T> | ReplaySubject<T>) {
+        return from(firstValueFrom(metadata$)).pipe(
+            debounceTime(1000),
+            mergeMap(async metadata => {
+                this.broadcast({
+                    node: metadata,
+                    hi: true,
+                    sender_id: metadata.node_id
+                })
+                return metadata
+            }),
+            switchMap(metadata => fromEvent(this.#udp4, 'message').pipe(
+                map(([raw, r]) => ({ raw, r, metadata }))
+            )),
+            mergeMap(async ({ raw, r, metadata }) => {
+
+                try {
+                    const msg = unpack(raw) as MdnsMessage<T>
+                    if (msg.node.node_id == metadata.node_id) return
+                    if (msg.sender_id == metadata.node_id) return
+                    if (msg.forwarder_id == metadata.node_id) return
+                    if (msg.node.namespace != metadata.namespace) return
+
+
+
+                    // Forward message in case from remote
+                    const node = { ...msg.node, host: msg.node.host || r.address }
+                    const is_remote = !this.#localAddress.has(r.address);
+                    is_remote && !msg.forwarder_id && await this.broadcast({
+                        ...msg,
+                        node,
+                        forwarder_id: metadata.node_id
+                    }, [API_GATEWAY_MULTICAST_ADDRESS]);
+
+                    // Ignore if message has receiver and it's not me
+                    if (msg.receiver_id && msg.receiver_id != metadata.node_id) return;
+
+                    // Say hi back if first time seen 
+                    if (msg.hi) {
+                        const node = await firstValueFrom(metadata$)
+                        await this.broadcast({
+                            node,
+                            hi: false,
+                            sender_id: node.node_id,
+                            receiver_id: msg.sender_id
+                        }, [is_remote ? r.address : API_GATEWAY_MULTICAST_ADDRESS]);
+                    }
+                    // Emit node
+                    return node
+
+                } catch (e) { }
+            }),
+            filter(Boolean)
+        )
+    }
+
 }

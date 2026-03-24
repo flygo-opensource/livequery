@@ -10,6 +10,7 @@ import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
 import { randomUUID } from "crypto";
 import { RxjsUdp } from "./RxjsUdp.js";
 import { LivequeryDatasource } from "./LivequeryDatasourceInterceptors.js";
+import { NODE_ID } from "./const.js";
 
 
 export type WebSocketHelloEvent = {
@@ -70,9 +71,9 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
     #pipes = new Map<Ref, { o: Observable<any>, s: Subscription }>()
 
 
-    // NODE METADATA
-    public readonly id = RxjsUdp.id
-    public readonly auth = randomUUID() 
+    // NODE METADATA 
+    public readonly id = NODE_ID
+    public readonly auth = randomUUID()
 
     constructor() {
         super()
@@ -82,7 +83,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
                 ... this.#subscriptions.get(ref) || new Map<ClientId, SubscriptionMetadata>(),
                 ...this.#subscriptions.get(`${ref}/${data.id}`) || new Map<ClientId, SubscriptionMetadata>()
             ].reduce((p, [client_id, { gateway_id }]) => {
-                const connection_id = gateway_id == this.id ? client_id : gateway_id
+                const connection_id = gateway_id == NODE_ID ? client_id : gateway_id
                 const old = p.get(connection_id)
                 const socket = old ? old.socket : this.#connections.get(connection_id)
                 if (!socket) return p
@@ -131,7 +132,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
             switchMap((ws: WebsocketWithMetadata) => {
                 return merge(
                     fromEvent(ws, 'open').pipe(tap(() => {
-                        const payload: WebSocketStartEvent = { event: 'start', data: { id: this.id, auth } }
+                        const payload: WebSocketStartEvent = { event: 'start', data: { id: NODE_ID, auth } }
                         ws.send(JSON.stringify(payload))
                     })),
                     fromEvent(ws, 'close').pipe(map(() => { throw 'CLOSED' })),
@@ -261,7 +262,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
         socket.gateway = auth == this.auth
         socket.refs = new Set()
         this.#connections.set(id, socket)
-        const payload: WebSocketHelloEvent = { event: 'hello', gid: this.id }
+        const payload: WebSocketHelloEvent = { event: 'hello', gid: NODE_ID }
         socket.send(JSON.stringify(payload))
     }
 
@@ -294,7 +295,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
 
 
             // Need remote unsubscribe
-            if (routing.listener_node_id != this.id) {
+            if (routing.listener_node_id != NODE_ID) {
                 const gateway = this.#connections.get(routing.listener_node_id)
                 if (gateway) {
                     const payload: WebSocketUnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
@@ -334,8 +335,8 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
         for (const { ref, client_id, gateway_id, listener_node_id } of e) {
             if (client_id == gateway_id) continue
             const socket = this.#connections.get(client_id)
-            if (gateway_id == this.id && (!socket || socket.refs?.has(ref))) {
-                if (listener_node_id != this.id) {
+            if (gateway_id == NODE_ID && (!socket || socket.refs?.has(ref))) {
+                if (listener_node_id != NODE_ID) {
                     const target = this.#connections.get(listener_node_id)
                     if (target) {
                         const e: WebSocketUnsubscribeEvent = {
@@ -353,7 +354,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
             this.#subscriptions.set(ref, map)
             this.#connections.get(client_id)?.refs?.add(ref)
 
-            if (gateway_id != this.id) {
+            if (gateway_id != NODE_ID) {
                 const target = this.#connections.get(gateway_id)
                 if (target) {
                     const payload: WebSocketSubscribeEvent = {
@@ -369,7 +370,7 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
             }
         }
     }
- 
+
 
 
 }

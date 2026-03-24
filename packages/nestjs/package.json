@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/nestjs.git"
     },
-    "version": "2.0.55",
+    "version": "2.0.56",
     "description": "Nestjs decorators for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -41,6 +41,9 @@
         "@nestjs/common": "*",
         "@nestjs/platform-ws": "^11.0.10",
         "@nestjs/websockets": "^10.3.7",
-        "express": "^4.21.2" 
+        "express": "^4.21.2"
+    },
+    "dependencies": {
+        "msgpackr": "^1.11.9"
     }
 }
