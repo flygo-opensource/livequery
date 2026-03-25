@@ -1,7 +1,7 @@
 import { createSocket } from "dgram";
 import { networkInterfaces } from "os";
 import { API_GATEWAY_WHITELIST_ADDRESS, API_GATEWAY_MULTICAST_PORT, API_GATEWAY_MULTICAST_ADDRESS } from "./const.js";
-import { BehaviorSubject, debounceTime, from, map, Observable, ReplaySubject } from "rxjs";
+import { BehaviorSubject, debounceTime, from, map, ReplaySubject } from "rxjs";
 import { firstValueFrom, fromEvent } from "rxjs";
 import { switchMap, mergeMap, filter } from "rxjs/operators";
 import { unpack, pack } from 'msgpackr'
@@ -21,7 +21,7 @@ export type MdnsMessage<T extends NodeMetadata> = {
 }
 
 
-export class RxjsUdp<T extends NodeMetadata> {
+export class RxjsUdp  {
 
     #udp4 = createSocket({
         type: 'udp4',

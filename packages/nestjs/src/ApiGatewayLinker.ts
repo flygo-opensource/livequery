@@ -37,7 +37,7 @@ export class ApiGatewayLinker {
             }
             return metadata;
         })) as any as ReplaySubject<ServiceApiMetadata>
-        const udp$ = new RxjsUdp<ServiceApiMetadata>()
+        const udp$ = new RxjsUdp()
 
         udp$.link(metadata$).pipe(
             filter(node => node.role == 'gateway'),

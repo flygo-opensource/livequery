@@ -4,9 +4,8 @@ import { type Response } from 'express';
 import { IncomingMessage } from 'http';
 import { LivequeryWebsocketSync } from './LivequeryWebsocketSync.js';
 import { mergeMap, filter, debounceTime, groupBy } from 'rxjs/operators'
-import { BehaviorSubject, Subscription, of, tap } from 'rxjs'
+import { BehaviorSubject, Subscription } from 'rxjs'
 import { NodeMetadata, RxjsUdp } from './RxjsUdp.js';
-import { randomUUID } from 'crypto';
 import { API_GATEWAY_NAMESPACE, LIVEQUERY_API_GATEWAY_DEBUG, NODE_ID } from './const.js';
 
 export type Routing = {
@@ -62,7 +61,7 @@ export class ApiGateway {
     constructor(
         @Optional() private lws: LivequeryWebsocketSync
     ) {
-        const udp = new RxjsUdp<ServiceApiMetadata>()
+        const udp = new RxjsUdp()
 
         udp.link(new BehaviorSubject<ServiceApiMetadata>({
             name: 'API gateway',
