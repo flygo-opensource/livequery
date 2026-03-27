@@ -1,28 +1,9 @@
-import { EMPTY, finalize, from, map, merge, mergeAll, mergeMap, Observable, of, Subject } from "rxjs"
+import { EMPTY, finalize, from, Subscription, map, merge, mergeAll, mergeMap, Observable, of, Subject, Subscriber } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
-import type { LivequeryAction, LivequeryDocument, LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
+import type { DataChangeEvent, LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import { WorkerRpc } from "./helpers/WorkerRpc"
+import type { LivequeryAction, LivequeryDocument, LivequeryFilters, LivequeryQueryParams } from "./types"
 
-export type LivequeryFilter = Partial<{
-    gt: number | string
-    gte: number | string
-    lt: number | string
-    lte: number | string
-    eq: number | string
-    ne: number | string
-    in: (number | string)[]
-    nin: (number | string)[]
-}>
-
-
-export type LivequeryFilters = Record<string, LivequeryFilter>
-
-export type CollectionQuery = {
-    action: 'get' | 'create' | 'update' | 'delete' | 'query' | `~${string}`
-    payload?: Record<string, any>
-    query?: LivequeryFilters
-    headers?: Record<string, any>
-}
 
 
 
@@ -42,42 +23,70 @@ export type CollectionStreamEvent<T extends LivequeryDocument> = LivequeryQueryR
     loading: LivequeryLoadingState
 }
 
-export type LivequeryWatchOptions = {
-    ref: string
-    filters: LivequeryFilters
-    lazy?: boolean
-    headers?: () => Promise<Record<string, any>>
+type CollectionId = string
+
+
+
+export type ConfigResolverFunction = <T extends LivequeryDocument>(e: {
+    from: Record<string, string | number | boolean>
+    old_document: T
+    change: DataChangeEvent<T>
+}) => {
+    approved: boolean
+    document: T
 }
 
-type CollectionId = string
+
+export type LivequeryCoreConfig = {
+    storage: LivequeryStorge
+    transporters: Record<string, LivequeryTransporter>
+    resolver: ConfigResolverFunction
+}
+
 
 export class LivequeryCore {
 
-    #collections = new Map<CollectionId, LivequeryWatchOptions & {
-        $: Subject<CollectionStreamEvent<any>>
+    #collections = new Map<CollectionId, {
+        ref: string
+        o: Subscriber<CollectionStreamEvent<any>>
     }>()
-    #refs = new Map<string, Set<CollectionId>>()
 
-    constructor(private options: LivequeryCoreOptions) {
+
+    #queries$ = new Subject<LivequeryQueryParams<any> & { collection_id: string }>()
+
+
+    constructor(private readonly config: LivequeryCoreConfig) {
         // Init here
     }
 
-    watch<T extends LivequeryDocument>(options: LivequeryWatchOptions) {
-        // create a subject for this collection 
-    }
-
-    query(filters: LivequeryFilters, reset: boolean) {
-        // Return first value from cache as soon as possible
-        // Trigger query to get real data
-        // Listen for realtime data
-
-    }
-
-    trigger<T>(action: LivequeryAction) {
+    watch<T extends LivequeryDocument>(ref: string) {
         const collection_id = WorkerRpc.getSenderId.call(this)
+        return new Observable<CollectionStreamEvent<T>>(o => {
+            this.#collections.set(collection_id, {
+                o,
+                ref
+            })
+            return () => {
+                this.#collections.delete(collection_id)
+            }
+        })
+    }
+
+    async query<T extends LivequeryDocument>(req: LivequeryQueryParams<T>) {
+        const collection_id = WorkerRpc.getSenderId.call(this)
+        setTimeout(() => this.#queries$.next({
+            ...req,
+            collection_id
+        }), 0)
+        return await this.config.storage.query(req.ref, req.filters) || []
+    }
+
+    trigger<T extends LivequeryDocument>(action: LivequeryAction<T>) {
+        const collection_id = WorkerRpc.getSenderId.call(this)
+        const options = this.#collections.get(collection_id)
+        if (!options) throw new Error(`Collection with id ${collection_id} not found (maybe disconnected)`)
         return EMPTY as Observable<T>
     }
-
 
 
 }
