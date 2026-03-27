@@ -1,0 +1,15 @@
+{
+  "name": "@livequery/new",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "rxjs": "^7.8.2"
+  },
+  "private": true
+}
