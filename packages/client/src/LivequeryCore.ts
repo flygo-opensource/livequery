@@ -1,8 +1,8 @@
-import { EMPTY, finalize, from, Subscription, map, merge, mergeAll, mergeMap, Observable, of, Subject, Subscriber } from "rxjs"
+import { EMPTY, finalize, from, map, mergeMap, Observable, Subject, Subscriber } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
-import type { DataChangeEvent, LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
+import type {  LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import { WorkerRpc } from "./helpers/WorkerRpc"
-import type { LivequeryAction, LivequeryDocument, LivequeryFilters, LivequeryQueryParams } from "./types"
+import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryQueryParams } from "./types"
 
 
 
@@ -17,10 +17,6 @@ export type LivequeryLoadingState = {
     next: boolean
     prev: boolean
     all: boolean
-}
-
-export type CollectionStreamEvent<T extends LivequeryDocument> = LivequeryQueryResult<T> & {
-    loading: LivequeryLoadingState
 }
 
 type CollectionId = string
@@ -48,20 +44,38 @@ export class LivequeryCore {
 
     #collections = new Map<CollectionId, {
         ref: string
-        o: Subscriber<CollectionStreamEvent<any>>
+        o: Subscriber<Partial<LivequeryQueryResult<any>>>
     }>()
-
 
     #queries$ = new Subject<LivequeryQueryParams<any> & { collection_id: string }>()
 
-
     constructor(private readonly config: LivequeryCoreConfig) {
+        this.#start()
+    }
+
+    #start() {
         // Init here
+        this.#queries$.pipe(
+            mergeMap(({ collection_id, ref, filters, headers }) => {
+                const sender = this.#collections.get(collection_id)
+                if (!sender) return EMPTY
+                return from(Object.entries(this.config.transporters)).pipe(
+                    mergeMap(([id, transporter]) => transporter.query({
+                        ref,
+                        filters,
+                        headers
+                    })),
+                    map(result => {
+                        sender.o.next(result)
+                    })
+                )
+            })
+        ).subscribe()
     }
 
     watch<T extends LivequeryDocument>(ref: string) {
         const collection_id = WorkerRpc.getSenderId.call(this)
-        return new Observable<CollectionStreamEvent<T>>(o => {
+        return new Observable<Partial<LivequeryQueryResult<T>>>(o => {
             this.#collections.set(collection_id, {
                 o,
                 ref
@@ -85,7 +99,10 @@ export class LivequeryCore {
         const collection_id = WorkerRpc.getSenderId.call(this)
         const options = this.#collections.get(collection_id)
         if (!options) throw new Error(`Collection with id ${collection_id} not found (maybe disconnected)`)
-        return EMPTY as Observable<T>
+
+        return from(Object.entries(this.config.transporters)).pipe(
+            mergeMap(([id, transporter]) => transporter.trigger<T>(action))
+        )
     }
 
 

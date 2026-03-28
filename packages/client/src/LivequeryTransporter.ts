@@ -1,27 +1,6 @@
 import type { Observable } from "rxjs";
-import type { LivequeryAction, LivequeryDocument, LivequeryQueryParams } from "./types";
+import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryPaging, LivequeryQueryParams } from "./types";
 
-
-
-export type DataChangeEvent<T extends LivequeryDocument> = {
-    id: string
-    type: 'added' | 'removed' | 'updated'
-    source: 'query' | 'action' | 'realtime'
-    data: Partial<Omit<T, 'id'>>
-}
-
-export type LivequeryPaging = {
-    next?: {
-        count: number
-        cursor: string
-    }
-    prev?: {
-        count: number
-        cursor: string
-    }
-    total: number
-    current: number
-}
 
 
 export type LivequeryQueryResult<T extends LivequeryDocument> = {

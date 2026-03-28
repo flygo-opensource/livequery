@@ -3,14 +3,16 @@ export type LivequeryDocument = {
     [key: string]: any
 }
 
-export type LivequeryActionType = 'add' | 'update' | 'delete' | `~${string}`
-
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
     K extends string ? (
-        T[K] extends MatchType ? K : (
-            T[K] extends { [key: string]: any } ? (
-                `${K}.${FlatObjectKeys<T[K], MatchType>}`
-            ) : never
+        0 extends (1 & T[K]) ? never : (
+            // T[K] extends unknown ? never : (
+            T[K] extends MatchType ? K : (
+                T[K] extends { [key: string]: any } ? (
+                    `${K}.${FlatObjectKeys<T[K], MatchType>}`
+                ) : never
+            )
+            // )
         )
     ) : never
 )
@@ -40,6 +42,31 @@ export type LivequeryFilters<T extends LivequeryDocument> = (
 )
 
 
+
+
+export type DataChangeEvent<T extends LivequeryDocument> = {
+    id: string
+    type: 'added' | 'removed' | 'updated'
+    source: 'query' | 'action' | 'realtime'
+    data: Partial<Omit<T, 'id'>>
+}
+
+
+export type LivequeryPaging = {
+    next?: {
+        count: number
+        cursor: string
+    }
+    prev?: {
+        count: number
+        cursor: string
+    }
+    total: number
+    current: number
+}
+
+
+
 export type LivequeryQueryParams<T extends LivequeryDocument> = {
     ref: string
     filters?: LivequeryFilters<T>
@@ -47,9 +74,10 @@ export type LivequeryQueryParams<T extends LivequeryDocument> = {
 }
 
 
+export type LivequeryActionType = 'add'|'update'|'delete'|`~${string}`
 
 
 export type LivequeryAction<T extends LivequeryDocument> = LivequeryQueryParams<T> & {
-    action: 'get' | 'post' | 'patch' | `~${string}`
+    action: LivequeryActionType
     payload?: Record<string, any>
 }
