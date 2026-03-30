@@ -4,10 +4,12 @@ import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryPagi
 
 
 export type LivequeryQueryResult<T extends LivequeryDocument> = {
+    query_id: string
     changes: DataChangeEvent<T>[]
     summary: Record<string, any>
     paging: LivequeryPaging
     metadata: Record<string, any>
+    source: 'query' | 'action' | 'realtime'
 }
 
 

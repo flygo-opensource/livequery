@@ -1,5 +1,8 @@
 export type LivequeryDocument = {
     id: string
+    "@syncing": {
+        [target: string]: number | string
+    }
     [key: string]: any
 }
 
@@ -18,13 +21,21 @@ type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
 )
 
 
-type QueryBuilder<T extends LivequeryDocument, FieldType, PostFix extends string | null, Value> = {
+type QueryBuilder<T extends LivequeryDocument, FieldType, PostFix extends string | number, Value> = {
     [K in keyof T as `${FlatObjectKeys<T, FieldType>}${PostFix extends string ? `:${PostFix}` : ''}`]?: Value
 }
 
+export type LivequeryPagingFilters<T extends LivequeryDocument> = (
+    QueryBuilder<T, string, 'sort', 'asc' | 'desc'>
+) & {
+    ':limit': number
+    ':before': string
+    ':after': string
+    ':page': number
+}
 
 export type LivequeryFilters<T extends LivequeryDocument> = (
-    QueryBuilder<T, string, null, string> &
+    // QueryBuilder<T, string, 0, string> &
     QueryBuilder<T, number, 'gt', number> &
     QueryBuilder<T, number, 'gte', number> &
     QueryBuilder<T, number, 'lt', number> &
@@ -47,7 +58,6 @@ export type LivequeryFilters<T extends LivequeryDocument> = (
 export type DataChangeEvent<T extends LivequeryDocument> = {
     id: string
     type: 'added' | 'removed' | 'updated'
-    source: 'query' | 'action' | 'realtime'
     data: Partial<Omit<T, 'id'>>
 }
 
@@ -69,15 +79,17 @@ export type LivequeryPaging = {
 
 export type LivequeryQueryParams<T extends LivequeryDocument> = {
     ref: string
-    filters?: LivequeryFilters<T>
+    query_id: string
+    filters?: Partial<LivequeryFilters<T>>
     headers?: Record<string, string>
+    collection_id: string
 }
 
 
-export type LivequeryActionType = 'add'|'update'|'delete'|`~${string}`
+export type LivequeryActionType = 'add' | 'update' | 'delete' | `~${string}`
 
 
-export type LivequeryAction<T extends LivequeryDocument> = LivequeryQueryParams<T> & {
+export type LivequeryAction<T extends LivequeryDocument> = Omit<LivequeryQueryParams<T>, 'query_id'> & {
     action: LivequeryActionType
     payload?: Record<string, any>
 }
