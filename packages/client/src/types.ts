@@ -1,8 +1,5 @@
 export type LivequeryDocument = {
     id: string
-    "@syncing": {
-        [target: string]: number | string
-    }
     [key: string]: any
 }
 

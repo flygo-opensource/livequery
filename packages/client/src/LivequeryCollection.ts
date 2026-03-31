@@ -21,7 +21,7 @@ export type LivequeryCollectionState<T extends LivequeryDocument> = {
 export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSubject<LivequeryCollectionState<T>> {
 
     #id = crypto.randomUUID()
-    #qid = '...'
+    #query_id = '...'
     #keys = new Set<keyof T>()
     #linker: Subscription
 
@@ -47,7 +47,7 @@ export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSu
             }
         })
         this.#linker = this.core.watch<T>(options.ref, this.#id).pipe(
-            filter(e => e.query_id === this.#qid),
+            filter(e => e.query_id === this.#query_id),
             tap(event => {
                 const value = this.value
                 const chaos = event.changes && event.changes.some(change => {
@@ -136,12 +136,13 @@ export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSu
 
     async #query(query_id: string, filters: Partial<LivequeryFilters<T>>) {
         this.#keys = new Set(Object.keys(filters).filter(a => a.includes(':sort')).map(k => k.split(':')[0] as keyof T))
-        const documents = await this.core.query<T>({
+        const result = await this.core.query<T>({
             query_id,
             ref: this.options.ref,
             filters,
             collection_id: this.#id
         })
+        const documents = result.documents || []
         const items = documents.map(doc => new BehaviorSubject(doc))
         this.next({
             ... this.value,
@@ -149,10 +150,10 @@ export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSu
             items,
             loading: {
                 all: true,
-                next: true,
-                prev: false
+                next: !!result.paging?.next,
+                prev: !!result.paging?.prev
             },
-
+            paging: result.paging || this.value.paging
         })
     }
 

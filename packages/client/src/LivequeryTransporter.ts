@@ -15,5 +15,5 @@ export type LivequeryQueryResult<T extends LivequeryDocument> = {
 
 export type LivequeryTransporter = {
     query<T extends LivequeryDocument>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult<T>>>
-    trigger<T extends LivequeryDocument>(action: LivequeryAction<T>): Observable<T>
+    trigger<T>(action: LivequeryAction<LivequeryDocument>): Observable<{ data: T, error?: Error }>
 }
