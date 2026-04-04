@@ -1,9 +1,8 @@
-import { EMPTY, from, map, mergeMap, Observable, Subject, Subscriber, switchMap } from "rxjs"
+import { defer, EMPTY, from, map, mergeMap, Observable, of, Subject, Subscriber, switchMap } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryQueryParams } from "./types"
 import { matchesAllFilters } from "./helpers/filterLivequeryDocuments"
-import { uuidv7 } from 'uuidv7'
 
 
 
@@ -22,9 +21,15 @@ export type LivequeryLoadingState = {
 type CollectionId = string
 type Ref = string
 
+export type SyncRequest<T extends LivequeryDocument> = LivequeryAction<T> & {
+    id: string
+    ref: string,
+    collection_ref: string
+    source: 'query' | 'realtime' | 'action'
+}
 
 
-export type ConfigResolverFunction = <T extends LivequeryDocument>(e: {
+export type ConflictResolverFunction = <T extends LivequeryDocument>(e: {
     from: Record<string, string | number | boolean>
     old_document: T
     change: DataChangeEvent<T>
@@ -37,7 +42,7 @@ export type ConfigResolverFunction = <T extends LivequeryDocument>(e: {
 export type LivequeryCoreConfig = {
     storage: LivequeryStorge
     transporters: Record<string, LivequeryTransporter>
-    resolver: ConfigResolverFunction
+    resolver: ConflictResolverFunction
 }
 
 
@@ -116,45 +121,101 @@ export class LivequeryCore {
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
 
+
+
+    async #broadcast<T extends LivequeryDocument>({ source, ref, collection_ref, action, payload, id }: SyncRequest<T>) {
+        const collections = this.#refs.get(ref)
+        if (!collections) return {}
+
+        const change = await (async () => {
+            if (action == 'add') {
+                return {
+                    id,
+                    type: 'added' as DataChangeEvent<any>['type'],
+                    data: await this.config.storage.add<T>(
+                        collection_ref,
+                        {
+                            ...payload,
+                            id,
+                        } as T
+                    )
+                }
+            }
+            if (action == 'update') {
+                return {
+                    id,
+                    type: 'updated' as DataChangeEvent<any>['type'],
+                    data: await this.config.storage.update<T>(
+                        collection_ref,
+                        id,
+                        payload || {}
+                    )
+                }
+            }
+            if (action == 'delete') {
+                return {
+                    id,
+                    type: 'removed' as DataChangeEvent<any>['type'],
+                    data: await this.config.storage.delete<T>(
+                        collection_ref,
+                        id
+                    )
+                }
+            }
+        })();
+        if (!change) return {}
+        for (const collection_id of collections) {
+            const sender = this.#collections.get(collection_id)
+            if (!sender) continue
+            sender.o.next({
+                changes: [change],
+                from: source
+            })
+        }
+        return change.data as T
+    }
+
+    async #sync(ref: string, collection_ref: string, doc: Record<string, any>) {
+        return EMPTY
+        if (doc.id.startsWith('local:')) {
+            // Try to sync to at least one transporter to get a real id
+            // Sync to collections
+
+        }
+
+        // Sync to all remote transporters
+        for (const transporter of Object.values(this.config.transporters)) {
+
+        }
+
+    }
+
     trigger<T extends LivequeryDocument>(action: LivequeryAction<T>) {
+
         const options = this.#collections.get(action.collection_id)
         if (!options) throw new Error(`Collection with id ${action.collection_id} not found (maybe disconnected)`)
-        const trigger = () => from(Object.entries(this.config.transporters)).pipe(
-            mergeMap(([id, transporter]) => transporter.trigger<T>(action))
-        )
-        if (action.action === 'add') {
-            const id = `local:${uuidv7()}`
-            return from(this.config.storage.add(
-                action.ref,
-                { ...action.payload, id } as T)
-            ).pipe(
-                mergeMap(async result => {
-                    const doc = result.data
-                    if (doc && doc.id) {
-                        this.config.storage.update(action.ref, id, doc)
-                    }
-                    return result
-                })
-            )
-        }
 
-        const id = action.payload?.id
-        if (!id) throw new Error(`Missing document id for update/delete action`)
-
-        if (action.action === 'update') { 
-            return from(this.config.storage.update(action.ref, id, action.payload as T)).pipe(
-                switchMap(trigger)
-            )
-        }
-
-        if (action.action === 'delete') { 
-            return from(this.config.storage.delete(action.ref, id)).pipe(
-                switchMap(trigger)
-            )
-        }
-
-        return from(Object.entries(this.config.transporters)).pipe(
-            mergeMap(trigger)
+        const refs = action.ref.split('/')
+        const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : action.ref
+        const id = refs.length % 2 == 0 ? refs[refs.length - 1] || '' : ''
+        return from(
+            this.#broadcast({
+                ...action,
+                id,
+                collection_ref,
+                source: 'action'
+            })
+        ).pipe(
+            switchMap(change => {
+                if (['add', 'update', 'delete'].includes(action.action)) {
+                    return from(this.#sync(action.ref, collection_ref, change)).pipe(
+                        mergeMap($ => $)
+                    )
+                }
+                return from(Object.entries(this.config.transporters)).pipe(
+                    mergeMap(([id, transporter]) => transporter.trigger<T>(action))
+                )
+            })
         )
     }
 

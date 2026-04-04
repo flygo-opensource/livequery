@@ -1,5 +1,10 @@
 export type LivequeryDocument = {
     id: string
+    _remotes: {
+        [target: string]: string | number | true
+    }
+    _prev: Record<string, any>
+    _deleting?:boolean  
     [key: string]: any
 }
 
@@ -55,8 +60,9 @@ export type LivequeryFilters<T extends LivequeryDocument> = (
 export type DataChangeEvent<T extends LivequeryDocument> = {
     id: string
     type: 'added' | 'removed' | 'updated'
-    data: Partial<Omit<T, 'id'>>
+    data?: Partial<Omit<T, 'id'>> | null|undefined
 }
+
 
 
 export type LivequeryPaging = {

@@ -2,12 +2,7 @@ import type { LivequeryDocument, LivequeryPaging } from "./types"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import { filterLivequeryDocuments } from "./helpers/filterLivequeryDocuments"
 
-type CursorFilters = {
-    ':limit'?: number
-    ':page'?: number
-    ':after'?: string
-    ':before'?: string
-}
+ 
 
 export class LivequeryMemoryStorage implements LivequeryStorge {
     #collections = new Map<string, LivequeryDocument[]>()
@@ -19,16 +14,22 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         const sources = (this.#collections.get(collection) || []) as T[]
         const f = filters || {}
         const sorters = Object.entries(f).filter(([k]) => k.endsWith(":sort")) as Array<[string, "asc" | "desc"]>
-        const cursor: CursorFilters = {
-            ':limit': this.#toNumber(f[':limit']),
-            ':page': this.#toNumber(f[':page']),
-            ':after': typeof f[':after'] === 'string' ? f[':after'] : undefined,
-            ':before': typeof f[':before'] === 'string' ? f[':before'] : undefined,
-        }
-
         const items = filterLivequeryDocuments(sources, f)
         const sorted = this.#sortItems(items, sorters)
-        return this.#applyCursor(sorted, cursor)
+        return {
+            documents: sorted,
+            paging: {
+                total: items.length,
+                current:sorted.length 
+            }
+        }
+    }
+
+    get<T extends LivequeryDocument>(ref: string, id: string): Promise<T | null> {
+        const docs = this.#collections.get(ref) as T[] | undefined
+        if (!docs) return Promise.resolve(null)
+        const doc = docs.find((d) => d.id === id) || null
+        return Promise.resolve(doc)
     }
 
     async add<T extends LivequeryDocument>(collection: string, document: T): Promise<T> {
@@ -40,7 +41,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         return document
     }
 
-    async update<T extends LivequeryDocument>(collection: string, id: string, document: Partial<T>): Promise<T | null> {
+    async update<T extends LivequeryDocument>(collection: string, id: string, document: Record<string, any>): Promise<T | null> {
         const docs = this.#clone(collection) as T[]
         const index = docs.findIndex((doc) => doc.id === id)
         if (index < 0) return null
@@ -99,61 +100,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         })
         return copied
     }
-
-    #applyCursor<T extends LivequeryDocument>(items: T[], cursor: CursorFilters): {
-        documents: T[]
-        paging: LivequeryPaging
-    } {
-        let output = items
-
-        if (cursor[':after']) {
-            const index = output.findIndex((item) => item.id === cursor[':after'])
-            if (index >= 0) output = output.slice(index + 1)
-        }
-
-        if (cursor[':before']) {
-            const index = output.findIndex((item) => item.id === cursor[':before'])
-            if (index >= 0) output = output.slice(0, index)
-        }
-
-        const limit = cursor[':limit']
-        if (!limit || limit <= 0) {
-            return {
-                documents: output,
-                paging: {
-                    total: output.length,
-                    current: 1,
-                }
-            }
-        }
-
-        const page = cursor[':page'] && cursor[':page'] > 0 ? cursor[':page'] : 1
-        const start = (page - 1) * limit
-        const documents = output.slice(start, start + limit)
-
-        const hasPrev = start > 0 && documents.length > 0
-        const hasNext = (start + documents.length) < output.length && documents.length > 0
-
-        return {
-            documents,
-            paging: {
-                total: output.length,
-                current: page,
-                ...(hasPrev ? {
-                    prev: {
-                        cursor: documents[0]!.id,
-                        count: start,
-                    }
-                } : {}),
-                ...(hasNext ? {
-                    next: {
-                        cursor: documents[documents.length - 1]!.id,
-                        count: output.length - (start + documents.length),
-                    }
-                } : {}),
-            }
-        }
-    }
+ 
 
     #getByPath(obj: Record<string, any>, path: string) {
         if (!path.includes('.')) return obj[path]
@@ -161,10 +108,5 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
             if (!acc || typeof acc !== 'object') return undefined
             return (acc as Record<string, any>)[key]
         }, obj)
-    }
-
-    #toNumber(value: unknown) {
-        const n = Number(value)
-        return Number.isFinite(n) ? n : undefined
-    }
+    } 
 }

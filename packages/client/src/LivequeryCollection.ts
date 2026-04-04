@@ -52,12 +52,11 @@ export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSu
                 const value = this.value
                 const chaos = event.changes && event.changes.some(change => {
                     if (change.type == 'added') return true
-                    return Object.keys(change.data).some(k => this.#keys.has(k as keyof T))
+                    return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
                 })
                 const changes = event.changes
                 if (!chaos || !changes || changes.length == 0) return
 
-                const mapper = (d: DataChangeEvent<T>) => new BehaviorSubject({ id: d.data.id, ...d.data } as any as T)
                 const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
                     for (const key of this.#keys) {
                         const va = a.value[key]
@@ -108,7 +107,14 @@ export class LivequeryCollection<T extends LivequeryDocument> extends BehaviorSu
                     return p
                 }, [
                     ...updated_items,
-                    ...events.added.map(mapper),
+                    ...(
+                        events.added
+                            .filter(a => a.data)
+                            .map(a => a.data!)
+                            .map(d => {
+                                return new BehaviorSubject({ id: d.id, ...d.data } as any as T)
+                            })
+                    )
                 ]).sort(sorter)
 
                 const indexes = items.reduce((p, c, index) => {
