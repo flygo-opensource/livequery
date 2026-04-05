@@ -2,7 +2,7 @@ import type { LivequeryDocument, LivequeryPaging } from "./types"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import { filterLivequeryDocuments } from "./helpers/filterLivequeryDocuments"
 
- 
+
 
 export class LivequeryMemoryStorage implements LivequeryStorge {
     #collections = new Map<string, LivequeryDocument[]>()
@@ -20,7 +20,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
             documents: sorted,
             paging: {
                 total: items.length,
-                current:sorted.length 
+                current: sorted.length
             }
         }
     }
@@ -34,11 +34,22 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
 
     async add<T extends LivequeryDocument>(collection: string, document: T): Promise<T> {
         const docs = this.#clone(collection) as T[]
-        const index = docs.findIndex((doc) => doc.id === document.id)
-        if (index >= 0) docs[index] = document
-        else docs.push(document)
+        const doc = {
+            ...document,
+            id: document.id || `local:${crypto.randomUUID()}`
+        }
+        if (!document.id) {
+            docs.push(doc)
+        } else {
+            const index = docs.findIndex((doc) => doc.id === document.id)
+            if (index >= 0) {
+                docs[index] = document
+            } else {
+                docs.push(document)
+            }
+        }
         this.#collections.set(collection, docs)
-        return document
+        return doc
     }
 
     async update<T extends LivequeryDocument>(collection: string, id: string, document: Record<string, any>): Promise<T | null> {
@@ -100,7 +111,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         })
         return copied
     }
- 
+
 
     #getByPath(obj: Record<string, any>, path: string) {
         if (!path.includes('.')) return obj[path]
@@ -108,5 +119,5 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
             if (!acc || typeof acc !== 'object') return undefined
             return (acc as Record<string, any>)[key]
         }, obj)
-    } 
+    }
 }

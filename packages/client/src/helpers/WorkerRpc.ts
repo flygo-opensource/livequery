@@ -1,4 +1,4 @@
-import { firstValueFrom, fromEvent, Observable, takeUntil, tap, type Subscriber } from "rxjs";
+import { EMPTY, finalize, firstValueFrom, fromEvent, map, mergeMap, Observable, Subject, Subscription, takeUntil, tap, type Subscriber } from "rxjs";
 
 
 export type RpcRequest = {
@@ -6,7 +6,6 @@ export type RpcRequest = {
     service: string
     method: string
     args: any[]
-    sender_id: string
 }
 
 export type RpcResponse = {
@@ -25,74 +24,96 @@ function isObservableLike(value: unknown): value is { subscribe: (...args: any[]
     return !!value && typeof value === 'object' && typeof (value as any).subscribe === 'function'
 }
 
+
+const WorkerContext = typeof window !== 'undefined' ? null : globalThis as any as SharedWorkerGlobalScope
+
+
+
 export class WorkerRpc {
 
-    static #sender_id = crypto.randomUUID()
     static #workers = new Map<SharedWorker, Map<RequestId, {
         o: Subscriber<any>
     }>>()
+    #services = new Map<string, any>()
 
-    static #services = new Map<string, any>()
-
-    // Allow service from worker to be called by main thread
-    static exposeWorkerService(instance: any) {
-        const serviceName = instance?.constructor?.name
-        if (!serviceName) throw new Error('Service instance must have a constructor name')
-        this.#services.set(serviceName, instance)
-
-        fromEvent<MessageEvent<RpcRequest>>(globalThis as any, 'message').subscribe(async e => {
-            const { id, service, method, args, sender_id } = e.data
-            if (!id || !service || !method) return
-
-            const svc = this.#services.get(service)
-            if (!svc) return
-
-            const post = (data: RpcResponse) => (globalThis as any).postMessage(data)
-            const parts = String(method).split('/').filter(Boolean)
-            let parent: any = null
-            let target: any = svc
-            for (const key of parts) {
-                parent = target
-                target = target?.[key]
-            }
-
-            if (typeof target === 'undefined') {
-                post({ id, error: `Path "${method}" not found on service "${service}"`, completed: true })
-                return
-            }
-
-            try {
-                const callArgs = args || []
-                const result = typeof target === 'function'
-                    ? target.apply(parent, callArgs)
-                    : (callArgs.length > 0
-                        ? (() => { throw new Error(`Path "${method}" is not callable`) })()
-                        : target)
-
-                if (isObservableLike(result)) {
-                    result.subscribe(
-                        (data: any) => post({ id, data, completed: false }),
-                        (err: any) => post({ id, error: err?.message ?? String(err), completed: true }),
-                        () => post({ id, completed: true })
-                    )
-                } else {
-                    const data = await Promise.resolve(result)
-                    post({ id, data, completed: true })
-                }
-            } catch (err: any) {
-                post({ id, error: err?.message ?? String(err), completed: true })
-            } finally {
-            }
-        })
+    constructor() {
+        this.#initialize()
     }
 
-    // Get sender id (called by worker to get sender id for sending response)
-    static getsender_id() {
-        return this.#sender_id
+    #initialize() {
+        if (!WorkerContext) return
+        fromEvent<MessageEvent>(WorkerContext, 'connect').pipe(
+            mergeMap(e => {
+                const port = e.ports[0]
+                if (!port) return EMPTY
+                port.start()
+                return fromEvent<MessageEvent<RpcRequest>>(port, 'message').pipe(
+                    takeUntil(fromEvent(port, 'messageerror')),
+                    map(msg => ({ port, msg })),
+                    finalize(() => {
+                        console.log(`Worker disconnected, cleaning up linked services`)
+                        port.close()
+                    })
+                )
+            }),
+            map(async ({ port, msg }) => {
+                const { id, service, method, args } = msg.data
+                if (!id || !service || !method) return
+
+                const svc = this.#services.get(service)
+                if (!svc) return
+
+                const post = (data: RpcResponse) => port.postMessage(data)
+                const parts = String(method).split('/').filter(Boolean)
+                let parent: any = null
+                let target: any = svc
+                for (const key of parts) {
+                    parent = target
+                    target = target?.[key]
+                }
+
+                if (typeof target === 'undefined') {
+                    post({ id, error: `Path "${method}" not found on service "${service}"`, completed: true })
+                    return
+                }
+
+                try {
+                    const callArgs = args || []
+                    const result = typeof target === 'function'
+                        ? target.apply(parent, callArgs)
+                        : (callArgs.length > 0
+                            ? (() => { throw new Error(`Path "${method}" is not callable`) })()
+                            : target)
+
+                    if (isObservableLike(result)) {
+                        result.subscribe(
+                            (data: any) => post({ id, data, completed: false }),
+                            (err: any) => post({ id, error: err?.message ?? String(err), completed: true }),
+                            () => post({ id, completed: true })
+                        )
+                    } else {
+                        const data = await Promise.resolve(result)
+                        post({ id, data, completed: true })
+                    }
+                } catch (err: any) {
+                    post({ id, error: err?.message ?? String(err), completed: true })
+                } finally {
+                }
+            })
+        ).subscribe()
+    }
+
+    exposeWorkerService(instance: any, name?: string) {
+        if (!WorkerContext) return
+        const serviceName = name || instance?.constructor?.name
+        if (!serviceName) throw new Error('Service instance must have a constructor name')
+        this.#services.set(serviceName, instance)
+        console.log(`Service "${serviceName}" exposed to workers`)
     }
 
     // Link a service from worker, allow it 
     static linkWorkerService<T>(serviceName: string, worker: SharedWorker) {
+        console.log(`Linking service "${serviceName}" from worker`)
         if (!this.#workers.has(worker)) {
             const requests = new Map<RequestId, {
                 o: Subscriber<any>
@@ -109,7 +130,12 @@ export class WorkerRpc {
                     (error || completed) && requests.delete(id)
                     error && request.o.error(new Error(error))
                 }),
-                takeUntil(fromEvent(worker.port as unknown as EventTarget, 'messageerror'))
+                takeUntil(fromEvent(worker.port as unknown as EventTarget, 'messageerror')),
+                finalize(() => {
+                    console.log(`Worker disconnected, cleaning up linked services`)
+                    this.#workers.delete(worker)
+                    worker.port.close()
+                })
             ).subscribe()
         }
 
@@ -126,8 +152,7 @@ export class WorkerRpc {
                 id,
                 service: serviceName,
                 method: methodPath,
-                args,
-                sender_id: this.#sender_id
+                args
             }))
 
             return Object.assign(observable, {

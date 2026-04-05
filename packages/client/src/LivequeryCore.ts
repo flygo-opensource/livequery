@@ -22,7 +22,6 @@ type CollectionId = string
 type Ref = string
 
 export type SyncRequest<T extends LivequeryDocument> = LivequeryAction<T> & {
-    id: string
     ref: string,
     collection_ref: string
     source: 'query' | 'realtime' | 'action'
@@ -97,6 +96,7 @@ export class LivequeryCore {
     }
 
     watch<T extends LivequeryDocument>(ref: string, collection_id: string) {
+        
         return new Observable<Partial<LivequeryQueryResult<T>>>(o => {
             this.#collections.set(collection_id, {
                 o,
@@ -123,24 +123,23 @@ export class LivequeryCore {
 
 
 
-    async #broadcast<T extends LivequeryDocument>({ source, ref, collection_ref, action, payload, id }: SyncRequest<T>) {
+    async #broadcast<T extends LivequeryDocument>({ source, ref, collection_ref, action, payload }: SyncRequest<T>) {
         const collections = this.#refs.get(ref)
-        if (!collections) return {}
-
+        if (!collections) return
         const change = await (async () => {
             if (action == 'add') {
+                const data = await this.config.storage.add<T>(
+                    collection_ref,
+                    payload as T
+                )
                 return {
-                    id,
+                    id: data.id,
                     type: 'added' as DataChangeEvent<any>['type'],
-                    data: await this.config.storage.add<T>(
-                        collection_ref,
-                        {
-                            ...payload,
-                            id,
-                        } as T
-                    )
+                    data
                 }
             }
+            const { id, ...rest } = payload || {}
+            if (!id) return
             if (action == 'update') {
                 return {
                     id,
@@ -148,7 +147,7 @@ export class LivequeryCore {
                     data: await this.config.storage.update<T>(
                         collection_ref,
                         id,
-                        payload || {}
+                        rest
                     )
                 }
             }
@@ -163,7 +162,7 @@ export class LivequeryCore {
                 }
             }
         })();
-        if (!change) return {}
+        if (!change) return 
         for (const collection_id of collections) {
             const sender = this.#collections.get(collection_id)
             if (!sender) continue
@@ -197,20 +196,22 @@ export class LivequeryCore {
 
         const refs = action.ref.split('/')
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : action.ref
-        const id = refs.length % 2 == 0 ? refs[refs.length - 1] || '' : ''
         return from(
-            this.#broadcast({
+            this.#broadcast<T>({
                 ...action,
-                id,
                 collection_ref,
                 source: 'action'
             })
         ).pipe(
-            switchMap(change => {
-                if (['add', 'update', 'delete'].includes(action.action)) {
-                    return from(this.#sync(action.ref, collection_ref, change)).pipe(
-                        mergeMap($ => $)
-                    )
+            switchMap(change => { 
+                if (change) {
+                    const targets = Object.entries(this.config.transporters)
+                    if (targets.length == 0) return of(change)
+                    if (['add', 'update', 'delete'].includes(action.action)) {
+                        return from(this.#sync(action.ref, collection_ref, change)).pipe(
+                            mergeMap($ => $)
+                        )
+                    }
                 }
                 return from(Object.entries(this.config.transporters)).pipe(
                     mergeMap(([id, transporter]) => transporter.trigger<T>(action))
