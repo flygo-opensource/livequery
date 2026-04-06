@@ -1,6 +1,6 @@
 # @livequery/new
 
-A local-first reactive data library for browser clients. It provides a type-safe, RxJS-based collection system with pluggable storage and transporter adapters, optimistic local mutations, and real-time synchronisation support.
+A local-first reactive data library for browser clients. Type-safe, RxJS-based collection system with pluggable storage and transporter adapters, optimistic local mutations, and real-time synchronisation support.
 
 ## Table of Contents
 
@@ -8,11 +8,12 @@ A local-first reactive data library for browser clients. It provides a type-safe
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Core Concepts](#core-concepts)
-  - [LivequeryDocument](#livequerydocument)
+  - [Doc](#doc)
   - [LivequeryStorge](#livequerystorge)
   - [LivequeryTransporter](#livequerytransporter)
   - [LivequeryCore](#livequerycore)
   - [LivequeryCollection](#livequerycollection)
+  - [LivequeryDocument](#livequerydocument)
 - [Query Filters](#query-filters)
 - [API Reference](#api-reference)
   - [LivequeryMemoryStorage](#livequerymemorystorage)
@@ -29,8 +30,9 @@ A local-first reactive data library for browser clients. It provides a type-safe
 ```
 ┌─────────────────────────────────────┐
 │          Your Application           │
-│   LivequeryCollection (BehaviorSubject)
-│        query / add / update / delete│
+│  LivequeryCollection                │
+│  .items / .loading / .paging        │
+│  .query() / .add() / .update() / .delete()
 └──────────────┬──────────────────────┘
                │
 ┌──────────────▼──────────────────────┐
@@ -49,7 +51,7 @@ A local-first reactive data library for browser clients. It provides a type-safe
 
 **Data flow for a mutation (add / update / delete):**
 1. `LivequeryCollection.add/update/delete` calls `LivequeryCore.trigger`.
-2. The core applies the change locally to storage *immediately* (optimistic update).
+2. The core applies the change to storage immediately (optimistic update).
 3. The change is broadcast to all live collections watching the same `ref`.
 4. The core then calls every configured transporter to sync the change remotely.
 
@@ -57,7 +59,7 @@ A local-first reactive data library for browser clients. It provides a type-safe
 1. `LivequeryCollection.query(filters)` calls `LivequeryCore.query`.
 2. The core returns locally-stored documents instantly from storage.
 3. In parallel, it fires the query against every transporter.
-4. Each transporter response streams `DataChangeEvent[]` back into the collection, which merges them reactively.
+4. Each transporter streams `DataChangeEvent[]` back into the collection, which merges them reactively.
 
 ---
 
@@ -74,20 +76,17 @@ bun add @livequery/new rxjs
 ## Quick Start
 
 ```ts
-import { of } from "rxjs"
 import {
   LivequeryCollection,
   LivequeryCore,
   LivequeryMemoryStorage,
-  type LivequeryDocument,
-  type LivequeryQueryParams,
-  type LivequeryQueryResult,
+  type Doc,
   type LivequeryTransporter,
-  type LivequeryAction,
 } from "@livequery/new"
+import { of } from "rxjs"
 
 // 1. Define your document shape
-type Todo = LivequeryDocument & {
+type Todo = Doc & {
   title: string
   done: boolean
   createdAt: number
@@ -96,21 +95,13 @@ type Todo = LivequeryDocument & {
 // 2. Create a storage (in-memory for this example)
 const storage = new LivequeryMemoryStorage()
 
-// 3. Create a transporter (no-op for this example; replace with your real backend)
+// 3. Create a transporter (no-op; replace with your real backend)
 const transporter: LivequeryTransporter = {
-  name: "primary",
-  query<T extends LivequeryDocument>(query: LivequeryQueryParams<T>) {
-    return of<Partial<LivequeryQueryResult<T>>>({
-      query_id: query.query_id,
-      changes: [],
-      summary: {},
-      paging: { total: 0, current: 0 },
-      metadata: {},
-      source: "query",
-    })
+  query(query) {
+    return of({ query_id: query.query_id, changes: [], summary: {}, paging: { total: 0, current: 0 }, metadata: {}, source: "query" })
   },
-  trigger<T>(_action: LivequeryAction<LivequeryDocument>) {
-    return of({ data: {} as T })
+  trigger(_action) {
+    return of({ data: {} as any })
   },
 }
 
@@ -125,52 +116,65 @@ const core = new LivequeryCore({
 })
 
 // 5. Create a reactive collection
-const todos = new LivequeryCollection<Todo>(core, {
+const todos = new LivequeryCollection<Todo>({
+  core,
   ref: "todos",
   filters: { "createdAt:sort": "desc", ":limit": 20, ":page": 1, ":before": "", ":after": "" },
   lazy: true,
 })
 
-// 6. Subscribe to state changes
-todos.subscribe((state) => {
-  console.log("items:", state.items.map((doc$) => doc$.value))
-  console.log("loading:", state.loading)
-  console.log("paging:", state.paging)
-})
+// 6. Call initialize() to start watching (required)
+todos.initialize()
 
-// 7. Trigger an initial query
+// 7. Subscribe to reactive state
+todos.items.subscribe((docs) => {
+  console.log("items:", docs.map((doc$) => doc$.value))
+})
+todos.loading.subscribe((state) => console.log("loading:", state))
+todos.paging.subscribe((p) => console.log("paging:", p))
+
+// 8. Trigger a query
 await todos.query({ "createdAt:sort": "desc", ":limit": 20, ":page": 1, ":before": "", ":after": "" })
 
-// 8. Mutate data
+// 9. Mutate data
 await todos.add({ title: "Buy milk", done: false, createdAt: Date.now() })
 await todos.update("some-id", { done: true })
 await todos.delete("some-id")
+```
 
 ---
 
 ## Core Concepts
 
-### LivequeryDocument
+### Doc
 
-Every document stored in livequery must extend `LivequeryDocument`:
+Every document stored in livequery must extend `Doc<T>`:
 
 ```ts
-type LivequeryDocument = {
-  id: string                                  // unique identifier
-  _remotes: { [target: string]: string | number | true } // sync state per transporter
-  _prev: Record<string, any>                  // previous field values (for conflict resolution)
-  _deleting?: boolean                         // marks document as pending deletion
-  [key: string]: any
+type Doc<T = {}> = T & {
+  id: string
 }
 ```
 
-Your own types extend this base:
+Your types extend this base:
 
 ```ts
-type Post = LivequeryDocument & {
+type Post = Doc & {
   title: string
   body: string
   publishedAt: number
+}
+```
+
+When a document is held inside a `LivequeryCollection`, it is wrapped in `DocState<T>` which adds optimistic-update tracking fields:
+
+```ts
+type DocState<T extends Doc> = T & {
+  _deleting?: boolean    // pending deletion
+  _updating?: boolean    // pending update
+  _adding?: boolean      // pending add
+  _remotes?: Record<string, string | number>  // per-transporter version cursors
+  _prev?: Partial<T>     // previous values before last local mutation
 }
 ```
 
@@ -182,15 +186,15 @@ type Post = LivequeryDocument & {
 
 ```ts
 type LivequeryStorge = {
-  query<T extends LivequeryDocument>(
+  query<T extends Doc>(
     collection: string,
     filters?: Record<string, any>
   ): Promise<{ documents: T[]; paging: LivequeryPaging }>
 
-  get<T extends LivequeryDocument>(ref: string, id: string): Promise<T | null>
-  add<T extends LivequeryDocument>(collection: string, document: T): Promise<T>
-  update<T extends LivequeryDocument>(collection: string, id: string, document: Record<string, any>): Promise<T | null>
-  delete<T extends LivequeryDocument>(collection: string, id: string): Promise<T | null>
+  get<T extends Doc>(ref: string, id: string): Promise<T | null>
+  add<T extends Doc>(collection: string, document: T): Promise<T>
+  update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<T | null>
+  delete<T extends Doc>(collection: string, id: string): Promise<T | null>
 }
 ```
 
@@ -202,20 +206,15 @@ A transporter connects the core to a remote backend (REST API, WebSocket, Fireba
 
 ```ts
 type LivequeryTransporter = {
-  name: string
-
-  // Called for every query. Returns an Observable so remotes can stream partial results
-  // (e.g., first respond with cached data, then real-time updates).
-  query<T extends LivequeryDocument>(
+  // Called for every query. Returns an Observable so the remote can stream results.
+  query<T extends Doc>(
     query: LivequeryQueryParams<T>
   ): Observable<Partial<LivequeryQueryResult<T>>>
 
-  // Called for add/update/delete/custom actions.
-  trigger<T>(action: LivequeryAction<LivequeryDocument>): Observable<{ data: T; error?: Error }>
+  // Called for add / update / delete / custom actions.
+  trigger<T>(action: LivequeryAction): Observable<{ data: T; error?: Error }>
 }
 ```
-
-The `query` method must emit `query_id` in every response so the core can route results to the correct collection.
 
 ---
 
@@ -225,26 +224,26 @@ The central coordinator. Instantiate once and share across your app.
 
 ```ts
 const core = new LivequeryCore({
-  storage,                  // LivequeryStorge implementation
-  transporters: {           // one or more LivequeryTransporter instances
+  storage,                      // LivequeryStorge implementation
+  transporters: {               // one or more named transporters
     primary: myTransporter,
   },
-  resolver,                 // ConflictResolverFunction – see below
+  resolver,                     // ConflictResolverFunction
 })
 ```
 
 #### Conflict resolver
 
-The resolver is called during every local mutation. It decides whether to approve the change and what the final merged document should look like.
+Called for every local mutation. Decides whether to approve the change and what the final merged document should be.
 
 ```ts
-type ConflictResolverFunction = <T extends LivequeryDocument>(e: {
-  from: Record<string, string | number | boolean>  // remote versions (_remotes)
+type ConflictResolverFunction = <T extends Doc>(e: {
+  from: Record<string, string | number | boolean>  // remote version cursors (_remotes)
   old_document: T                                  // current local document
   change: DataChangeEvent<T>                       // incoming change
 }) => {
-  approved: boolean   // if false, the change is discarded
-  document: T         // the resolved document to store
+  approved: boolean   // false → discard the change
+  document: T         // resolved document to persist
 }
 ```
 
@@ -261,46 +260,79 @@ const resolver: ConflictResolverFunction = ({ change, old_document }) => ({
 
 ### LivequeryCollection
 
-`LivequeryCollection<T>` extends RxJS `BehaviorSubject` and holds the reactive state for one collection path (`ref`).
+`LivequeryCollection<T>` holds reactive state for one collection path (`ref`). Its state is exposed as a set of `BehaviorSubject` properties.
 
 ```ts
-const posts = new LivequeryCollection<Post>(core, {
+const posts = new LivequeryCollection<Post>({
+  core,
   ref: "posts",
   filters: { "publishedAt:sort": "desc", ":limit": 10, ":page": 1, ":before": "", ":after": "" },
-  lazy: true,   // true = don't load on construction; false = auto-load
+  lazy: true,   // true = don't auto-load on initialize(); false = load immediately
 })
+
+// Must call initialize() to wire up the core watcher
+posts.initialize()
 ```
 
-The emitted `LivequeryCollectionState<T>` value has the shape:
+#### Reactive state properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `items` | `BehaviorSubject<LivequeryDocument<DocState<T>>[]>` | Current list of documents |
+| `loading` | `BehaviorSubject<LivequeryLoadingState>` | Loading flags |
+| `filters` | `BehaviorSubject<Partial<LivequeryFilters<T>>>` | Active filters |
+| `paging` | `BehaviorSubject<LivequeryPaging>` | Pagination info |
+| `summary` | `BehaviorSubject<Record<string, any>>` | Aggregation data from transporter |
+| `metadata` | `BehaviorSubject<Record<string, any>>` | Arbitrary metadata from transporter |
 
 ```ts
-type LivequeryCollectionState<T extends LivequeryDocument> = {
-  ref: string
-  items: Array<BehaviorSubject<T>>    // each item is itself a BehaviorSubject
-  indexes: Map<string, number>        // id → index in items array
-  summary: Record<string, any>        // aggregation data from transporter
-  metadata?: Record<string, any>      // arbitrary metadata from transporter
-  filters?: Partial<LivequeryFilters<T>>
-  loading: {
-    all: boolean    // initial query in progress
-    next: boolean   // loading next page
-    prev: boolean   // loading previous page
-  }
-  paging: LivequeryPaging
+posts.items.subscribe((docs) => console.log(docs.map(d => d.value)))
+posts.loading.subscribe(({ all, next, prev }) => console.log({ all, next, prev }))
+```
+
+`LivequeryLoadingState`:
+
+```ts
+type LivequeryLoadingState = {
+  all: boolean   // initial query in progress
+  next: boolean  // loading next page
+  prev: boolean  // loading previous page
 }
 ```
 
-Each `items[i]` is a `BehaviorSubject<T>`, so you can subscribe to individual document changes:
+---
+
+### LivequeryDocument
+
+Each element of `collection.items.value` is a `LivequeryDocument<DocState<T>>`, which extends `BehaviorSubject<T>`. It provides convenient mutation helpers scoped to that document.
 
 ```ts
-posts.value.items[0].subscribe((doc) => console.log("doc changed:", doc))
+class LivequeryDocument<T extends Doc> extends BehaviorSubject<T> {
+  update(data: Partial<T>): Promise<void>
+  del(): Promise<void>
+  trigger<R>(action: LivequeryActionType, payload: Record<string, any>): Observable<{ data: R; error?: Error }>
+}
+```
+
+```ts
+const doc = posts.items.value[0]
+
+// Subscribe to individual document changes
+doc.subscribe((post) => console.log("post changed:", post))
+
+// Mutate directly on the document
+await doc.update({ title: "Updated title" })
+await doc.del()
+
+// Fire a custom action
+doc.trigger("~publish", { scheduledAt: Date.now() }).subscribe()
 ```
 
 ---
 
 ## Query Filters
 
-Filters are type-safe. The compiler will only allow valid field paths and operators for your document type.
+Filters are fully type-safe. The TypeScript compiler will only allow valid field paths and operators for your document type.
 
 ### Pagination / sorting
 
@@ -329,7 +361,7 @@ Filters are type-safe. The compiler will only allow valid field paths and operat
 | `null` | any | `"null-only"` or `"not-null"` |
 
 ```ts
-type Article = LivequeryDocument & {
+type Article = Doc & {
   score: number
   tags: string[]
   title: string
@@ -357,7 +389,7 @@ const filters: LivequeryFilters<Article> = {
 
 ### LivequeryMemoryStorage
 
-An in-memory `LivequeryStorge` implementation backed by a `Map`. Data is lost on page reload.
+An in-memory `LivequeryStorge` implementation backed by a `Map`. Data is lost on page reload. Useful for testing and offline-first prototypes.
 
 ```ts
 const storage = new LivequeryMemoryStorage()
@@ -367,23 +399,19 @@ const storage = new LivequeryMemoryStorage()
 |--------|-----------|-------------|
 | `query` | `(collection, filters?) → Promise<{documents, paging}>` | Filter, sort and paginate documents |
 | `get` | `(collection, id) → Promise<T \| null>` | Fetch a single document by id |
-| `add` | `(collection, document) → Promise<T>` | Upsert a document |
-| `update` | `(collection, id, partial) → Promise<T \| null>` | Merge partial into existing document |
+| `add` | `(collection, document) → Promise<T>` | Upsert a document (insert or replace by id) |
+| `update` | `(collection, id, partial) → Promise<T \| null>` | Merge partial fields into existing document |
 | `delete` | `(collection, id) → Promise<T \| null>` | Remove and return a document |
-| `seed` | `(collection, docs[]) → void` | Bulk-load initial documents (replaces existing) |
+| `seed` | `(collection, docs[]) → void` | Bulk-load documents (replaces existing) |
 | `clear` | `(collection?) → void` | Clear one collection or all collections |
 
 ```ts
-// Seed test data
 storage.seed<Todo>("todos", [
-  { id: "1", _remotes: {}, _prev: {}, title: "Write docs", done: false, createdAt: Date.now() }
+  { id: "1", title: "Write docs", done: false, createdAt: Date.now() }
 ])
 
-// Clear a specific collection
-storage.clear("todos")
-
-// Clear everything
-storage.clear()
+storage.clear("todos")   // clear one collection
+storage.clear()          // clear everything
 ```
 
 ---
@@ -392,32 +420,36 @@ storage.clear()
 
 | Method | Description |
 |--------|-------------|
-| `query(filters)` | Execute a fresh query with new filters |
-| `loadMore()` | Append next page (uses `paging.next.cursor`) |
-| `loadPrev()` | Prepend previous page (uses `paging.prev.cursor`) |
+| `initialize()` | Wire up the core watcher and optionally auto-load (required before use) |
+| `query(filters)` | Execute a fresh query replacing current items |
+| `loadMore()` | Append next page using `paging.next.cursor` |
+| `loadPrev()` | Prepend previous page using `paging.prev.cursor` |
 | `loadAround(cursor)` | Load items around a specific cursor (both directions) |
 | `add(payload)` | Optimistically add a new document |
 | `update(id, payload)` | Optimistically update a document |
 | `delete(id)` | Optimistically delete a document |
 | `trigger(action, payload?)` | Fire a custom action (e.g. `"~publish"`) |
-| `unsubscribe()` | Tear down the collection and its watcher |
 
 ```ts
-// Infinite scroll — load next page
-await todos.loadMore()
+// Paginate
+await collection.loadMore()
+await collection.loadPrev()
+await collection.loadAround("cursor-abc")
 
-// Cursor-based navigation
-await todos.loadAround("cursor-abc")
+// Mutate
+await collection.add({ title: "New item", done: false, createdAt: Date.now() })
+await collection.update("doc-id", { done: true })
+await collection.delete("doc-id")
 
-// Custom action (handled by your transporter)
-await todos.trigger("~sendEmail", { to: "user@example.com" })
+// Custom action handled by your transporter
+collection.trigger("~sendEmail", { to: "user@example.com" }).subscribe()
 ```
 
 ---
 
 ### WorkerRpc
 
-`WorkerRpc` is a utility for calling services across a `SharedWorker` boundary using an RxJS / Promise-compatible API.
+`WorkerRpc` is a utility for calling services across a `SharedWorker` boundary using an Observable / Promise-compatible API.
 
 #### Expose a service inside a SharedWorker
 
@@ -431,7 +463,8 @@ class DataService {
   }
 }
 
-WorkerRpc.exposeWorkerService(new DataService())
+const rpc = new WorkerRpc()
+rpc.exposeWorkerService(new DataService())
 ```
 
 #### Consume the service in the main thread
@@ -442,7 +475,7 @@ import { WorkerRpc } from "@livequery/new"
 
 const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module" })
 
-// Returns a typed proxy. Each property access builds the method path.
+// Returns a typed proxy
 const service = WorkerRpc.linkWorkerService<DataService>("DataService", worker)
 
 // Call as a Promise
@@ -462,13 +495,14 @@ Implement `LivequeryTransporter` to connect to any backend:
 
 ```ts
 import { Observable } from "rxjs"
-import type { LivequeryTransporter, LivequeryDocument, LivequeryQueryParams, LivequeryQueryResult, LivequeryAction } from "@livequery/new"
+import type {
+  LivequeryTransporter, Doc,
+  LivequeryQueryParams, LivequeryAction
+} from "@livequery/new"
 
 const httpTransporter: LivequeryTransporter = {
-  name: "http",
-
-  query<T extends LivequeryDocument>(params: LivequeryQueryParams<T>) {
-    return new Observable<Partial<LivequeryQueryResult<T>>>(subscriber => {
+  query<T extends Doc>(params: LivequeryQueryParams<T>) {
+    return new Observable(subscriber => {
       fetch(`/api/${params.ref}?${new URLSearchParams(params.filters as any)}`)
         .then(r => r.json())
         .then(data => {
@@ -486,10 +520,12 @@ const httpTransporter: LivequeryTransporter = {
     })
   },
 
-  trigger<T>(action: LivequeryAction<LivequeryDocument>) {
+  trigger<T>(action: LivequeryAction) {
     return new Observable<{ data: T }>(subscriber => {
+      const method = action.action === "delete" ? "DELETE"
+        : action.action === "add" ? "POST" : "PATCH"
       fetch(`/api/${action.ref}`, {
-        method: action.action === "delete" ? "DELETE" : action.action === "add" ? "POST" : "PATCH",
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(action.payload),
       })
@@ -508,7 +544,7 @@ const httpTransporter: LivequeryTransporter = {
 Implement `LivequeryStorge` to persist data in `localStorage`, `IndexedDB`, SQLite, etc.:
 
 ```ts
-import type { LivequeryStorge, LivequeryDocument, LivequeryPaging } from "@livequery/new"
+import type { LivequeryStorge, Doc, LivequeryPaging } from "@livequery/new"
 
 class LocalStorageAdapter implements LivequeryStorge {
   private read<T>(collection: string): T[] {
@@ -518,17 +554,17 @@ class LocalStorageAdapter implements LivequeryStorge {
     localStorage.setItem(collection, JSON.stringify(docs))
   }
 
-  async query<T extends LivequeryDocument>(collection: string, filters?: Record<string, any>) {
+  async query<T extends Doc>(collection: string, filters?: Record<string, any>) {
     const docs = this.read<T>(collection)
-    // apply filters, sort, paginate ...
+    // apply filters, sort, paginate …
     return { documents: docs, paging: { total: docs.length, current: docs.length } }
   }
 
-  async get<T extends LivequeryDocument>(collection: string, id: string) {
+  async get<T extends Doc>(collection: string, id: string) {
     return this.read<T>(collection).find(d => d.id === id) ?? null
   }
 
-  async add<T extends LivequeryDocument>(collection: string, document: T) {
+  async add<T extends Doc>(collection: string, document: T) {
     const docs = this.read<T>(collection)
     const i = docs.findIndex(d => d.id === document.id)
     if (i >= 0) docs[i] = document; else docs.push(document)
@@ -536,7 +572,7 @@ class LocalStorageAdapter implements LivequeryStorge {
     return document
   }
 
-  async update<T extends LivequeryDocument>(collection: string, id: string, patch: Record<string, any>) {
+  async update<T extends Doc>(collection: string, id: string, patch: Record<string, any>) {
     const docs = this.read<T>(collection)
     const i = docs.findIndex(d => d.id === id)
     if (i < 0) return null
@@ -545,7 +581,7 @@ class LocalStorageAdapter implements LivequeryStorge {
     return docs[i]
   }
 
-  async delete<T extends LivequeryDocument>(collection: string, id: string) {
+  async delete<T extends Doc>(collection: string, id: string) {
     const docs = this.read<T>(collection)
     const i = docs.findIndex(d => d.id === id)
     if (i < 0) return null
@@ -561,23 +597,60 @@ class LocalStorageAdapter implements LivequeryStorge {
 ## Types Reference
 
 ```ts
-// Core document base
-type LivequeryDocument = { id: string; _remotes: Record<string, string|number|true>; _prev: Record<string,any>; _deleting?: boolean; [key:string]:any }
+// Base document type — all documents must have an `id`
+type Doc<T = {}> = T & { id: string }
 
-// Change event emitted by transporters / core
-type DataChangeEvent<T> = { id: string; type: "added" | "updated" | "removed"; data?: Partial<Omit<T,"id">> | null }
+// Document state inside a collection (tracks optimistic-update flags)
+type DocState<T extends Doc> = T & {
+  _deleting?: boolean
+  _updating?: boolean
+  _adding?: boolean
+  _remotes?: Record<string, string | number>
+  _prev?: Partial<T>
+}
 
-// Query parameters sent to transporters
-type LivequeryQueryParams<T> = { ref: string; query_id: string; collection_id: string; filters?: Partial<LivequeryFilters<T>>; headers?: Record<string,string> }
+// Change event emitted by transporters and the core
+type DataChangeEvent<T extends Doc> = {
+  id: string
+  type: "added" | "updated" | "removed"
+  data?: Partial<Omit<T, "id">> | null
+}
+
+// Query parameters forwarded to every transporter
+type LivequeryQueryParams<T extends Doc> = {
+  ref: string
+  query_id: string
+  collection_id: string
+  filters?: Partial<LivequeryFilters<T>>
+  headers?: Record<string, string>
+}
 
 // Result streamed back from a transporter query
-type LivequeryQueryResult<T> = { query_id: string; changes: DataChangeEvent<T>[]; summary: Record<string,any>; paging: LivequeryPaging; metadata: Record<string,any>; source: "query"|"action"|"realtime" }
+type LivequeryQueryResult<T extends Doc> = {
+  query_id: string
+  changes: DataChangeEvent<T>[]
+  summary: Record<string, any>
+  paging: LivequeryPaging
+  metadata: Record<string, any>
+  source: "query" | "action" | "realtime"
+}
 
-// Action sent to transporters
-type LivequeryAction<T> = { ref: string; collection_id: string; action: "add"|"update"|"delete"|`~${string}`; payload?: Record<string,any>; filters?: Partial<LivequeryFilters<T>>; headers?: Record<string,string> }
+// Action sent to every transporter for mutations
+type LivequeryAction = {
+  ref: string
+  collection_id: string
+  action: "add" | "update" | "delete" | `~${string}`
+  payload?: Record<string, any>
+  headers?: Record<string, string>
+}
 
-// Paging info
-type LivequeryPaging = { total: number; current: number; next?: { count: number; cursor: string }; prev?: { count: number; cursor: string } }
+// Pagination info
+type LivequeryPaging = {
+  total: number
+  current: number
+  next?: { count: number; cursor: string }
+  prev?: { count: number; cursor: string }
+}
 ```
 
 ---
@@ -588,9 +661,9 @@ type LivequeryPaging = { total: number; current: number; next?: { count: number;
 bun run build
 ```
 
-Build output is placed in `dist/` as ESM with TypeScript declarations. The target is browser ESM (`--target browser`).
+Output is placed in `dist/` as ESM with TypeScript declarations (browser target).
 
 ```bash
-bun run build:watch   # watch mode (JS only)
+bun run build:watch   # watch mode (JS only, no type declarations)
 bun run clean         # remove dist/
 ```

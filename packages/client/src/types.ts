@@ -1,11 +1,13 @@
-export type LivequeryDocument<T = {}> = T & {
+export type Doc<T = {}> = T & {
     id: string
-    _remotes: {
-        [target: string]: string | number | true
-    }
-    _prev: Record<string, any>
+}
+
+export type DocState<T extends Doc> = T & {
     _deleting?: boolean
-    [key: string]: any
+    _updating?: boolean
+    _adding?: boolean
+    _remotes?: Record<string, string | number>
+    _prev?: Partial<T>
 }
 
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
@@ -23,11 +25,11 @@ type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
 )
 
 
-type QueryBuilder<T extends LivequeryDocument, FieldType, PostFix extends string | number, Value> = {
+type QueryBuilder<T extends Doc, FieldType, PostFix extends string | number, Value> = {
     [K in keyof T as `${FlatObjectKeys<T, FieldType>}${PostFix extends string ? `:${PostFix}` : ''}`]?: Value
 }
 
-export type LivequeryPagingFilters<T extends LivequeryDocument> = (
+export type LivequeryPagingFilters<T extends Doc> = (
     QueryBuilder<T, string, 'sort', 'asc' | 'desc'>
 ) & {
     ':limit': number
@@ -36,7 +38,7 @@ export type LivequeryPagingFilters<T extends LivequeryDocument> = (
     ':page': number
 }
 
-export type LivequeryFilters<T extends LivequeryDocument> = (
+export type LivequeryFilters<T extends Doc> = (
     // QueryBuilder<T, string, 0, string> &
     QueryBuilder<T, number, 'gt', number> &
     QueryBuilder<T, number, 'gte', number> &
@@ -57,7 +59,7 @@ export type LivequeryFilters<T extends LivequeryDocument> = (
 
 
 
-export type DataChangeEvent<T extends LivequeryDocument> = {
+export type DataChangeEvent<T extends Doc> = {
     id: string
     type: 'added' | 'removed' | 'updated'
     data?: Partial<Omit<T, 'id'>> | null | undefined
@@ -80,7 +82,7 @@ export type LivequeryPaging = {
 
 
 
-export type LivequeryQueryParams<T extends LivequeryDocument> = {
+export type LivequeryQueryParams<T extends Doc> = {
     ref: string
     query_id: string
     filters?: Partial<LivequeryFilters<T>>
@@ -92,7 +94,7 @@ export type LivequeryQueryParams<T extends LivequeryDocument> = {
 export type LivequeryActionType = 'add' | 'update' | 'delete' | `~${string}`
 
 
-export type LivequeryAction<T extends LivequeryDocument> = Omit<LivequeryQueryParams<T>, 'query_id'> & {
+export type LivequeryAction = Omit<LivequeryQueryParams<Doc>, 'query_id' | 'filters'> & {
     action: LivequeryActionType
     payload?: Record<string, any>
 }

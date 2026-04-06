@@ -1,10 +1,10 @@
-import type { LivequeryDocument, LivequeryFilters } from "../types"
+import type { Doc, LivequeryFilters } from "../types"
 
 type Primitive = string | number | boolean | null | undefined
 
-export type LivequeryFilterInput<T extends LivequeryDocument> = Partial<LivequeryFilters<T>> | Record<string, any>
+export type LivequeryFilterInput<T extends Doc> = Partial<LivequeryFilters<T>> | Record<string, any>
 
-export function filterLivequeryDocuments<T extends LivequeryDocument>(
+export function filterDocs<T extends Doc>(
     documents:T[],
     filters?: LivequeryFilterInput<T>
 ): T[] {
@@ -13,7 +13,7 @@ export function filterLivequeryDocuments<T extends LivequeryDocument>(
     return documents.filter((doc) => matchesAllFilters(doc, normalized))
 }
 
-export function matchesAllFilters<T extends LivequeryDocument>(doc: T, filters: Record<string, any>) {
+export function matchesAllFilters<T extends Doc>(doc: T, filters: Record<string, any>) {
     for (const [key, expected] of Object.entries(filters)) {
         if (key.startsWith(':') || key.endsWith(':sort')) continue
 

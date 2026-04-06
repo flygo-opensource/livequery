@@ -1,9 +1,8 @@
 import { defer, EMPTY, from, map, mergeMap, Observable, of, Subject, Subscriber, switchMap } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
-import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryQueryParams } from "./types"
-import { matchesAllFilters } from "./helpers/filterLivequeryDocuments"
-
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams } from "./types"
+import { matchesAllFilters } from "./helpers/filterDocs"
 
 
 
@@ -21,14 +20,14 @@ export type LivequeryLoadingState = {
 type CollectionId = string
 type Ref = string
 
-export type SyncRequest<T extends LivequeryDocument> = LivequeryAction<T> & {
+export type SyncRequest = LivequeryAction & {
     ref: string,
     collection_ref: string
     source: 'query' | 'realtime' | 'action'
 }
 
 
-export type ConflictResolverFunction = <T extends LivequeryDocument>(e: {
+export type ConflictResolverFunction = <T extends Doc>(e: {
     from: Record<string, string | number | boolean>
     old_document: T
     change: DataChangeEvent<T>
@@ -49,6 +48,7 @@ export class LivequeryCore {
 
     #collections = new Map<CollectionId, {
         ref: string
+        document_id?: string
         o: Subscriber<Partial<LivequeryQueryResult<any>> & {
             from: 'query' | 'realtime' | 'action'
         }>
@@ -82,7 +82,7 @@ export class LivequeryCore {
                     map((result, index) => {
                         const changes = (result.changes || []).filter(change => {
                             if (change.type != 'added') return true
-                            return matchesAllFilters(change.data as any as LivequeryDocument, filters || {})
+                            return matchesAllFilters(change.data as any as Doc, filters || {})
                         })
                         sender.o.next({
                             ...result,
@@ -95,12 +95,14 @@ export class LivequeryCore {
         ).subscribe()
     }
 
-    watch<T extends LivequeryDocument>(ref: string, collection_id: string) {
-        
+    watch<T extends Doc>(ref: string, collection_id: string) {
+        const refs = ref.split('/')
+        const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
         return new Observable<Partial<LivequeryQueryResult<T>>>(o => {
             this.#collections.set(collection_id, {
                 o,
-                ref
+                ref,
+                document_id
             })
             const refCollections = this.#refs.get(ref) || new Set<CollectionId>()
             refCollections.add(collection_id)
@@ -116,14 +118,14 @@ export class LivequeryCore {
         })
     }
 
-    async query<T extends LivequeryDocument>(req: LivequeryQueryParams<T>) {
+    async query<T extends Doc>(req: LivequeryQueryParams<T>) {
         setTimeout(() => this.#queries$.next(req), 0)
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
 
 
 
-    async #broadcast<T extends LivequeryDocument>({ source, ref, collection_ref, action, payload }: SyncRequest<T>) {
+    async #broadcast<T extends Doc>({ source, ref, collection_ref, action, payload }: SyncRequest) {
         const collections = this.#refs.get(ref)
         if (!collections) return
         const change = await (async () => {
@@ -162,20 +164,26 @@ export class LivequeryCore {
                 }
             }
         })();
-        if (!change) return 
+        if (!change) return
         for (const collection_id of collections) {
             const sender = this.#collections.get(collection_id)
             if (!sender) continue
-            sender.o.next({
-                changes: [change],
-                from: source
-            })
+            if (!sender.document_id || sender.document_id === change.id) {
+                sender.o.next({
+                    changes: [change],
+                    from: source
+                })
+                if (sender.document_id) {
+                    sender.document_id = change.id
+                }
+            }
+
         }
         return change.data as T
     }
 
-    async #sync(ref: string, collection_ref: string, doc: Record<string, any>) {
-        return EMPTY
+    async #sync<Response>(ref: string, collection_ref: string, doc: Record<string, any>) {
+        return EMPTY as Observable<{ data: Response, error?: Error }>
         if (doc.id.startsWith('local:')) {
             // Try to sync to at least one transporter to get a real id
             // Sync to collections
@@ -189,7 +197,7 @@ export class LivequeryCore {
 
     }
 
-    trigger<T extends LivequeryDocument>(action: LivequeryAction<T>) {
+    trigger<Response>(action: LivequeryAction) {
 
         const options = this.#collections.get(action.collection_id)
         if (!options) throw new Error(`Collection with id ${action.collection_id} not found (maybe disconnected)`)
@@ -197,24 +205,24 @@ export class LivequeryCore {
         const refs = action.ref.split('/')
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : action.ref
         return from(
-            this.#broadcast<T>({
+            this.#broadcast<Doc>({
                 ...action,
                 collection_ref,
                 source: 'action'
             })
         ).pipe(
-            switchMap(change => { 
+            switchMap(change => {
                 if (change) {
                     const targets = Object.entries(this.config.transporters)
-                    if (targets.length == 0) return of(change)
+                    if (targets.length == 0) return of({ data: change, error: undefined })
                     if (['add', 'update', 'delete'].includes(action.action)) {
-                        return from(this.#sync(action.ref, collection_ref, change)).pipe(
+                        return from(this.#sync<Response>(action.ref, collection_ref, change)).pipe(
                             mergeMap($ => $)
                         )
                     }
                 }
                 return from(Object.entries(this.config.transporters)).pipe(
-                    mergeMap(([id, transporter]) => transporter.trigger<T>(action))
+                    mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
                 )
             })
         )

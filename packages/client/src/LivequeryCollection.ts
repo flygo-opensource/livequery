@@ -1,17 +1,19 @@
-import { BehaviorSubject, filter, firstValueFrom, map, Subscription, tap } from "rxjs"
+import { BehaviorSubject, filter, firstValueFrom, Observable, Subscription, tap } from "rxjs"
 import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
-import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryFilters, LivequeryPaging } from "./types"
+import type { DataChangeEvent, LivequeryActionType, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
+import { LivequeryDocument } from "./LivequeryDocument"
 
 
 
-export type LivequeryCollectionOptions<T extends LivequeryDocument> = {
-    core: LivequeryCore,
+export type LivequeryCollectionOptions<T extends Doc> = {
+    core?: LivequeryCore | false | '' | 0 | null | undefined,
     ref: string
     filters: LivequeryFilters<T>
     lazy?: boolean
+    full?: boolean
 }
 
-export class LivequeryCollection<T extends LivequeryDocument> {
+export class LivequeryCollection<T extends Doc> {
 
     #id = crypto.randomUUID()
     #query_id = '#'
@@ -20,7 +22,8 @@ export class LivequeryCollection<T extends LivequeryDocument> {
     #indexes: Map<string, number>
 
     public readonly ref: string
-    public readonly items: BehaviorSubject<Array<BehaviorSubject<T>>>
+    
+    public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
     public readonly metadata: BehaviorSubject<Record<string, any>>
     public readonly loading: BehaviorSubject<LivequeryLoadingState>
@@ -32,7 +35,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
     constructor(private options: LivequeryCollectionOptions<T>) {
         this.ref = options.ref
         this.#indexes = new Map()
-        this.items = new BehaviorSubject<Array<BehaviorSubject<T>>>([])
+        this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
         this.loading = new BehaviorSubject<LivequeryLoadingState>({
             all: options.lazy ? false : true,
@@ -47,13 +50,12 @@ export class LivequeryCollection<T extends LivequeryDocument> {
     }
 
     initialize() {
-        if (this.options.lazy) return
         if (typeof window == 'undefined') return
         if (!this.options.core) return
         if (this.#linker) return
         this.#linker = this.options.core.watch<T>(this.options.ref, this.#id).pipe(
             filter(e => e.source == 'query' ? e.query_id === this.#query_id : true),
-            tap(event => {
+            tap(event => { 
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
                 if (!event.changes || event.changes.length == 0) return
@@ -61,7 +63,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
                 const chaos = event.changes && event.changes.some(change => {
                     if (change.type == 'added' || change.type == 'removed') return true
                     return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
-                }) 
+                })
 
 
 
@@ -119,7 +121,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
                     ...(
                         events.added
                             .filter(a => a.data)
-                            .map(d => new BehaviorSubject({ id: d.id, ...d.data } as any as T))
+                            .map(d => new LivequeryDocument(this, { id: d.id, ...d.data } as any as T))
                     )
                 ]).sort(sorter)
 
@@ -129,7 +131,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
                 }, new Map<string, number>())
 
 
-                this.items.next(items)
+                chaos && this.items.next(items)
                 this.loading.next({
                     all: false,
                     next: false,
@@ -138,10 +140,13 @@ export class LivequeryCollection<T extends LivequeryDocument> {
                 event.paging && this.paging.next(event.paging)
             })
         ).subscribe()
+        
+        !this.options.lazy && this.query(this.options.filters || {})
         return this.#linker
     }
 
     async #query(query_id: string, filters: Partial<LivequeryFilters<T>>) {
+        if (!this.options.core) return
         this.#keys = new Set(Object.keys(filters).filter(a => a.includes(':sort')).map(k => k.split(':')[0] as keyof T))
         const result = await this.options.core.query<T>({
             query_id,
@@ -150,7 +155,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
             collection_id: this.#id
         })
         const documents = result.documents || []
-        const items = documents.map(doc => new BehaviorSubject(doc))
+        const items = documents.map(doc => new LivequeryDocument(this, doc))
         this.filters.next(filters)
         this.items.next(items)
         this.loading.next({
@@ -199,6 +204,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
     }
 
     add(payload: Partial<T>) {
+        if (!this.options.core) return
         return firstValueFrom(this.options.core.trigger({
             action: 'add',
             payload,
@@ -209,6 +215,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
 
 
     update(id: string, payload: Partial<T>) {
+        if (!this.options.core) return
         return firstValueFrom(this.options.core.trigger({
             action: 'update',
             payload: {
@@ -222,6 +229,7 @@ export class LivequeryCollection<T extends LivequeryDocument> {
 
 
     delete(id: string) {
+        if (!this.options.core) return
         return firstValueFrom(this.options.core.trigger({
             action: 'delete',
             payload: {
@@ -232,12 +240,13 @@ export class LivequeryCollection<T extends LivequeryDocument> {
         }))
     }
 
-    trigger(action: LivequeryAction<T>['action'], payload?: LivequeryAction<T>['payload']) {
-        return this.options.core.trigger({
+    trigger<T>(action: LivequeryActionType, payload?: Record<string, any>) {
+        if (!this.options.core) return
+        return this.options.core.trigger<T>({
             action,
             payload,
             ref: this.options.ref,
             collection_id: this.#id
-        })
+        }) as Observable<{ data: T, error?: Error }>
     }
 }

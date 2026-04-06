@@ -1,8 +1,8 @@
 import type { Observable } from "rxjs";
-import type { DataChangeEvent, LivequeryAction, LivequeryDocument, LivequeryPaging, LivequeryQueryParams } from "./types";
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQueryParams } from "./types";
 
 
-export type LivequeryQueryResult<T extends LivequeryDocument> = {
+export type LivequeryQueryResult<T extends Doc> = {
     query_id: string
     changes: DataChangeEvent<T>[]
     summary: Record<string, any>
@@ -12,8 +12,7 @@ export type LivequeryQueryResult<T extends LivequeryDocument> = {
 }
 
 
-export type LivequeryTransporter = {
-    name: string
-    query<T extends LivequeryDocument>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult<T>>>
-    trigger<T>(action: LivequeryAction<LivequeryDocument>): Observable<{ data: T, error?: Error }>
+export type LivequeryTransporter = { 
+    query<T extends Doc>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult<T>>>
+    trigger<T>(action: LivequeryAction): Observable<{ data: T, error?: Error }>
 }
