@@ -1,7 +1,7 @@
 import { defer, EMPTY, from, map, mergeMap, Observable, of, Subject, Subscriber, switchMap } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams } from "./types"
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
 import { matchesAllFilters } from "./helpers/filterDocs"
 
 
@@ -140,28 +140,64 @@ export class LivequeryCore {
                     data
                 }
             }
+
+
             const { id, ...rest } = payload || {}
             if (!id) return
             if (action == 'update') {
+                const old = await this.config.storage.get<T>(
+                    collection_ref,
+                    id
+                ) as undefined | DocState<T>
+                if (!old) return
+                const _prev = Object.keys(rest).reduce((acc, key) => {
+                    if (key in (old._prev || {})) return acc
+                    return {
+                        ...acc,
+                        [key]: (old as any)[key]
+                    }
+                }, old._prev || {})
+                await this.config.storage.update<T>(
+                    collection_ref,
+                    id,
+                    {
+                        ...rest,
+                        _prev
+                    }
+                )
                 return {
                     id,
                     type: 'updated' as DataChangeEvent<any>['type'],
-                    data: await this.config.storage.update<T>(
-                        collection_ref,
-                        id,
-                        rest
-                    )
+                    data: rest
                 }
             }
             if (action == 'delete') {
-                return {
-                    id,
-                    type: 'removed' as DataChangeEvent<any>['type'],
-                    data: await this.config.storage.delete<T>(
+                const soft = !!payload?._soft
+                if (soft) {
+                    await this.config.storage.update<T>(
+                        collection_ref,
+                        id,
+                        {
+                            _deleting: true
+                        }
+                    )
+                    return {
+                        id,
+                        type: 'removed' as DataChangeEvent<any>['type'],
+                        data: { _deleting: true }
+                    }
+                } else {
+                    const data = await this.config.storage.delete<T>(
                         collection_ref,
                         id
                     )
+                    return {
+                        id,
+                        type: 'removed' as DataChangeEvent<any>['type'],
+                        data
+                    }
                 }
+
             }
         })();
         if (!change) return
@@ -177,7 +213,6 @@ export class LivequeryCore {
                     sender.document_id = change.id
                 }
             }
-
         }
         return change.data as T
     }
@@ -198,7 +233,6 @@ export class LivequeryCore {
     }
 
     trigger<Response>(action: LivequeryAction) {
-
         const options = this.#collections.get(action.collection_id)
         if (!options) throw new Error(`Collection with id ${action.collection_id} not found (maybe disconnected)`)
 

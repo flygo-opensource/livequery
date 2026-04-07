@@ -29,9 +29,7 @@ type QueryBuilder<T extends Doc, FieldType, PostFix extends string | number, Val
     [K in keyof T as `${FlatObjectKeys<T, FieldType>}${PostFix extends string ? `:${PostFix}` : ''}`]?: Value
 }
 
-export type LivequeryPagingFilters<T extends Doc> = (
-    QueryBuilder<T, string, 'sort', 'asc' | 'desc'>
-) & {
+export type LivequeryPagingFilters = {
     ':limit': number
     ':before': string
     ':after': string
@@ -39,7 +37,8 @@ export type LivequeryPagingFilters<T extends Doc> = (
 }
 
 export type LivequeryFilters<T extends Doc> = (
-    // QueryBuilder<T, string, 0, string> &
+    QueryBuilder<T, number, 'sort', 'asc' | 'desc'> &
+    QueryBuilder<T, string, 'sort', 'asc' | 'desc'> &
     QueryBuilder<T, number, 'gt', number> &
     QueryBuilder<T, number, 'gte', number> &
     QueryBuilder<T, number, 'lt', number> &

@@ -13,7 +13,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<T> {
         super(document)
     }
 
-    update(data: Partial<T>) {
+    update(data: Partial<T>) { 
         const id = this.value.id
         return this.collection.update(id, data)
     }

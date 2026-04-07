@@ -17,12 +17,12 @@ export class LivequeryCollection<T extends Doc> {
 
     #id = crypto.randomUUID()
     #query_id = '#'
-    #keys = new Set<keyof T>()
+    #keys = new Map<keyof T, number>()
     #linker: Subscription
     #indexes: Map<string, number>
 
     public readonly ref: string
-    
+
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
     public readonly metadata: BehaviorSubject<Record<string, any>>
@@ -55,29 +55,26 @@ export class LivequeryCollection<T extends Doc> {
         if (this.#linker) return
         this.#linker = this.options.core.watch<T>(this.options.ref, this.#id).pipe(
             filter(e => e.source == 'query' ? e.query_id === this.#query_id : true),
-            tap(event => { 
+            tap(event => {
+
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
                 if (!event.changes || event.changes.length == 0) return
-
                 const chaos = event.changes && event.changes.some(change => {
                     if (change.type == 'added' || change.type == 'removed') return true
                     return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
                 })
-
-
-
                 const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
-                    for (const key of this.#keys) {
+                    for (const [key, order] of this.#keys) {
                         const va = a.value[key]
                         const vb = b.value[key]
                         if (typeof va === 'number' && typeof vb === 'number') {
-                            if (va < vb) return -1
-                            if (va > vb) return 1
+                            if (va < vb) return -order
+                            if (va > vb) return order
                         }
                         if (typeof va === 'string' && typeof vb === 'string') {
-                            if (va < vb) return -1
-                            if (va > vb) return 1
+                            if (va < vb) return -order
+                            if (va > vb) return order
                         }
                     }
                     return 0
@@ -140,14 +137,20 @@ export class LivequeryCollection<T extends Doc> {
                 event.paging && this.paging.next(event.paging)
             })
         ).subscribe()
-        
+
         !this.options.lazy && this.query(this.options.filters || {})
         return this.#linker
     }
 
     async #query(query_id: string, filters: Partial<LivequeryFilters<T>>) {
         if (!this.options.core) return
-        this.#keys = new Set(Object.keys(filters).filter(a => a.includes(':sort')).map(k => k.split(':')[0] as keyof T))
+        this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
+            if (k.endsWith(':sort')) {
+                const field = k.split(':')[0] as keyof T
+                p.set(field, v === 'asc' ? 1 : -1)
+            }
+            return p
+        }, new Map<keyof T, number>())
         const result = await this.options.core.query<T>({
             query_id,
             ref: this.options.ref,
@@ -210,7 +213,7 @@ export class LivequeryCollection<T extends Doc> {
             payload,
             ref: this.options.ref,
             collection_id: this.#id
-        }))
+        }), { defaultValue: { data: null } })
     }
 
 
@@ -224,20 +227,21 @@ export class LivequeryCollection<T extends Doc> {
             },
             ref: this.options.ref,
             collection_id: this.#id
-        }))
+        }), { defaultValue: { data: null } })
     }
 
 
-    delete(id: string) {
+    delete(id: string, soft: boolean = false) {
         if (!this.options.core) return
         return firstValueFrom(this.options.core.trigger({
             action: 'delete',
             payload: {
-                id
+                id,
+                ...soft ? { _soft: true } : {}
             },
             ref: this.options.ref,
             collection_id: this.#id
-        }))
+        }), { defaultValue: { data: null } })
     }
 
     trigger<T>(action: LivequeryActionType, payload?: Record<string, any>) {

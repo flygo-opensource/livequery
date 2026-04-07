@@ -157,7 +157,7 @@ export class WorkerRpc {
 
             return Object.assign(observable, {
                 then(onFulfilled?: (value: any) => any, onRejected?: (reason: any) => any) {
-                    return firstValueFrom(observable).then(onFulfilled, onRejected)
+                    return firstValueFrom(observable, { defaultValue: { data: null } }).then(onFulfilled, onRejected)
                 }
             }) as ThenableObservable<any>
         }
