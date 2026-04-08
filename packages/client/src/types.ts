@@ -61,7 +61,7 @@ export type LivequeryFilters<T extends Doc> = (
 export type DataChangeEvent<T extends Doc> = {
     id: string
     type: 'added' | 'removed' | 'updated'
-    data?: Partial<Omit<T, 'id'>> | null | undefined
+    data?: Record<string, any>
 }
 
 
@@ -83,17 +83,17 @@ export type LivequeryPaging = {
 
 export type LivequeryQueryParams<T extends Doc> = {
     ref: string
-    query_id: string
     filters?: Partial<LivequeryFilters<T>>
     headers?: Record<string, string>
-    collection_id: string
 }
 
 
-export type LivequeryActionType = 'add' | 'update' | 'delete' | `~${string}`
-
-
 export type LivequeryAction = Omit<LivequeryQueryParams<Doc>, 'query_id' | 'filters'> & {
-    action: LivequeryActionType
+    action: string 
     payload?: Record<string, any>
+}
+
+export type LivequeryResult<T> = {
+    data: T
+    error?: { code: string, message: string }
 }

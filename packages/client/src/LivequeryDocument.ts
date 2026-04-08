@@ -1,6 +1,6 @@
 import { BehaviorSubject } from "rxjs";
 import type { LivequeryCollection } from "./LivequeryCollection";
-import type { LivequeryActionType, Doc } from "./types";
+import type { Doc } from "./types";
 
 
 
@@ -13,7 +13,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<T> {
         super(document)
     }
 
-    update(data: Partial<T>) { 
+    update(data: Partial<T>) {
         const id = this.value.id
         return this.collection.update(id, data)
     }
@@ -23,7 +23,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<T> {
         return this.collection.delete(id)
     }
 
-    trigger<T>(action: LivequeryActionType, payload: Record<string, any>) {
-        return this.collection.trigger<T>(action, payload) 
+    trigger<T>(action: string, payload: Record<string, any>) {
+        return this.collection.trigger<T>(action, payload)
     }
 }   

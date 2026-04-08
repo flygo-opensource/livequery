@@ -1,6 +1,6 @@
-import { BehaviorSubject, filter, firstValueFrom, Observable, Subscription, tap } from "rxjs"
+import { BehaviorSubject, Observable, Subscription, tap } from "rxjs"
 import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
-import type { DataChangeEvent, LivequeryActionType, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
+import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
 import { LivequeryDocument } from "./LivequeryDocument"
 
 
@@ -16,7 +16,6 @@ export type LivequeryCollectionOptions<T extends Doc> = {
 export class LivequeryCollection<T extends Doc> {
 
     #id = crypto.randomUUID()
-    #query_id = '#'
     #keys = new Map<keyof T, number>()
     #linker: Subscription
     #indexes: Map<string, number>
@@ -54,11 +53,11 @@ export class LivequeryCollection<T extends Doc> {
         if (!this.options.core) return
         if (this.#linker) return
         this.#linker = this.options.core.watch<T>(this.options.ref, this.#id).pipe(
-            filter(e => e.source == 'query' ? e.query_id === this.#query_id : true),
             tap(event => {
-
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
+                event.paging && this.paging.next(event.paging)
+
                 if (!event.changes || event.changes.length == 0) return
                 const chaos = event.changes && event.changes.some(change => {
                     if (change.type == 'added' || change.type == 'removed') return true
@@ -142,7 +141,7 @@ export class LivequeryCollection<T extends Doc> {
         return this.#linker
     }
 
-    async #query(query_id: string, filters: Partial<LivequeryFilters<T>>) {
+    async #query(filters: Partial<LivequeryFilters<T>>) {
         if (!this.options.core) return
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
@@ -152,7 +151,6 @@ export class LivequeryCollection<T extends Doc> {
             return p
         }, new Map<keyof T, number>())
         const result = await this.options.core.query<T>({
-            query_id,
             ref: this.options.ref,
             filters,
             collection_id: this.#id
@@ -170,87 +168,82 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {
-        await this.#query(`all:${Date.now().toString(36)}`, filters)
+        this.loading.next({
+            all: true,
+            next: false,
+            prev: false
+        })
+        await this.#query(filters)
     }
 
     async loadMore() {
         const next = this.paging.value.next
         if (!next) return
-        const id = `after:${Date.now().toString(36)}`
         const filters = {
             ...this.filters.value,
             ':after': next.cursor
         }
-        await this.#query(id, filters || {})
+        this.loading.next({
+            all: false,
+            next: true,
+            prev: false
+        })
+        await this.#query(filters || {})
     }
 
 
     async loadPrev() {
         const prev = this.paging.value.prev
         if (!prev) return
-        const id = `before:${Date.now().toString(36)}`
         const filters = {
             ...this.filters.value,
             ':before': prev.cursor
         }
-        await this.#query(id, filters || {})
+        this.loading.next({
+            all: false,
+            next: false,
+            prev: true
+        })
+        await this.#query(filters || {})
     }
 
     async loadAround(cursor: string) {
-        const id = `all:${Date.now().toString(36)}`
         const filters = {
             ...this.filters.value,
             ':after': cursor,
             ':before': cursor
         }
-        await this.#query(id, filters || {})
+        this.loading.next({
+            all: false,
+            next: true,
+            prev: true
+        })
+        await this.#query(filters || {})
     }
 
     add(payload: Partial<T>) {
-        if (!this.options.core) return
-        return firstValueFrom(this.options.core.trigger({
-            action: 'add',
-            payload,
-            ref: this.options.ref,
-            collection_id: this.#id
-        }), { defaultValue: { data: null } })
+        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.options.core.add<T>(this.options.ref, payload)
     }
 
 
     update(id: string, payload: Partial<T>) {
-        if (!this.options.core) return
-        return firstValueFrom(this.options.core.trigger({
-            action: 'update',
-            payload: {
-                id,
-                ...payload
-            },
-            ref: this.options.ref,
-            collection_id: this.#id
-        }), { defaultValue: { data: null } })
+        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.options.core.update<T>(this.options.ref, id, payload)
     }
 
 
-    delete(id: string, soft: boolean = false) {
-        if (!this.options.core) return
-        return firstValueFrom(this.options.core.trigger({
-            action: 'delete',
-            payload: {
-                id,
-                ...soft ? { _soft: true } : {}
-            },
-            ref: this.options.ref,
-            collection_id: this.#id
-        }), { defaultValue: { data: null } })
+    delete(id: string) {
+        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.options.core.delete<T>(this.options.ref, id)
     }
 
-    trigger<T>(action: LivequeryActionType, payload?: Record<string, any>) {
-        if (!this.options.core) return
+    trigger<T>(action: string, payload?: Record<string, any>) {
+        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
         return this.options.core.trigger<T>({
             action,
             payload,
-            ref: this.options.ref,
-            collection_id: this.#id
+            ref: this.options.ref
         }) as Observable<{ data: T, error?: Error }>
     }
 }
