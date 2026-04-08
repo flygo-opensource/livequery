@@ -6,16 +6,17 @@ import { LivequeryDocument } from "./LivequeryDocument"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    core?: LivequeryCore | false | '' | 0 | null | undefined,
+    core?: LivequeryCore<any> | false | '' | 0 | null | undefined,
     ref: string
     filters: LivequeryFilters<T>
     lazy?: boolean
     full?: boolean
+    context?: Record<string, any>
 }
 
 export class LivequeryCollection<T extends Doc> {
 
-    #id = crypto.randomUUID()
+    public readonly id = crypto.randomUUID()
     #keys = new Map<keyof T, number>()
     #linker: Subscription
     #indexes: Map<string, number>
@@ -52,7 +53,7 @@ export class LivequeryCollection<T extends Doc> {
         if (typeof window == 'undefined') return
         if (!this.options.core) return
         if (this.#linker) return
-        this.#linker = this.options.core.watch<T>(this.options.ref, this.#id).pipe(
+        this.#linker = this.options.core.watch(this.options.ref, this.id, this.options.context || {}).pipe(
             tap(event => {
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
@@ -88,11 +89,9 @@ export class LivequeryCollection<T extends Doc> {
                         ]
                     }
                 }, {
-                    added: [],
-                    updated: [],
-                    removed: []
-                } as {
-                    [type in DataChangeEvent<T>['type']]: DataChangeEvent<T>[]
+                    added: [] as DataChangeEvent[],
+                    updated: [] as DataChangeEvent[],
+                    removed: [] as DataChangeEvent[]
                 })
 
                 const updated_items = events.updated.reduce((p, { data, id }) => {
@@ -153,7 +152,7 @@ export class LivequeryCollection<T extends Doc> {
         const result = await this.options.core.query<T>({
             ref: this.options.ref,
             filters,
-            collection_id: this.#id
+            collection_id: this.id
         })
         const documents = result.documents || []
         const items = documents.map(doc => new LivequeryDocument(this, doc))

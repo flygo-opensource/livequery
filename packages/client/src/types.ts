@@ -33,10 +33,11 @@ export type LivequeryPagingFilters = {
     ':limit': number
     ':before': string
     ':after': string
+    ':around': string
     ':page': number
 }
 
-export type LivequeryFilters<T extends Doc> = (
+export type LivequeryInlineFilters<T extends Doc> = (
     QueryBuilder<T, number, 'sort', 'asc' | 'desc'> &
     QueryBuilder<T, string, 'sort', 'asc' | 'desc'> &
     QueryBuilder<T, number, 'gt', number> &
@@ -56,9 +57,10 @@ export type LivequeryFilters<T extends Doc> = (
 )
 
 
+export type LivequeryFilters<T extends Doc> = LivequeryPagingFilters & LivequeryInlineFilters<T>
 
-
-export type DataChangeEvent<T extends Doc> = {
+export type DataChangeEvent = {
+    collection_ref: string
     id: string
     type: 'added' | 'removed' | 'updated'
     data?: Record<string, any>
@@ -89,7 +91,7 @@ export type LivequeryQueryParams<T extends Doc> = {
 
 
 export type LivequeryAction = Omit<LivequeryQueryParams<Doc>, 'query_id' | 'filters'> & {
-    action: string 
+    action: string
     payload?: Record<string, any>
 }
 

@@ -1,7 +1,11 @@
 import { EMPTY, finalize, firstValueFrom, fromEvent, map, mergeMap, Observable, takeUntil, tap, type Subscriber } from "rxjs";
 
+export type RpcContext = {
+    tab_id: string
+    caller_id: string
+}
 
-export type RpcRequest = {
+export type RpcRequest = RpcContext & {
     id: string;
     service: string
     method: string
@@ -27,9 +31,10 @@ function isObservableLike(value: unknown): value is { subscribe: (...args: any[]
 
 const WorkerContext = typeof window !== 'undefined' ? null : globalThis as any as SharedWorkerGlobalScope
 
-
+export const TAB_ID = Math.random().toString(36).slice(2, 10)
 
 export class WorkerRpc {
+    static #CALLER_ID = Math.random().toString(36).slice(2, 10)
 
     static #workers = new Map<SharedWorker, Map<RequestId, {
         o: Subscriber<any>
@@ -57,7 +62,7 @@ export class WorkerRpc {
                 )
             }),
             map(async ({ port, msg }) => {
-                const { id, service, method, args } = msg.data
+                const { id, service, method, args, ...ctx } = msg.data
                 if (!id || !service || !method) return
 
                 const svc = this.#services.get(service)
@@ -66,7 +71,7 @@ export class WorkerRpc {
                 const post = (data: RpcResponse) => port.postMessage(data)
                 const parts = String(method).split('/').filter(Boolean)
                 let parent: any = null
-                let target: any = svc
+                let target: any = Object.assign(svc, { __RPC_CONTEXT__: ctx })
                 for (const key of parts) {
                     parent = target
                     target = target?.[key]
@@ -111,9 +116,12 @@ export class WorkerRpc {
         console.log(`Service "${serviceName}" exposed to workers`)
     }
 
+    static getContext(instance: any) {
+        return instance?.__RPC_CONTEXT__  
+    }
+
     // Link a service from worker, allow it 
     static linkWorkerService<T>(serviceName: string, worker: SharedWorker) {
-        console.log(`Linking service "${serviceName}" from worker`)
         if (!this.#workers.has(worker)) {
             const requests = new Map<RequestId, {
                 o: Subscriber<any>
@@ -148,12 +156,18 @@ export class WorkerRpc {
                 return () => requests.delete(id)
             })
 
-            setTimeout(() => worker.port.postMessage({
-                id,
-                service: serviceName,
-                method: methodPath,
-                args
-            }))
+            setTimeout(() => {
+                const req: RpcRequest = {
+                    id,
+                    service: serviceName,
+                    method: methodPath,
+                    args,
+                    tab_id: TAB_ID,
+                    caller_id: WorkerRpc.#CALLER_ID
+                }
+
+                worker.port.postMessage(req)
+            })
 
             return Object.assign(observable, {
                 then(onFulfilled?: (value: any) => any, onRejected?: (reason: any) => any) {

@@ -4,9 +4,8 @@ import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTran
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
 
 
-
-export type LivequeryCoreOptions = {
-    transporters: Record<string, LivequeryTransporter>
+export type LivequeryCoreOptions<T> = {
+    transporters: Record<string, LivequeryTransporter<T>>
     storage: LivequeryStorge
 }
 
@@ -19,42 +18,44 @@ export type LivequeryLoadingState = {
 type CollectionId = string
 type Ref = string
 
-export type SyncRequest<T extends Doc> = DataChangeEvent<T> & {
+export type SyncRequest = DataChangeEvent & {
     ref: string,
     collection_ref: string
     source: 'realtime' | 'action'
 }
 
 
+
 export type ConflictResolverFunction = <T extends Doc>(e: {
     from: Record<string, string | number | boolean>
     old_document: T
-    change: DataChangeEvent<T>
+    change: DataChangeEvent
 }) => {
     approved: boolean
     document: T
 }
 
 
-export type LivequeryCoreConfig = {
+export type LivequeryCoreConfig<T> = {
     storage: LivequeryStorge
-    transporters: Record<string, LivequeryTransporter>
+    transporters: Record<string, LivequeryTransporter<T>>
 }
 
 
-export class LivequeryCore {
+export class LivequeryCore<Context> {
 
     #collections = new Map<CollectionId, {
         ref: string
         document_id?: string
-        o: Subscriber<Partial<LivequeryQueryResult<any>> & {
+        o: Subscriber<Partial<LivequeryQueryResult> & {
             from: 'query' | 'realtime' | 'action'
         }>
+        context: Record<string, any>
     }>()
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<LivequeryQueryParams<any> & { collection_id: string }>()
 
-    constructor(private readonly config: LivequeryCoreConfig) {
+    constructor(private readonly config: LivequeryCoreConfig<Context>) {
         this.#start()
     }
 
@@ -64,8 +65,8 @@ export class LivequeryCore {
             mergeMap(({ collection_id, ref, filters, headers }) => {
                 const sender = this.#collections.get(collection_id)
                 if (!sender) return EMPTY
-                return from(Object.entries(this.config.transporters)).pipe(
-                    mergeMap(([id, transporter]) => transporter.query({
+                return from(Object.values(this.config.transporters)).pipe(
+                    mergeMap(transporter => transporter.query({
                         ref,
                         filters,
                         headers,
@@ -77,7 +78,7 @@ export class LivequeryCore {
                         })
                         if (index > 0) {
                             for (const change of result.changes || []) {
-                                this.#sync('realtime', ref, change)
+                                this.#sync('realtime', change)
                             }
                         }
                     })
@@ -86,15 +87,16 @@ export class LivequeryCore {
         ).subscribe()
     }
 
-    watch<T extends Doc>(ref: string, collection_id: string) {
+    watch(ref: string, collection_id: string, context: Record<string, any> = {}) {
         const refs = ref.split('/')
         const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
-        return new Observable<Partial<LivequeryQueryResult<T>>>(o => {
+        return new Observable<Partial<LivequeryQueryResult>>(o => {
             this.#collections.set(collection_id, {
                 o,
                 ref,
-                document_id
+                document_id,
+                context
             })
             const refCollections = this.#refs.get(collection_ref) || new Set<CollectionId>()
             refCollections.add(collection_id)
@@ -111,12 +113,13 @@ export class LivequeryCore {
     }
 
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
-        setTimeout(() => this.#queries$.next(req), 0)
+        const collections = this.#refs.get(req.ref)
+        collections && collections.size == 1 && setTimeout(() => this.#queries$.next(req), 0)
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
 
-    #sync<T extends Doc>(source: 'realtime' | 'action', collection_ref: string, change: DataChangeEvent<T>,) {
-        const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
+    #sync<T extends Doc>(source: 'realtime' | 'action', change: DataChangeEvent) {
+        const collections = this.#refs.get(change.collection_ref) || new Set<CollectionId>()
         for (const collection_id of collections) {
             const sender = this.#collections.get(collection_id)
             if (!sender) continue
@@ -126,7 +129,7 @@ export class LivequeryCore {
                     from: source
                 })
                 const new_id = change.data?.id
-                if (new_id) {
+                if (sender.document_id && new_id) {
                     sender.document_id = new_id
                 }
             }
@@ -145,15 +148,15 @@ export class LivequeryCore {
                 concatMap(async ([_transporterId, transporter]) => {
                     // id starts with 'local:' → new document, add to remote
                     if (String(doc.id).startsWith('local:')) {
-                        const r = await transporter.add<T>(collection_ref, cleanDoc as T)
-                        if (r.error) throw r.error
-                        if (r.data.id) {
-                            await this.config.storage.update<T>(collection_ref, doc.id, { id: r.data.id })
-                            this.#sync('realtime', collection_ref, {
+                        const new_doc = await transporter.add<T>(collection_ref, cleanDoc as T)
+                        if (new_doc.id) {
+                            await this.config.storage.update<T>(collection_ref, doc.id, { id: new_doc.id })
+                            this.#sync('realtime', {
+                                collection_ref,
                                 type: 'updated',
                                 id: doc.id,
                                 data: {
-                                    id: r.data.id
+                                    id: new_doc.id
                                 }
                             })
                         }
@@ -163,16 +166,13 @@ export class LivequeryCore {
 
                     const ref = `${collection_ref}/${doc.id}`
                     if (doc._deleting) {
-                        const r = await transporter.delete(ref, doc.id)
-                        if (r.error) throw r.error
-                        if (r.data) {
-                            // delete local
-                            await this.config.storage.delete<T>(ref, doc.id)
-                            this.#sync('realtime', collection_ref, {
-                                type: 'removed',
-                                id: doc.id
-                            })
-                        }
+                        const deleted_doc = await transporter.delete(ref, doc.id)
+                        await this.config.storage.delete<T>(ref, doc.id)
+                        this.#sync('realtime', {
+                            collection_ref,
+                            type: 'removed',
+                            id: doc.id
+                        })
                     }
 
                     // _prev present → document was updated locally, push changed fields to remote
@@ -181,8 +181,7 @@ export class LivequeryCore {
                             ...acc,
                             [key]: doc[key]
                         }), { id: doc.id } as Partial<T>)
-                        const r = await transporter.update<T>(ref, doc.id, changedFields)
-                        if (r.error) throw r.error
+                        await transporter.update<T>(ref, doc.id, changedFields)
                     }
 
                     return EMPTY
@@ -197,10 +196,11 @@ export class LivequeryCore {
             collection_ref,
             doc as T
         )
-        await this.#sync('action', collection_ref, {
+        await this.#sync('action', {
             id: data.id,
             type: 'added',
-            data
+            data,
+            collection_ref
         })
         await this.#push(collection_ref, data)
         return data
@@ -227,7 +227,8 @@ export class LivequeryCore {
                 _prev
             }
         )
-        this.#sync('action', collection_ref, {
+        this.#sync('action', {
+            collection_ref,
             id,
             type: 'updated',
             data: {
@@ -247,7 +248,8 @@ export class LivequeryCore {
                 collection_ref,
                 id
             )
-            this.#sync('action', collection_ref, {
+            this.#sync('action', {
+                collection_ref,
                 id,
                 type: 'removed'
             })
@@ -263,6 +265,6 @@ export class LivequeryCore {
     trigger<Response>(action: LivequeryAction) {
         return from(Object.values(this.config.transporters)).pipe(
             mergeMap(transporter => transporter.trigger<Response>(action))
-        ) as Observable<Response> | Promise<Response>
+        )
     }
 }
