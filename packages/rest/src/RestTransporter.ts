@@ -2,8 +2,8 @@ import { of, firstValueFrom, EMPTY } from 'rxjs';
 import { filter, map, mergeMap } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
-import { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
-import { MaybePromise } from './DeduplicateComposer.js';
+import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
+import type { MaybePromise } from './DeduplicateComposer.js';
 
 export type RestTransporterRequest = {
     ref: string
@@ -11,7 +11,7 @@ export type RestTransporterRequest = {
     method: string
     payload?: any
     query?: any
-    context?:any 
+    context?: any
 }
 
 export type RestTransporterConfig = {
@@ -113,7 +113,7 @@ export class RestTransporter implements LivequeryTransporter<any> {
         return merge(http_request, websocket_sync)
     }
 
-    add<T extends Doc>( ref: string, data: Partial<Omit<T, 'id'>>) {
+    add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
         return this.#call<T>({ method: 'POST', ref, payload: data, query: {} })
     }
 
@@ -126,8 +126,7 @@ export class RestTransporter implements LivequeryTransporter<any> {
     }
 
 
-    trigger<T>( { ref, action, payload }: LivequeryAction) {
+    trigger<T>({ ref, action, payload }: LivequeryAction) {
         return this.#call<T>({ method: 'POST', ref, action, payload, query: {} })
     }
 }
- 
