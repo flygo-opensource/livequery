@@ -1,25 +1,29 @@
-import { UpdatedData } from "@livequery/types";
-import { firstValueFrom, fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject, Subscription, of, interval } from "rxjs";
-import { delay, filter, finalize, map, mergeMap, retry, switchMap, tap } from "rxjs/operators";
-import { v4 } from 'uuid'
+import { fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject, Subscription, of, interval, EMPTY } from "rxjs";
+import { delay, finalize, map, mergeMap, retry, switchMap, tap } from "rxjs/operators";
+import { DataChangeEvent } from '@livequery/new'
+import { v7 as uuidv7 } from 'uuid';
+
 
 export class Socket {
 
-    public readonly client_id = v4()
+    public readonly client_id = uuidv7()
     public readonly $gateway = new BehaviorSubject<{ id: string } | undefined>(undefined)
     public readonly $reconnect = new BehaviorSubject(0)
 
-    #topics = new Map<string, { stream: Subject<UpdatedData>, listen_count: number }>()
+    #topics = new Map<string, { stream: Subject<DataChangeEvent>, listen_count: number }>()
     #$input = new ReplaySubject<{ data: object, event: string }>(1000)
 
     #running: Subscription | undefined
 
+    constructor(private endpoint: string) {
+        this.#init()
+    }
 
     #init() {
         if (typeof WebSocket == 'undefined') return
-
-        return of(1).pipe(
-            mergeMap(async () => new WebSocket(await this.ws_url_fatory())),
+        if (this.#running) return
+        this.#running = of(1).pipe(
+            mergeMap(async () => new WebSocket(this.endpoint)),
             switchMap(ws => merge(
                 fromEvent(ws, 'closed').pipe(map(e => { throw e })),
                 fromEvent(ws, 'close').pipe(map(e => { throw e })),
@@ -42,7 +46,8 @@ export class Socket {
                 fromEvent(ws, 'message').pipe(
                     tap((evt: any) => {
                         const e = JSON.parse(evt.data) as { event: string }
-                        this[`$${e.event}`]?.(e)
+                        const fn = (this as any)[`$${e.event}`]
+                        typeof fn == 'function' && fn.call(this, e)
                     })
                 )
             ).pipe(
@@ -52,30 +57,19 @@ export class Socket {
         ).subscribe()
     }
 
-    constructor(private ws_url_fatory: () => string | Promise<string>) {
-        this.#running = this.#init()
-    }
 
     stop() {
         this.#running?.unsubscribe()
     }
 
-    private $sync(e: { data: { changes: UpdatedData<any>[] } }) {
+    private $sync(e: { data: { changes: Array<DataChangeEvent & { ref: string }> } }) {
         for (const change of e.data.changes) {
-
-            // Collection ref broadcast
+            change.collection_ref = change.ref
             this.#topics.get(change.ref)?.stream.next(change)
-
-            // Document ref broadcast
-            const ref = `${change.ref}/${change.data.id}`
-            this.#topics.get(ref)?.stream.next({
-                ...change,
-                ref
-            })
         }
     }
 
-    $hello(e: { gid: string }) {
+    private $hello(e: { gid: string }) {
         this.$gateway.next({ id: e.gid })
     }
 
@@ -85,19 +79,19 @@ export class Socket {
     }
 
 
-    listen(ref: string): Observable<UpdatedData> {
+    listen(ref: string): Observable<DataChangeEvent> {
         if (!this.#topics.has(ref)) {
-            const stream = new Subject<UpdatedData>()
+            const stream = new Subject<DataChangeEvent>()
             this.#topics.set(ref, { stream, listen_count: 0 })
         }
-
-        this.#topics.get(ref).listen_count++
-
-        return this.#topics.get(ref).stream.pipe(
+        const topic = this.#topics.get(ref)
+        if (!topic) return EMPTY
+        topic.listen_count++
+        return topic.stream.pipe(
             finalize(() => {
-                this.#topics.get(ref).listen_count--
+                topic.listen_count--
                 setTimeout(() => {
-                    if (this.#topics.get(ref).listen_count == 0) {
+                    if (topic.listen_count == 0) {
                         this.#$input.next({ event: 'unsubscribe', data: { ref } })
                     }
                 }, 2000)

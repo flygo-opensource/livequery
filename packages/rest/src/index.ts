@@ -1,5 +1,3 @@
-export { Deduplicate } from './hooks/Deduplicate.js'
-
-export { RestTransporter, ApiRequest } from './RestTransporter.js'
-export { Socket } from './Socket.js'
-export { AddHeadersHook } from './hooks/AddHeadersHook.js' 
+export * from './RestTransporter.js'
+export * from './Socket.js'
+export * from './DeduplicateComposer.js'

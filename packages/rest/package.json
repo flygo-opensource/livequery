@@ -3,7 +3,7 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.28",
+    "version": "2.0.61",
     "type": "module",
     "description": "",
     "main": "build/index.js",
@@ -12,14 +12,12 @@
         "build/**/*"
     ],
     "dependencies": {
-        "query-string": "^7.0.1",
-        "uuid": "^8.3.2"
+        "rxjs": "^7.8.1",
+        "uuid": "^13.0.0"
     },
     "devDependencies": {
-        "rxjs": "^7.8.1",
-        "typescript": "5.6.3",
-        "@types/uuid": "^8.3.0",
-        "@livequery/types": "2.0.15"
+        "@livequery/new": "2.0.61",
+        "typescript": "5.6.3"
     },
     "peerDependencies": {},
     "scripts": {

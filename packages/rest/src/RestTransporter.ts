@@ -1,129 +1,52 @@
-import { Transporter, QueryOption, QueryStream, QueryData, CollectionResponse, DocumentResponse, Response as ApiResponse, TransporterHook } from '@livequery/types'
 import { of, firstValueFrom, EMPTY } from 'rxjs';
-import { catchError, combineLatestWith, filter, map, mergeMap } from 'rxjs/operators';
-import { merge, pipe, tap } from 'rxjs'
+import { filter, map, mergeMap } from 'rxjs/operators';
+import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
-import qs from 'query-string'
+import { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
+import { MaybePromise } from './DeduplicateComposer.js';
 
-
-type MaybePromise<T> = T | Promise<T>
-
-export type ApiRequest = { url: RequestInfo | URL | string, options?: RequestInit }
-
+export type RestTransporterRequest = {
+    ref: string
+    action?: string
+    method: string
+    payload?: any
+    query?: any
+    context?:any 
+}
 
 export type RestTransporterConfig = {
-    base_url: () => MaybePromise<string>
-    websocket_url?: () => MaybePromise<string>,
+    api: string
+    ws?: string
+    headers?: (options: RestTransporterRequest) => MaybePromise<Record<string, string>>
+    onRequest?: (options: RestTransporterRequest) => Promise<void>
+    onResponse?: (request: RestTransporterRequest, response: LivequeryResult<any>) => Promise<void>
 }
 
 
-export class RestTransporter implements Transporter {
 
-    private socket: Socket
+export type LivequeryCollectionResponse<T extends Doc> = {
+    summary?: any,
+    items: T[],
+    item: T
+    subscription_token?: string,
+    paging: LivequeryPaging
+}
+
+
+export class RestTransporter implements LivequeryTransporter<any> {
+
+    private socket: Socket | undefined
 
     constructor(
         private config: RestTransporterConfig
     ) {
-        config.websocket_url && (this.socket = new Socket(config.websocket_url))
-    }
-
-    hook(hook: TransporterHook): RestTransporter {
-
-        return {
-            ...this,
-
-            hook: (next_hook: TransporterHook) => {
-                return this.hook(next => pipe(hook(() => next_hook(next))))
-            },
-
-            get: <T>(ref: string, query: any = {}) => {
-                return this.call<T>(ref, 'GET', null, query, hook)
-            },
-
-            add: <T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> => {
-                return this.call(ref, 'POST', data, {}, hook)
-            },
-
-            update: <T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> => {
-                return this.call(ref, method, data, {}, hook)
-            },
-
-            remove: <T>(ref: string) => {
-                return this.call<T>(ref, 'DELETE', {}, {}, hook)
-            },
-
-            trigger: <T>(ref: string, name: string, payload?: any, query?: any) => {
-                return this.call<ApiResponse<T>>(`${ref}/~${name}`, 'POST', payload, query, hook)
-            },
-
-            query: <T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) => {
-                return this.#query(ref, options, hook)
-            },
+        if (config.ws) {
+            this.socket = new Socket(config.ws!)
         }
     }
 
-    query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>) {
-        return this.#query(ref, options)
-    }
-
-    #query<T extends { id: string }>(ref: string, options?: Partial<QueryOption<T>>, hook?: TransporterHook) {
-
-        const http_request = merge(this.socket?.$reconnect || of(1))
-            .pipe(
-                mergeMap(() => this.call<QueryData<T>>(ref, 'GET', undefined, options, hook)),
-                map(({ data, error }) => {
-                    if (error) throw error
-                    data.subscription_token && this.socket?.subscribe(data.subscription_token)
-                    const collection = data as CollectionResponse<T>['data']
-
-                    // If collection
-                    if (collection.items) {
-                        return {
-                            data: {
-                                summary: collection.summary,
-                                changes: collection.items.map(data => ({ data, type: 'added', ref })),
-                                paging: { ...collection, n: 0 }
-                            }
-                        } as QueryStream<T>
-                    }
-
-                    // If document  
-                    const document = data as DocumentResponse<T>['data']
-                    return {
-                        data: {
-                            summary: collection.summary,
-                            changes: [{ data: document.item, type: 'added', ref }],
-                            paging: { ...collection, n: 0 }
-                        }
-                    } as QueryStream<T>
-
-                }),
-                catchError(error => of({ error })),
-            )
-
-        const websocket_sync = (!this.socket || options[':after'] || options[':before'] || options[':around']) ? of<QueryStream<T>>() : (
-            this.socket.listen(ref).pipe(
-                map((change) => ({ data: { changes: [change] } } as QueryStream<T>))
-            )
-        )
-
-        return merge(http_request, websocket_sync)
-    }
-
-    private async call<Response extends {}>(url: string, method: string, payload?: any, query: any = {}, hook?: TransporterHook): Promise<Response> {
-
-        function encode_query(query: any) {
-
-            if (!query || Object.keys(query || {}).length == 0) return ''
-
-            const encoded_query = Object.keys(query).reduce((o, key) => ({
-                ...o,
-                [key]: typeof query[key] == 'object' ? JSON.stringify(query[key]) : query[key]
-            }), {})
-
-            return `?${qs.stringify(encoded_query)}`
-        }
-
+    async #call<T>({ method, ref, payload, query }: RestTransporterRequest) {
+        const url = `${await this.config.api}/${ref}${Object.keys(query || {}).length > 0 ? `?${new URLSearchParams(query).toString()}` : ''}`
         const headers = {
             ...payload ? {
                 'Content-Type': 'application/json'
@@ -131,57 +54,80 @@ export class RestTransporter implements Transporter {
             ... this.socket ? {
                 socket_id: this.socket.client_id,
                 'x-lcid': this.socket.client_id,
-                'x-lgid': await firstValueFrom(this.socket.$gateway.pipe( 
+                'x-lgid': await firstValueFrom(this.socket.$gateway.pipe(
                     filter(Boolean),
                     map(g => g.id)
                 ))
             } : {}
         }
-        try {
-            const request: ApiRequest = {
-                url: `${this.config.base_url()}/${url}${encode_query(query)}`,
-                options: {
-                    method,
-                    headers,
-                    ...payload ? { body: JSON.stringify(payload) } : {},
-                }
-            }
-            const next = () => pipe(
-                mergeMap(async (mapped: ApiRequest) => {
-                    const response = await fetch(mapped.url, mapped.options).then(r => r.json())
+        const req = { method, ref, payload, query }
+        this.config.onRequest && await this.config.onRequest(req)
+        const response: LivequeryResult<T> = await fetch(url, {
+            method,
+            headers,
+            ...payload ? { body: JSON.stringify(payload) } : {},
+        }).then(r => r.json())
+        this.config.onResponse && await this.config.onResponse(req, response)
+        if (response.error) throw response.error
+        return response.data
+    }
+
+    query<T extends Doc>({ ref, filters }: { ref: string, filters: LivequeryFilters<T> }) {
+        const http_request = merge(this.socket?.$reconnect || of(1)).pipe(
+            mergeMap(() => this.#call<LivequeryCollectionResponse<T>>({ ref, method: 'GET', payload: undefined, query: filters })),
+            map(collection => {
+                collection.subscription_token && this.socket?.subscribe(collection.subscription_token)
+
+                // If collection
+                if (collection.items) {
                     return {
-                        ...response,
-                        __request: mapped
+                        summary: collection.summary,
+                        changes: collection.items.map(data => ({ data, type: 'added', id: data.id })),
+                        source: "query"
+                    } as Partial<LivequeryQueryResult>
+                }
+
+                // If document  
+                return {
+                    summary: collection.summary,
+                    changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
+                    source: "query"
+                } as Partial<LivequeryQueryResult>
+
+            })
+        )
+
+
+        const websocket_sync = (!this.socket || !filters || filters[':after'] || filters[':before'] || filters[':around']) ? EMPTY : (
+            this.socket.listen(ref).pipe(
+                map((change) => {
+                    const e: Partial<LivequeryQueryResult> = {
+                        changes: [change],
+                        source: "realtime"
                     }
+                    return e
                 })
             )
-            const body: any = await firstValueFrom(of(request).pipe(
-                hook ? hook(next) : next()
-            ))
-            if (body.error) throw body.error
-            return body as Response
-        } catch (error) {
-            throw error
-        }
+        )
+
+        return merge(http_request, websocket_sync)
     }
 
-    get<T>(ref: string, query: any = {}) {
-        return this.call<T>(ref, 'GET', null, query,)
+    add<T extends Doc>( ref: string, data: Partial<Omit<T, 'id'>>) {
+        return this.#call<T>({ method: 'POST', ref, payload: data, query: {} })
     }
 
-    add<T extends {} = {}>(ref: string, data: Partial<T>): Promise<any> {
-        return this.call(ref, 'POST', data, {})
+    update<T extends Doc>(ref: string, id: string, data: Partial<T>) {
+        return this.#call<T>({ method: 'PATCH', ref: ref + '/' + id, payload: data, query: {} })
     }
 
-    update<T extends {} = {}>(ref: string, data: Partial<T>, method: 'PATCH' | 'PUT' = 'PATCH'): Promise<any> {
-        return this.call(ref, method, data, {})
+    delete<T extends Doc>(ref: string, id: string) {
+        return this.#call<T>({ method: 'DELETE', ref: ref + '/' + id, payload: undefined, query: {} })
     }
 
-    remove<T>(ref: string) {
-        return this.call<T>(ref, 'DELETE')
-    }
 
-    trigger<T extends {}>(ref: string, name: string, payload?: any, query?: any) {
-        return this.call<ApiResponse<T>>(`${ref}/~${name}`, 'POST', payload, query)
+    trigger<T>( { ref, action, payload }: LivequeryAction) {
+        return this.#call<T>({ method: 'POST', ref, action, payload, query: {} })
     }
-} 
+}
+ 
