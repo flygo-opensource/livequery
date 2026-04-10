@@ -41,9 +41,7 @@ export class DeduplicateComposer {
     }
 
     define<T>(opts: ResolverOptrions<T>) {
-        return {
-            resolve: () => this.get(opts)
-        }
+        return opts
     }
 
 } 

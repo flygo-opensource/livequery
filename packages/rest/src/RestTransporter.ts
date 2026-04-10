@@ -1,25 +1,25 @@
-import { of, firstValueFrom, EMPTY } from 'rxjs';
-import { filter, map, mergeMap } from 'rxjs/operators';
+import { of, firstValueFrom, EMPTY, from } from 'rxjs';
+import { filter, first, map, mergeMap, shareReplay, take, tap } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
-import type { MaybePromise } from './DeduplicateComposer.js';
+
 
 export type RestTransporterRequest = {
-    ref: string
-    action?: string
+    url: string
     method: string
-    payload?: any
-    query?: any
-    context?: any
+    query?: Record<string, any>
+    body?: Record<string, any>
+    headers?: Record<string, string>
 }
+
+export type Promiseable<T> = T | Promise<T>
 
 export type RestTransporterConfig = {
     api: string
     ws?: string
-    headers?: (options: RestTransporterRequest) => MaybePromise<Record<string, string>>
-    onRequest?: (options: RestTransporterRequest) => Promise<void>
-    onResponse?: (request: RestTransporterRequest, response: LivequeryResult<any>) => Promise<void>
+    onRequest?: (options: RestTransporterRequest & { ref: string }) => Promiseable<Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>> | void
+    onResponse?: (request: RestTransporterRequest & { ref: string }, response: LivequeryResult<any>) => Promise<void> | void
 }
 
 
@@ -33,7 +33,7 @@ export type LivequeryCollectionResponse<T extends Doc> = {
 }
 
 
-export class RestTransporter implements LivequeryTransporter<any> {
+export class RestTransporter implements LivequeryTransporter {
 
     private socket: Socket | undefined
 
@@ -45,10 +45,10 @@ export class RestTransporter implements LivequeryTransporter<any> {
         }
     }
 
-    async #call<T>({ method, ref, payload, query }: RestTransporterRequest) {
-        const url = `${await this.config.api}/${ref}${Object.keys(query || {}).length > 0 ? `?${new URLSearchParams(query).toString()}` : ''}`
+    async #call<T>(req: Omit<RestTransporterRequest, 'url'> & { ref: string, action?: string }) {
+        const url = `${await this.config.api}/${req.ref}${req.action ? `/~${req.action}` : ''}${Object.keys(req.query || {}).length > 0 ? `?${new URLSearchParams(req.query).toString()}` : ''}`
         const headers = {
-            ...payload ? {
+            ...req.body ? {
                 'Content-Type': 'application/json'
             } : {},
             ... this.socket ? {
@@ -60,73 +60,82 @@ export class RestTransporter implements LivequeryTransporter<any> {
                 ))
             } : {}
         }
-        const req = { method, ref, payload, query }
-        this.config.onRequest && await this.config.onRequest(req)
-        const response: LivequeryResult<T> = await fetch(url, {
-            method,
+        const http_request: RestTransporterRequest & { ref: string } = {
+            url,
+            method: req.method,
+            body: req.body,
             headers,
-            ...payload ? { body: JSON.stringify(payload) } : {},
+            query: req.query,
+            ref: req.ref
+        }
+        const modified = await this.config.onRequest?.(http_request)
+        const response: LivequeryResult<T> = modified && modified.response ? modified.response : await fetch(url, {
+            method: req.method,
+            headers,
+            ...req.body ? { body: JSON.stringify(req.body) } : {},
+            ...modified as any
         }).then(r => r.json())
-        this.config.onResponse && await this.config.onResponse(req, response)
+        this.config.onResponse && await this.config.onResponse(http_request, response)
         if (response.error) throw response.error
         return response.data
     }
 
     query<T extends Doc>({ ref, filters }: { ref: string, filters: LivequeryFilters<T> }) {
-        const http_request = merge(this.socket?.$reconnect || of(1)).pipe(
-            mergeMap(() => this.#call<LivequeryCollectionResponse<T>>({ ref, method: 'GET', payload: undefined, query: filters })),
-            map(collection => {
-                collection.subscription_token && this.socket?.subscribe(collection.subscription_token)
+        const ready$ = from(this.socket ? (this.socket.pipe(filter(s => !!s.connected), map(() => Date.now()))) : of(1)).pipe(first())
+        const watch$ = (!this.socket || !filters || filters[':after'] || filters[':before'] || filters[':around']) ? EMPTY : this.socket.listen(ref)
 
-                // If collection
-                if (collection.items) {
-                    return {
+        return merge(
+
+            ready$.pipe(
+                take(1),
+                mergeMap(() => this.#call<LivequeryCollectionResponse<T>>({
+                    ref,
+                    method: 'GET',
+                    query: filters
+                })),
+                map(collection => {
+                    collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
+                    // If collection
+                    if (collection.items) return {
                         summary: collection.summary,
                         changes: collection.items.map(data => ({ data, type: 'added', id: data.id })),
                         source: "query"
                     } as Partial<LivequeryQueryResult>
-                }
 
-                // If document  
-                return {
-                    summary: collection.summary,
-                    changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
-                    source: "query"
-                } as Partial<LivequeryQueryResult>
+                    // If document  
+                    return {
+                        summary: collection.summary,
+                        changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
+                        source: "query"
+                    } as Partial<LivequeryQueryResult>
 
-            })
-        )
-
-
-        const websocket_sync = (!this.socket || !filters || filters[':after'] || filters[':before'] || filters[':around']) ? EMPTY : (
-            this.socket.listen(ref).pipe(
-                map((change) => {
-                    const e: Partial<LivequeryQueryResult> = {
-                        changes: [change],
-                        source: "realtime"
-                    }
-                    return e
                 })
-            )
-        )
+            ),
 
-        return merge(http_request, websocket_sync)
+            watch$.pipe(map((change) => {
+                const e: Partial<LivequeryQueryResult> = {
+                    changes: [change],
+                    source: "realtime"
+                }
+                return e
+            }))
+        )
     }
 
     add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
-        return this.#call<T>({ method: 'POST', ref, payload: data, query: {} })
+        return this.#call<T>({ method: 'POST', ref, body: data, query: {} })
     }
 
     update<T extends Doc>(ref: string, id: string, data: Partial<T>) {
-        return this.#call<T>({ method: 'PATCH', ref: ref + '/' + id, payload: data, query: {} })
+        return this.#call<T>({ method: 'PATCH', ref: ref + '/' + id, body: data, query: {} })
     }
 
     delete<T extends Doc>(ref: string, id: string) {
-        return this.#call<T>({ method: 'DELETE', ref: ref + '/' + id, payload: undefined, query: {} })
+        return this.#call<T>({ method: 'DELETE', ref: ref + '/' + id, body: undefined, query: {} })
     }
 
 
     trigger<T>({ ref, action, payload }: LivequeryAction) {
-        return this.#call<T>({ method: 'POST', ref, action, payload, query: {} })
+        return this.#call<T>({ method: 'POST', ref, action, body: payload, query: {} })
     }
 }

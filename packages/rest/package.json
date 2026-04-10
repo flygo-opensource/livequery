@@ -3,11 +3,18 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.61",
+    "version": "2.0.62",
     "type": "module",
     "description": "",
     "main": "build/index.js",
     "types": "build/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        }
+    },
     "files": [
         "build/**/*"
     ],
@@ -20,11 +27,14 @@
         "typescript": "5.6.3"
     },
     "peerDependencies": {},
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "build": "rm -rf build; tsc -b .",
-        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
-    },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:js": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --sourcemap",
+    "build:types": "bunx tsc -p tsconfig.build.json",
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:watch": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --watch",
+    "prepublishOnly": "bun run build"
+  },
     "author": "",
     "license": "ISC"
 }
