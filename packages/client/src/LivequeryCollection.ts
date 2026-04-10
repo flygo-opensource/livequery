@@ -6,9 +6,9 @@ import { LivequeryDocument } from "./LivequeryDocument"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    core?: LivequeryCore<any> | false | '' | 0 | null | undefined,
+    core?: LivequeryCore,
     ref: string
-    filters: LivequeryFilters<T>
+    filters?: LivequeryFilters<T>
     lazy?: boolean
     full?: boolean
     context?: Record<string, any>
@@ -16,9 +16,9 @@ export type LivequeryCollectionOptions<T extends Doc> = {
 
 export class LivequeryCollection<T extends Doc> {
 
-    public readonly id = crypto.randomUUID()
+    public readonly id = (Math.random() * 1e18).toString(36)
     #keys = new Map<keyof T, number>()
-    #linker: Subscription
+    #linker: Subscription | undefined
     #indexes: Map<string, number>
 
     public readonly ref: string
@@ -30,29 +30,33 @@ export class LivequeryCollection<T extends Doc> {
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
 
+    private options: LivequeryCollectionOptions<T>
 
-
-    constructor(private options: LivequeryCollectionOptions<T>) {
-        this.ref = options.ref
+    constructor(options?: LivequeryCollectionOptions<T>) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
         this.loading = new BehaviorSubject<LivequeryLoadingState>({
-            all: options.lazy ? false : true,
-            next: options.lazy ? false : true,
+            all: options?.lazy ? false : true,
+            next: options?.lazy ? false : true,
             prev: false
         })
-        this.filters = new BehaviorSubject<Partial<LivequeryFilters<T>>>(options.filters)
+        this.filters = new BehaviorSubject<Partial<LivequeryFilters<T>>>(options?.filters || {})
         this.paging = new BehaviorSubject<LivequeryPaging>({
             total: 0,
             current: 0
         })
+        if (options) {
+            this.ref = options.ref
+            this.options = options
+        }
     }
 
+
     initialize() {
+        if (!this.options) return
         if (typeof window == 'undefined') return
         if (!this.options.core) return
-        if (this.#linker) return
         this.#linker = this.options.core.watch(this.options.ref, this.id, this.options.context || {}).pipe(
             tap(event => {
                 event.summary && this.summary.next(event.summary)
@@ -133,15 +137,14 @@ export class LivequeryCollection<T extends Doc> {
                     prev: false
                 })
                 event.paging && this.paging.next(event.paging)
-            })
-        ).subscribe()
-
+            }
+            )).subscribe()
         !this.options.lazy && this.query(this.options.filters || {})
         return this.#linker
     }
 
     async #query(filters: Partial<LivequeryFilters<T>>) {
-        if (!this.options.core) return
+        if (!this.options.core || !this.options) return
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T

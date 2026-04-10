@@ -12,7 +12,7 @@ export type LivequeryQueryResult = {
 
 
 
-export type LivequeryTransporter<Context> = {
+export type LivequeryTransporter  = {
     query<T extends Doc>( query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult>>
     add<T extends Doc>( ref: string, doc: Omit<T, 'id'>): Promise<T>
     update<T extends Doc>( ref: string, id: string, doc: Partial<T>): Promise<T>

@@ -1,11 +1,11 @@
-import { concatMap, EMPTY, from, lastValueFrom, map, mergeMap, Observable, Subject, Subscriber } from "rxjs"
+import { concatMap, EMPTY, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
 
 
-export type LivequeryCoreOptions<T> = {
-    transporters: Record<string, LivequeryTransporter<T>>
+export type LivequeryCoreOptions = {
+    transporters: Record<string, LivequeryTransporter>
     storage: LivequeryStorge
 }
 
@@ -36,50 +36,74 @@ export type ConflictResolverFunction = <T extends Doc>(e: {
 }
 
 
-export type LivequeryCoreConfig<T> = {
+export type LivequeryCoreConfig = {
     storage: LivequeryStorge
-    transporters: Record<string, LivequeryTransporter<T>>
+    transporters: Record<string, LivequeryTransporter>
 }
 
+export type CollectionMetadata = {
+    ref: string
+    document_id?: string
+    o: Subscriber<Partial<LivequeryQueryResult> & {
+        from: 'query' | 'realtime' | 'action'
+    }>
+    context: Record<string, any>
+}
 
-export class LivequeryCore<Context> {
+export class LivequeryCore {
 
-    #collections = new Map<CollectionId, {
-        ref: string
-        document_id?: string
-        o: Subscriber<Partial<LivequeryQueryResult> & {
-            from: 'query' | 'realtime' | 'action'
-        }>
-        context: Record<string, any>
-    }>()
+    #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
-    #queries$ = new Subject<LivequeryQueryParams<any> & { collection_id: string }>()
+    #queries$ = new Subject<LivequeryQueryParams<any> & { collection: CollectionMetadata }>()
 
-    constructor(private readonly config: LivequeryCoreConfig<Context>) {
+    constructor(private readonly config: LivequeryCoreConfig) {
         this.#start()
     }
 
     #start() {
-        // Init here
+        const cache = new Map<string, Observable<any>>()
         this.#queries$.pipe(
-            mergeMap(({ collection_id, ref, filters, headers }) => {
-                const sender = this.#collections.get(collection_id)
-                if (!sender) return EMPTY
+            mergeMap(({ collection, ref, filters, headers }) => {
                 return from(Object.values(this.config.transporters)).pipe(
-                    mergeMap(transporter => transporter.query({
-                        ref,
-                        filters,
-                        headers,
-                    })),
+                    map(transporter => {
+                        const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
+                        const cached = cache.get(key)
+                        if (cached) return cached
+                        const query = transporter.query({
+                            ref,
+                            filters,
+                            headers,
+                        }).pipe(
+                            mergeMap(async (result, index) => {
+                                result.changes && await lastValueFrom(from(result.changes).pipe(
+                                    mergeMap(async change => {
+                                        await this.config.storage.add(change.collection_ref, {
+                                            id: change.id,
+                                            ...change.data
+                                        } as any)
+                                    })
+                                ))
+                                return result
+                            }),
+                            map((result, index) => {
+                                index == 0 && cache.delete(key)
+                                return result
+                            }),
+                            shareReplay()
+                        )
+                        cache.set(key, query)
+                        return query
+                    }),
+                    mergeMap($ => $),
                     map((result, index) => {
-                        sender.o.next({
-                            ...result,
-                            from: index === 0 ? 'query' : 'realtime'
-                        })
-                        if (index > 0) {
-                            for (const change of result.changes || []) {
-                                this.#sync('realtime', change)
-                            }
+                        if (index == 0) {
+                            collection.o.next({
+                                ...result,
+                                from: index === 0 ? 'query' : 'realtime'
+                            })
+                        }
+                        for (const change of result.changes || []) {
+                            this.#sync('realtime', change)
                         }
                     })
                 )
@@ -113,8 +137,8 @@ export class LivequeryCore<Context> {
     }
 
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
-        const collections = this.#refs.get(req.ref)
-        collections && collections.size == 1 && setTimeout(() => this.#queries$.next(req), 0)
+        const collection = this.#collections.get(req.collection_id)
+        collection && this.#queries$.next({ ...req, collection })
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
 
@@ -146,7 +170,6 @@ export class LivequeryCore<Context> {
         return lastValueFrom(
             from(Object.entries(this.config.transporters)).pipe(
                 concatMap(async ([_transporterId, transporter]) => {
-                    // id starts with 'local:' → new document, add to remote
                     if (String(doc.id).startsWith('local:')) {
                         const new_doc = await transporter.add<T>(collection_ref, cleanDoc as T)
                         if (new_doc.id) {
