@@ -4,7 +4,7 @@ export type RestTransporterRequest = {
     method: string;
     query?: Record<string, any>;
     body?: Record<string, any> | string;
-    headers?: Record<string, string>;
+    headers?: Record<string, string | undefined>;
 };
 export type Promiseable<T> = T | Promise<T>;
 export type RestTransporterConfig = {
