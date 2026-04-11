@@ -3,7 +3,7 @@ export type RestTransporterRequest = {
     url: string;
     method: string;
     query?: Record<string, any>;
-    body?: Record<string, any>;
+    body?: Record<string, any> | string;
     headers?: Record<string, string>;
 };
 export type Promiseable<T> = T | Promise<T>;

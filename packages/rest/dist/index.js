@@ -1984,74 +1984,6 @@ function of() {
   var scheduler = popScheduler(args);
   return from(args, scheduler);
 }
-// node_modules/rxjs/dist/esm5/internal/operators/groupBy.js
-function groupBy(keySelector, elementOrOptions, duration, connector) {
-  return operate(function(source, subscriber) {
-    var element;
-    if (!elementOrOptions || typeof elementOrOptions === "function") {
-      element = elementOrOptions;
-    } else {
-      duration = elementOrOptions.duration, element = elementOrOptions.element, connector = elementOrOptions.connector;
-    }
-    var groups = new Map;
-    var notify = function(cb) {
-      groups.forEach(cb);
-      cb(subscriber);
-    };
-    var handleError = function(err) {
-      return notify(function(consumer) {
-        return consumer.error(err);
-      });
-    };
-    var activeGroups = 0;
-    var teardownAttempted = false;
-    var groupBySourceSubscriber = new OperatorSubscriber(subscriber, function(value) {
-      try {
-        var key_1 = keySelector(value);
-        var group_1 = groups.get(key_1);
-        if (!group_1) {
-          groups.set(key_1, group_1 = connector ? connector() : new Subject);
-          var grouped = createGroupedObservable(key_1, group_1);
-          subscriber.next(grouped);
-          if (duration) {
-            var durationSubscriber_1 = createOperatorSubscriber(group_1, function() {
-              group_1.complete();
-              durationSubscriber_1 === null || durationSubscriber_1 === undefined || durationSubscriber_1.unsubscribe();
-            }, undefined, undefined, function() {
-              return groups.delete(key_1);
-            });
-            groupBySourceSubscriber.add(innerFrom(duration(grouped)).subscribe(durationSubscriber_1));
-          }
-        }
-        group_1.next(element ? element(value) : value);
-      } catch (err) {
-        handleError(err);
-      }
-    }, function() {
-      return notify(function(consumer) {
-        return consumer.complete();
-      });
-    }, handleError, function() {
-      return groups.clear();
-    }, function() {
-      teardownAttempted = true;
-      return activeGroups === 0;
-    });
-    source.subscribe(groupBySourceSubscriber);
-    function createGroupedObservable(key, groupSubject) {
-      var result = new Observable(function(groupSubscriber) {
-        activeGroups++;
-        var innerSub = groupSubject.subscribe(groupSubscriber);
-        return function() {
-          innerSub.unsubscribe();
-          --activeGroups === 0 && teardownAttempted && groupBySourceSubscriber.unsubscribe();
-        };
-      });
-      result.key = key;
-      return result;
-    }
-  });
-}
 // node_modules/rxjs/dist/esm5/internal/operators/catchError.js
 function catchError2(selector) {
   return operate(function(source, subscriber) {
@@ -2507,7 +2439,7 @@ class RestTransporter {
   }
   async#call(req) {
     const url = `${await this.config.api}/${req.ref}${req.action ? `/~${req.action}` : ""}${Object.keys(req.query || {}).length > 0 ? `?${new URLSearchParams(req.query).toString()}` : ""}`;
-    const headers = {
+    const base_headers = {
       ...req.body ? {
         "Content-Type": "application/json"
       } : {},
@@ -2517,22 +2449,33 @@ class RestTransporter {
         "x-lgid": await firstValueFrom(this.socket.$gateway.pipe(filter2(Boolean), map((g) => g.id)))
       } : {}
     };
-    const http_request = {
+    const original_request = {
       url,
       method: req.method,
       body: req.body,
-      headers,
+      headers: base_headers,
       query: req.query,
       ref: req.ref
     };
-    const modified = await this.config.onRequest?.(http_request);
-    const response = modified && modified.response ? modified.response : await fetch(url, {
+    const { response: fake_response, headers, ...modified } = await this.config.onRequest?.(original_request) || {};
+    if (fake_response) {
+      this.config.onResponse && await this.config.onResponse(original_request, fake_response);
+      if (fake_response.error)
+        throw fake_response.error;
+      return fake_response.data;
+    }
+    const request = {
+      ref: req.ref,
+      url,
       method: req.method,
-      headers,
-      ...req.body ? { body: JSON.stringify(req.body) } : {},
-      ...modified
-    }).then((r) => r.json());
-    this.config.onResponse && await this.config.onResponse(http_request, response);
+      ...modified,
+      headers: {
+        ...base_headers,
+        ...headers
+      }
+    };
+    const response = fake_response ? fake_response : await fetch(request.url, request).then((r) => r.json());
+    this.config.onResponse && await this.config.onResponse(request, response);
     if (response.error)
       throw response.error;
     return response.data;
@@ -2578,36 +2521,10 @@ class RestTransporter {
     return this.#call({ method: "POST", ref, action, body: payload, query: {} });
   }
 }
-// src/DeduplicateComposer.ts
-class DeduplicateComposer {
-  #map = new Map;
-  #queue = new Subject;
-  constructor() {
-    this.#queue.pipe(groupBy((r) => r.name, { duration: () => timer(60000) }), mergeMap(($) => $.pipe(mergeMap(async (opts) => {
-      for (let i = 1;i <= 2; i++) {
-        const cache = this.#map.get(opts.name);
-        const value = cache ? cache.value : await opts.resolve();
-        !cache && this.#map.set(opts.name, { value });
-        const ok = opts.validate ? await opts.validate(value) : true;
-        if (ok)
-          return opts.o(value);
-        this.#map.delete(opts.name);
-      }
-      return opts.o(null);
-    }, 1)))).subscribe();
-  }
-  get(opts) {
-    return new Promise((o) => this.#queue.next({ ...opts, o }));
-  }
-  define(opts) {
-    return opts;
-  }
-}
 export {
   Socket,
-  RestTransporter,
-  DeduplicateComposer
+  RestTransporter
 };
 
-//# debugId=918750AE08421D0D64756E2164756E21
+//# debugId=8AFAEA6D49671A1564756E2164756E21
 //# sourceMappingURL=index.js.map

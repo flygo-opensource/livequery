@@ -9,7 +9,7 @@ export type RestTransporterRequest = {
     url: string
     method: string
     query?: Record<string, any>
-    body?: Record<string, any>
+    body?: Record<string, any> | string
     headers?: Record<string, string>
 }
 
@@ -47,7 +47,7 @@ export class RestTransporter implements LivequeryTransporter {
 
     async #call<T>(req: Omit<RestTransporterRequest, 'url'> & { ref: string, action?: string }) {
         const url = `${await this.config.api}/${req.ref}${req.action ? `/~${req.action}` : ''}${Object.keys(req.query || {}).length > 0 ? `?${new URLSearchParams(req.query).toString()}` : ''}`
-        const headers = {
+        const base_headers = {
             ...req.body ? {
                 'Content-Type': 'application/json'
             } : {},
@@ -60,22 +60,32 @@ export class RestTransporter implements LivequeryTransporter {
                 ))
             } : {}
         }
-        const http_request: RestTransporterRequest & { ref: string } = {
+        const original_request: RestTransporterRequest & { ref: string } = {
             url,
             method: req.method,
             body: req.body,
-            headers,
+            headers: base_headers,
             query: req.query,
             ref: req.ref
         }
-        const modified = await this.config.onRequest?.(http_request)
-        const response: LivequeryResult<T> = modified && modified.response ? modified.response : await fetch(url, {
+        const { response: fake_response, headers, ...modified } = await this.config.onRequest?.(original_request) || {}
+        if (fake_response) {
+            this.config.onResponse && await this.config.onResponse(original_request, fake_response)
+            if (fake_response.error) throw fake_response.error
+            return fake_response.data as T
+        }
+        const request = {
+            ref: req.ref,
+            url,
             method: req.method,
-            headers,
-            ...req.body ? { body: JSON.stringify(req.body) } : {},
-            ...modified as any
-        }).then(r => r.json())
-        this.config.onResponse && await this.config.onResponse(http_request, response)
+            ...modified as any as {},
+            headers: {
+                ...base_headers,
+                ...headers
+            },
+        }
+        const response: LivequeryResult<T> = fake_response ? fake_response : await fetch(request.url, request).then(r => r.json())
+        this.config.onResponse && await this.config.onResponse(request, response)
         if (response.error) throw response.error
         return response.data
     }
