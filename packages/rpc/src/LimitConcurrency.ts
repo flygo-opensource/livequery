@@ -1,14 +1,18 @@
-import { catchError, EMPTY, finalize, firstValueFrom, from, lastValueFrom, mergeMap, Observable, of, Subject, Subscriber, tap } from "rxjs"
+import { catchError, EMPTY, finalize, from, lastValueFrom, mergeMap, Observable, of, Subject, Subscriber, tap } from "rxjs"
 
 
 
-export const LimitConcurrency = <T extends ((...args: any) => any)>(limit: number = 1) => (target: any, propertyKey: string, descriptor:any ) => {
-    const originalMethod = descriptor.value as T
+type ThenableObservable<T> = Observable<T> & PromiseLike<T>
+
+export const LimitConcurrency = <T extends (...args: any[]) => any>(limit: number = 1) =>
+    (_target: object, _propertyKey: string | symbol, descriptor: TypedPropertyDescriptor<T>): TypedPropertyDescriptor<T> => {
+    const originalMethod = descriptor.value
+    if (!originalMethod) return descriptor
     const sj = new Subject<{ args: any, o: Subscriber<any> }>()
     sj.pipe(
         mergeMap(async ({ args, o }) => {
             try {
-                const result = await originalMethod.apply(target, args)
+                const result = await originalMethod.apply(this, args)
                 const observable = result instanceof Promise ? from(result) : (result instanceof Observable ? result : of(result))
                 await lastValueFrom(observable.pipe(
                     tap(data => o.next(data)),
@@ -21,24 +25,29 @@ export const LimitConcurrency = <T extends ((...args: any) => any)>(limit: numbe
             } catch (e) {
                 o.error(e)
             }
-        }, 1)
+        }, Math.max(1, limit))
     ).subscribe()
 
-    const ovf = (...args: any[]) => {
+    const ovf = function (this: unknown, ...args: Parameters<T>): ThenableObservable<any> {
         const o = new Observable(o => {
             sj.next({ args, o })
         })
         return Object.assign(o, {
-            async then(resolve: (value: any) => void, reject: (reason?: any) => void) {
+            async then<TResult1 = any, TResult2 = never>(
+                onfulfilled?: ((value: any) => TResult1 | PromiseLike<TResult1>) | null,
+                onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null
+            ): Promise<TResult1 | TResult2> {
                 try {
                     const r = await lastValueFrom(o, { defaultValue: null })
-                    resolve(r)
+                    return Promise.resolve(onfulfilled ? onfulfilled(r) : (r as TResult1))
                 } catch (e) {
-                    reject(e)
+                    if (onrejected) return Promise.resolve(onrejected(e))
+                    return Promise.reject(e)
                 }
             }
         })
     }
 
-    return ovf as any 
+    descriptor.value = ovf as unknown as T
+    return descriptor
 }
