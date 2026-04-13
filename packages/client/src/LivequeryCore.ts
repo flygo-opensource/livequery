@@ -9,11 +9,7 @@ export type LivequeryCoreOptions = {
     storage: LivequeryStorge
 }
 
-export type LivequeryLoadingState = {
-    next: boolean
-    prev: boolean
-    all: boolean
-}
+export type LivequeryLoadingState = null | 'next' | 'prev' | 'all'
 
 type CollectionId = string
 type Ref = string
@@ -65,7 +61,7 @@ export class LivequeryCore {
         this.#queries$.pipe(
             mergeMap(({ collection, ref, filters, headers }) => {
                 return from(Object.values(this.config.transporters)).pipe(
-                    map(transporter => { 
+                    map(transporter => {
                         const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
                         const cached = cache.get(key)
                         if (cached) return cached
@@ -89,7 +85,7 @@ export class LivequeryCore {
                             map((result, index) => {
                                 index == 0 && cache.delete(key)
                                 return result
-                            }), 
+                            }),
                             shareReplay()
                         )
                         cache.set(key, query)

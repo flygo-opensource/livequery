@@ -26,7 +26,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
     public readonly metadata: BehaviorSubject<Record<string, any>>
-    public readonly loading: BehaviorSubject<LivequeryLoadingState>
+    public readonly loading: BehaviorSubject<LivequeryLoadingState | null>
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
@@ -37,11 +37,7 @@ export class LivequeryCollection<T extends Doc> {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
-        this.loading = new BehaviorSubject<LivequeryLoadingState>({
-            all: options?.lazy ? false : true,
-            next: options?.lazy ? false : true,
-            prev: false
-        })
+        this.loading = new BehaviorSubject<LivequeryLoadingState>(null)
         this.filters = new BehaviorSubject<Partial<LivequeryFilters<T>>>(options?.filters || {})
         this.paging = new BehaviorSubject<LivequeryPaging>({
             total: 0,
@@ -134,11 +130,7 @@ export class LivequeryCollection<T extends Doc> {
 
 
                 chaos && this.items.next(items)
-                this.loading.next({
-                    all: false,
-                    next: false,
-                    prev: false
-                })
+                this.loading.next(null)
                 event.paging && this.paging.next(event.paging)
             }
             )).subscribe()
@@ -165,20 +157,15 @@ export class LivequeryCollection<T extends Doc> {
         const items = documents.map(doc => new LivequeryDocument(this, doc))
         this.filters.next(filters)
         this.items.next(items)
-        this.loading.next({
-            all: false,
-            next: !!result.paging?.next,
-            prev: !!result.paging?.prev
-        })
+        const prev = result.paging?.prev
+        const next = result.paging?.next
+        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : null
+        this.loading.next(loading)
         result.paging && this.paging.next(result.paging)
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {
-        this.loading.next({
-            all: true,
-            next: false,
-            prev: false
-        })
+        this.loading.next('all')
         await this.#query(filters)
     }
 
@@ -189,11 +176,7 @@ export class LivequeryCollection<T extends Doc> {
             ...this.filters.value,
             ':after': next.cursor
         }
-        this.loading.next({
-            all: false,
-            next: true,
-            prev: false
-        })
+        this.loading.next('next')
         await this.#query(filters || {})
     }
 
@@ -205,11 +188,7 @@ export class LivequeryCollection<T extends Doc> {
             ...this.filters.value,
             ':before': prev.cursor
         }
-        this.loading.next({
-            all: false,
-            next: false,
-            prev: true
-        })
+        this.loading.next('prev')
         await this.#query(filters || {})
     }
 
@@ -219,11 +198,7 @@ export class LivequeryCollection<T extends Doc> {
             ':after': cursor,
             ':before': cursor
         }
-        this.loading.next({
-            all: false,
-            next: true,
-            prev: true
-        })
+        this.loading.next('all') 
         await this.#query(filters || {})
     }
 
@@ -253,7 +228,7 @@ export class LivequeryCollection<T extends Doc> {
         }) as Observable<{ data: T, error?: Error }>
     }
 
-    resetError(){
+    resetError() {
         this.error.next(null)
     }
 }
