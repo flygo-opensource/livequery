@@ -1,6 +1,6 @@
 {
-  "name": "@livequery/new",
-  "version": "2.0.64",
+  "name": "@livequery/core",
+  "version": "2.0.67",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
