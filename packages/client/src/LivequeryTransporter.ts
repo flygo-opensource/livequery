@@ -3,6 +3,7 @@ import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQ
 
 
 export type LivequeryQueryResult = {
+    error: { code: string, message: string }
     changes: DataChangeEvent[]
     summary: Record<string, any>
     paging: LivequeryPaging
@@ -12,10 +13,10 @@ export type LivequeryQueryResult = {
 
 
 
-export type LivequeryTransporter  = {
-    query<T extends Doc>( query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult>>
-    add<T extends Doc>( ref: string, doc: Omit<T, 'id'>): Promise<T>
-    update<T extends Doc>( ref: string, id: string, doc: Partial<T>): Promise<T>
-    delete<T extends Doc>( ref: string, id: string): Promise<T>
-    trigger<T>( action: LivequeryAction): Promise<T>
+export type LivequeryTransporter = {
+    query<T extends Doc>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult>>
+    add<T extends Doc>(ref: string, doc: Omit<T, 'id'>): Promise<T>
+    update<T extends Doc>(ref: string, id: string, doc: Partial<T>): Promise<T>
+    delete<T extends Doc>(ref: string, id: string): Promise<T>
+    trigger<T>(action: LivequeryAction): Promise<T>
 }

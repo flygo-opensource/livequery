@@ -29,6 +29,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly loading: BehaviorSubject<LivequeryLoadingState>
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
+    public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
     private options: LivequeryCollectionOptions<T>
 
@@ -46,6 +47,7 @@ export class LivequeryCollection<T extends Doc> {
             total: 0,
             current: 0
         })
+        this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
         if (options) {
             this.ref = options.ref
             this.options = options
@@ -62,6 +64,7 @@ export class LivequeryCollection<T extends Doc> {
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
                 event.paging && this.paging.next(event.paging)
+                event.error && this.error.next(event.error)
 
                 if (!event.changes || event.changes.length == 0) return
                 const chaos = event.changes && event.changes.some(change => {
@@ -145,6 +148,7 @@ export class LivequeryCollection<T extends Doc> {
 
     async #query(filters: Partial<LivequeryFilters<T>>) {
         if (!this.options.core || !this.options) return
+        this.error.next(null)
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -247,5 +251,9 @@ export class LivequeryCollection<T extends Doc> {
             payload,
             ref: this.options.ref
         }) as Observable<{ data: T, error?: Error }>
+    }
+
+    resetError(){
+        this.error.next(null)
     }
 }

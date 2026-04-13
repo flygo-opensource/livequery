@@ -1,4 +1,4 @@
-import { concatMap, EMPTY, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber } from "rxjs"
+import { catchError, concatMap, EMPTY, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
@@ -65,7 +65,7 @@ export class LivequeryCore {
         this.#queries$.pipe(
             mergeMap(({ collection, ref, filters, headers }) => {
                 return from(Object.values(this.config.transporters)).pipe(
-                    map(transporter => {
+                    map(transporter => { 
                         const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
                         const cached = cache.get(key)
                         if (cached) return cached
@@ -83,12 +83,13 @@ export class LivequeryCore {
                                         } as any)
                                     })
                                 ))
+                                result.error && collection.o.error(result.error)
                                 return result
                             }),
                             map((result, index) => {
                                 index == 0 && cache.delete(key)
                                 return result
-                            }),
+                            }), 
                             shareReplay()
                         )
                         cache.set(key, query)
