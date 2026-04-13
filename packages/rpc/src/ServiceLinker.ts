@@ -18,10 +18,10 @@ export class ServiceLinker {
                 if (!e.response) return
                 const request = this.#requests.get(e.id)
                 if (!request) return
-                const { completed, data, error } = e.response 
+                const { completed, data, error } = e.response
                 if (completed || error) this.#requests.delete(e.id)
                 data && request.o.next(data)
-                completed && request.o.complete();
+                completed && request.o.complete(); 
                 error && request.o.error(new Error(error))
             })
         ).subscribe()
@@ -32,7 +32,7 @@ export class ServiceLinker {
         if (cache) return cache
 
         const behavior_subjects = new Map<string, BehaviorSubject<any>>()
-        const ready$ = new ReplaySubject(1)
+        const ready$ = new BehaviorSubject(false)
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             const id = this.#request_id++
@@ -53,7 +53,7 @@ export class ServiceLinker {
                     id,
                     request: {
                         service: name,
-                        method: paths ,
+                        method: paths,
                         args,
                     }
                 })
@@ -82,7 +82,9 @@ export class ServiceLinker {
             const fn = (...args: any[]) => rpc(paths, args)
             return new Proxy(fn, {
                 get: (_, prop) => {
-                    if (prop == 'then' || typeof prop != 'string') return (s: Function) => firstValueFrom(ready$).then(v => s(v))
+                    if (prop == 'then' || typeof prop != 'string') {
+                        return (s: Function) => firstValueFrom(ready$).then(v => s(v))
+                    }
                     if (prop == 'pipe' || prop == 'subscribe' || prop == 'getValue') {
                         const id = [...paths].pop() || '#'
                         if (prop == 'getValue' || behavior_subjects.has(id)) {
@@ -102,12 +104,11 @@ export class ServiceLinker {
             }) as T
         }
         const service = build() as any
-        setTimeout(async () => {
-            const states = await rpc<Record<string, any>>(['____initialize____'], [])
+        rpc<Record<string, any>>(['____initialize____'], []).then(states => {
             for (const [key, value] of Object.entries(states)) {
                 assert(key, value)
             }
-            return states
+            ready$.next(true)
         })
         this.#services.set(name, service)
         return service

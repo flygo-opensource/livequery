@@ -31,10 +31,9 @@ export class WorkerManager {
                     this.#stopper$.next(id)
                     return
                 }
-                if (!request) return
-                const post = (response: RpcMessage['response']) => respond({ id, response })
+                if (!request) return 
                 const service = this.#services.getValue().get(request.service)
-                if (!service) return post({ error: `Service ${request.service} not found` })
+                if (!service) return respond({ error: `Service ${request.service} not found` })
                 try {
                     const result = await this.#call<any>(service, request.method, request.args)
                     if (isObservableLike(result)) {
@@ -43,16 +42,16 @@ export class WorkerManager {
                                 filter(stop_id => stop_id === id)
                             ))
                         ).subscribe(
-                            (data: any) => post({ data }),
-                            (err: any) => post({ error: err?.message ?? String(err), completed: true }),
-                            () => post({ completed: true })
+                            (data: any) => respond({ data }),
+                            (err: any) => respond({ error: err?.message ?? String(err), completed: true }),
+                            () => respond({ completed: true })
                         )
                     } else {
                         const data = await Promise.resolve(result)
-                        post({ data, completed: true })
+                        respond({ data, completed: true })
                     }
                 } catch (err: any) {
-                    post({ error: err?.message ?? String(err) })
+                    respond({ error: err?.message ?? String(err) })
                 }
             })
         ).subscribe()
@@ -62,15 +61,20 @@ export class WorkerManager {
         const services = this.#services.getValue()
         services.set(name, Object.assign(service, {
             ____initialize____: () => {
-                return Object.entries(services).reduce((p, [k, v]) => {
-                    if (v instanceof BehaviorSubject) {
-                        return {
-                            ...p,
-                            [k]: v.getValue()
-                        }
-                    }
+                const states = Object.getOwnPropertyNames(service).reduce((p, k) => {
+                    if (typeof service[k].getValue === 'function') {
+                        try {
+                            return {
+                                ...p,
+                                [k]: service[k].getValue()
+                            }
+                        } catch { }
+                    } 
                     return p
-                }, {} as Record<string, any>)
+                }, {
+                    '#': typeof service.getValue === 'function' ? service.getValue() : undefined
+                } as Record<string, any>)
+                return states
             }
         }))
         this.#services.next(services)

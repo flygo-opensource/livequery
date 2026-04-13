@@ -41,16 +41,20 @@ export class SharedWorkerChannel extends RpcChannel {
 
     #initForegound(worker: SharedWorker) {
         worker.port.start()
-        const respond = (response: RpcMessage) => worker.port.postMessage(response)
         fromEvent<MessageEvent<RpcMessage>>(worker.port as unknown as EventTarget, 'message').pipe(
+            takeUntil(fromEvent(worker.port as unknown as EventTarget, 'messageerror')),
             tap(e => {
+                const respond = (response: RpcMessage['response']) => {
+                    console.log(`Responding to worker with`, { response })
+                    const msg: RpcMessage = {
+                        id: e.data.id,
+                        response
+                    }
+                    worker.port.postMessage(msg)
+                }
                 this.next({ ...e.data, respond })
             }),
-            takeUntil(fromEvent(worker.port as unknown as EventTarget, 'messageerror')),
-            finalize(() => {
-                console.log(`Worker disconnected, cleaning up linked services`)
-                worker.port.close()
-            })
+            finalize(() => worker.port.close())
         ).subscribe()
     }
 

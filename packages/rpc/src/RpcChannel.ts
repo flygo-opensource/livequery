@@ -17,6 +17,6 @@ export type RpcMessage = {
 }
 
 
-export abstract class RpcChannel extends Subject<RpcMessage & { respond: (msg: RpcMessage) => void }> {
+export abstract class RpcChannel extends Subject<RpcMessage & { respond: (msg: RpcMessage['response']) => void }> {
     abstract send(message: RpcMessage): void
 }
