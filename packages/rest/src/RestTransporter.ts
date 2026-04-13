@@ -1,5 +1,5 @@
 import { of, firstValueFrom, EMPTY, from } from 'rxjs';
-import { filter, first, map, mergeMap, shareReplay, take, tap } from 'rxjs/operators';
+import { filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
