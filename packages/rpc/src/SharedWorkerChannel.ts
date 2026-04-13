@@ -45,7 +45,6 @@ export class SharedWorkerChannel extends RpcChannel {
             takeUntil(fromEvent(worker.port as unknown as EventTarget, 'messageerror')),
             tap(e => {
                 const respond = (response: RpcMessage['response']) => {
-                    console.log(`Responding to worker with`, { response })
                     const msg: RpcMessage = {
                         id: e.data.id,
                         response
