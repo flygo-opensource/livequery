@@ -9,13 +9,13 @@
         "uuid": "^13.0.0",
       },
       "devDependencies": {
-        "@livequery/new": "2.0.61",
+        "@livequery/core": "2.0.70",
         "typescript": "5.6.3",
       },
     },
   },
   "packages": {
-    "@livequery/new": ["@livequery/new@2.0.61", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-4JO4+QpfIRCd/UYNSsOfZOuIyPK6hWAVJsrxBthjh0FmU7FUw98lvGlsS53MRsycT9cBGONxu/pJ6rveA6dwNg=="],
+    "@livequery/core": ["@livequery/core@2.0.70", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-H5H0rsXDNesr7xUiFEsR3LwOUQHE05rGxA5a5fv1kBAgfYzeNKk5GbvLbeGFcbKIUqjLaNRQ5MltjqTJghp15Q=="],
 
     "rxjs": ["rxjs@7.8.2", "", { "dependencies": { "tslib": "^2.1.0" } }, "sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA=="],
 

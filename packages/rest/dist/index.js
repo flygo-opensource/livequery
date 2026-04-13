@@ -2474,7 +2474,9 @@ class RestTransporter {
         ...headers
       }
     };
-    const response = fake_response ? fake_response : await fetch(request.url, request).then((r) => r.json());
+    const response = fake_response ? fake_response : await fetch(request.url, request).then((r) => r.json()).catch((e) => {
+      return { error: { code: e.name, message: e.message }, data: undefined };
+    });
     this.config.onResponse && await this.config.onResponse(request, response);
     if (response.error)
       throw response.error;
@@ -2483,11 +2485,11 @@ class RestTransporter {
   query({ ref, filters }) {
     const ready$ = from(this.socket ? this.socket.pipe(filter2((s) => !!s.connected), map(() => Date.now())) : of(1)).pipe(first2());
     const watch$ = !this.socket || !filters || filters[":after"] || filters[":before"] || filters[":around"] ? EMPTY : this.socket.listen(ref);
-    return merge(ready$.pipe(take2(1), mergeMap(() => this.#call({
+    return merge(ready$.pipe(take2(1), mergeMap(() => from(this.#call({
       ref,
       method: "GET",
       query: filters
-    })), map((collection) => {
+    })).pipe(map((collection) => {
       collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token);
       if (collection.items)
         return {
@@ -2500,7 +2502,10 @@ class RestTransporter {
         changes: [{ data: collection.item, type: "added", id: collection.item.id }],
         source: "query"
       };
-    })), watch$.pipe(map((change) => {
+    }), catchError2((e) => {
+      const error = e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || "UnknownError", message: e.message || "An unknown error occurred" };
+      return of({ error, source: "query" });
+    })))), watch$.pipe(map((change) => {
       const e = {
         changes: [change],
         source: "realtime"
@@ -2526,5 +2531,5 @@ export {
   RestTransporter
 };
 
-//# debugId=8AFAEA6D49671A1564756E2164756E21
+//# debugId=94B40654BB6184D664756E2164756E21
 //# sourceMappingURL=index.js.map

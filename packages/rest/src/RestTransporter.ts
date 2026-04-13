@@ -1,8 +1,8 @@
 import { of, firstValueFrom, EMPTY, from } from 'rxjs';
-import { filter, first, map, mergeMap, take } from 'rxjs/operators';
+import { catchError, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
-import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/new'
+import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core'
 
 
 export type RestTransporterRequest = {
@@ -84,7 +84,9 @@ export class RestTransporter implements LivequeryTransporter {
                 ...headers
             },
         }
-        const response: LivequeryResult<T> = fake_response ? fake_response : await fetch(request.url, request).then(r => r.json())
+        const response: LivequeryResult<T> = fake_response ? fake_response : await fetch(request.url, request).then(r => r.json()).catch(e => {
+            return { error: { code: e.name, message: e.message }, data: undefined } as LivequeryResult<T>
+        })
         this.config.onResponse && await this.config.onResponse(request, response)
         if (response.error) throw response.error
         return response.data
@@ -96,30 +98,37 @@ export class RestTransporter implements LivequeryTransporter {
 
         return merge(
 
+
             ready$.pipe(
                 take(1),
-                mergeMap(() => this.#call<LivequeryCollectionResponse<T>>({
-                    ref,
-                    method: 'GET',
-                    query: filters
-                })),
-                map(collection => {
-                    collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
-                    // If collection
-                    if (collection.items) return {
-                        summary: collection.summary,
-                        changes: collection.items.map(data => ({ data, type: 'added', id: data.id })),
-                        source: "query"
-                    } as Partial<LivequeryQueryResult>
+                mergeMap(() => (
+                    from(this.#call<LivequeryCollectionResponse<T>>({
+                        ref,
+                        method: 'GET',
+                        query: filters
+                    })).pipe(
+                        map(collection => {
+                            collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
+                            // If collection
+                            if (collection.items) return {
+                                summary: collection.summary,
+                                changes: collection.items.map(data => ({ data, type: 'added', id: data.id })),
+                                source: "query"
+                            } as Partial<LivequeryQueryResult>
 
-                    // If document  
-                    return {
-                        summary: collection.summary,
-                        changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
-                        source: "query"
-                    } as Partial<LivequeryQueryResult>
+                            // If document  
+                            return {
+                                summary: collection.summary,
+                                changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
+                                source: "query"
+                            } as Partial<LivequeryQueryResult>
+                        }),
+                        catchError(e => {
+                            const error = e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || 'UnknownError', message: e.message || 'An unknown error occurred' }
+                            return of({ error, source: "query" } as Partial<LivequeryQueryResult>)
+                        })
 
-                })
+                    )))
             ),
 
             watch$.pipe(map((change) => {

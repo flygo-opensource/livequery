@@ -1,5 +1,5 @@
 import { Observable, BehaviorSubject } from "rxjs";
-import type { DataChangeEvent } from '@livequery/new';
+import type { DataChangeEvent } from '@livequery/core';
 export type LivequerySocketMetadata = {
     client_id: string;
     gateway_id?: string;
