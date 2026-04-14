@@ -1,4 +1,4 @@
-import { EMPTY, finalize, fromEvent, mergeMap, takeUntil, tap } from "rxjs"
+import { catchError, EMPTY, finalize, fromEvent, mergeMap, takeUntil, tap } from "rxjs"
 import { RpcChannel, type RpcMessage } from "./RpcChannel";
 
 
@@ -27,11 +27,16 @@ export class SharedWorkerChannel extends RpcChannel {
                 return fromEvent<MessageEvent<RpcMessage>>(port, 'message').pipe(
                     takeUntil(fromEvent(port, 'messageerror')),
                     tap(msg => {
-                        const respond = (response: any) => port.postMessage(response)
+                        const respond = (response: RpcMessage['response']) => {
+                            port.postMessage({
+                                id: msg.data.id,
+                                response
+                            })
+                        }
+
                         this.next({ ...msg.data, respond })
                     }),
                     finalize(() => {
-                        console.log(`Worker disconnected, cleaning up linked services`)
                         port.close()
                     })
                 )
@@ -53,7 +58,10 @@ export class SharedWorkerChannel extends RpcChannel {
                 }
                 this.next({ ...e.data, respond })
             }),
-            finalize(() => worker.port.close())
+            finalize(() => worker.port.close()),
+            catchError(e => {
+                return EMPTY
+            })
         ).subscribe()
     }
 

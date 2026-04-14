@@ -1,5 +1,5 @@
-import { BehaviorSubject, filter, mergeMap, Subject, takeUntil } from "rxjs";
-import type { RpcChannel, RpcMessage } from "./RpcChannel";
+import { BehaviorSubject, filter, map, mergeMap, Subject, takeUntil, tap } from "rxjs";
+import type { RpcChannel } from "./RpcChannel";
 
 function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => any } {
     return !!value && typeof value === 'object' && typeof (value as any).pipe === 'function'
@@ -12,7 +12,7 @@ export class WorkerManager {
 
     async #call<T>(target: any, paths: string[], args: any[]): Promise<T | null> {
         const [first, ...rest] = paths
-        if (!first || first == '#') return target
+        if (!first || first == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
         if (rest.length == 0) {
             const prop = target[first]
             if (typeof prop == 'function') {
@@ -26,32 +26,46 @@ export class WorkerManager {
 
     constructor(private channel: RpcChannel) {
         this.channel.pipe(
-            mergeMap(async ({ id, cancel, request, respond }) => {
+            map(({ id, cancel, request, respond }) => {
                 if (cancel) {
-                    this.#stopper$.next(id)
+                    cancel.ids.forEach((id: number) => this.#stopper$.next(id))
                     return
                 }
-                if (!request) return 
+                if (!request) return
                 const service = this.#services.getValue().get(request.service)
                 if (!service) return respond({ error: `Service ${request.service} not found` })
+                if (request.method.length == 0 || request.method[0] == '#') {
+                    respond({ error: `Can not call [${request.service}.${request.method.join('.')}]` })
+                    return
+                }
+                return { request, id, respond, service }
+            }),
+            filter(Boolean),
+            map(a => a!),
+            mergeMap(async ({ id, request, respond, service }) => {
                 try {
                     const result = await this.#call<any>(service, request.method, request.args)
+                    const state = { stopped: false }
                     if (isObservableLike(result)) {
                         result.pipe(
                             takeUntil(this.#stopper$.pipe(
-                                filter(stop_id => stop_id === id)
+                                filter(stop_id => stop_id === id),
+                                tap(() => { state.stopped = true })
                             ))
                         ).subscribe(
                             (data: any) => respond({ data }),
                             (err: any) => respond({ error: err?.message ?? String(err), completed: true }),
-                            () => respond({ completed: true })
+                            () => !state.stopped && respond({ completed: true })
                         )
                     } else {
-                        const data = await Promise.resolve(result)
+                        const data = await result
                         respond({ data, completed: true })
                     }
                 } catch (err: any) {
-                    respond({ error: err?.message ?? String(err) })
+                    respond({
+                        error: err?.message ?? String(err),
+                        completed: true
+                    })
                 }
             })
         ).subscribe()
@@ -62,18 +76,16 @@ export class WorkerManager {
         services.set(name, Object.assign(service, {
             ____initialize____: () => {
                 const states = Object.getOwnPropertyNames(service).reduce((p, k) => {
-                    if (typeof service[k].getValue === 'function') {
+                    if (service[k] && typeof service[k].getValue === 'function') {
                         try {
                             return {
                                 ...p,
                                 [k]: service[k].getValue()
                             }
                         } catch { }
-                    } 
+                    }
                     return p
-                }, {
-                    '#': typeof service.getValue === 'function' ? service.getValue() : undefined
-                } as Record<string, any>)
+                }, {} as Record<string, any>)
                 return states
             }
         }))

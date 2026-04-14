@@ -8,7 +8,7 @@ export type RpcMessage = {
         method: string[]
         args: any[]
     }
-    cancel?: boolean
+    cancel?: { ids: number[] }
     response?: Partial<{
         data: any
         error: string
