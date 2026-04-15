@@ -2468,6 +2468,7 @@ class RestTransporter {
       ref: req.ref,
       url,
       method: req.method,
+      ...req.body ? { body: typeof req.body === "string" ? req.body : JSON.stringify(req.body) } : {},
       ...modified,
       headers: {
         ...base_headers,
@@ -2531,5 +2532,5 @@ export {
   RestTransporter
 };
 
-//# debugId=94B40654BB6184D664756E2164756E21
+//# debugId=4E476900E558595864756E2164756E21
 //# sourceMappingURL=index.js.map

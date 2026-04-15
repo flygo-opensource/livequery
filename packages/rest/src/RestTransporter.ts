@@ -78,8 +78,10 @@ export class RestTransporter implements LivequeryTransporter {
             ref: req.ref,
             url,
             method: req.method,
+            ...req.body ? { body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body) } : {},
             ...modified as any as {},
             headers: {
+                ... req.body && typeof req.body != 'string' ? { 'Content-Type': 'application/json' } : {},
                 ...base_headers,
                 ...headers
             },
