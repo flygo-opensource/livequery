@@ -13,7 +13,7 @@ export type LivequerySocketMetadata = {
 export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
 
     public readonly client_id = uuidv7()
-    public readonly $gateway = new BehaviorSubject<{ id: string } | undefined>(undefined)
+    public readonly $gateway = new ReplaySubject<string>(1)
     public readonly $connected = new BehaviorSubject(false)
 
     #topics = new Map<string, { stream: Subject<DataChangeEvent>, listen_count: number }>()
@@ -46,7 +46,6 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 ),
                 fromEvent(ws, 'open').pipe(
                     tap(() => {
-
                         this.next({
                             ... this.value,
                             connected: true,
@@ -54,9 +53,7 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                         })
                         console.log(this.value.session == 1 ? 'Websocket connected' : `Websocket re-connected (${this.value.session})`)
                         ws.send(JSON.stringify({ event: 'start', data: { id: this.client_id } }))
-                    }),
-                    delay(1),
-                    tap(() => !this.$gateway.getValue() && this.$gateway.next({ id: '' })),
+                    }), 
                     mergeMap(() => this.#$input),
                     tap(data => ws.send(JSON.stringify(data)))
                 ),
@@ -78,7 +75,6 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
         ).subscribe()
     }
 
-
     stop() {
         this.complete()
     }
@@ -91,7 +87,7 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
     }
 
     private $hello(e: { gid: string }) {
-        this.$gateway.next({ id: e.gid })
+        this.$gateway.next(e.gid)
     }
 
 

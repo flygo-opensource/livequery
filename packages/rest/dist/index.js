@@ -2007,73 +2007,6 @@ function catchError2(selector) {
     }
   });
 }
-// node_modules/rxjs/dist/esm5/internal/operators/concatAll.js
-function concatAll2() {
-  return mergeAll(1);
-}
-
-// node_modules/rxjs/dist/esm5/internal/observable/concat.js
-function concat2() {
-  var args = [];
-  for (var _i = 0;_i < arguments.length; _i++) {
-    args[_i] = arguments[_i];
-  }
-  return concatAll2()(from(args, popScheduler(args)));
-}
-
-// node_modules/rxjs/dist/esm5/internal/operators/take.js
-function take2(count2) {
-  return count2 <= 0 ? function() {
-    return EMPTY;
-  } : operate(function(source, subscriber) {
-    var seen = 0;
-    source.subscribe(createOperatorSubscriber(subscriber, function(value) {
-      if (++seen <= count2) {
-        subscriber.next(value);
-        if (count2 <= seen) {
-          subscriber.complete();
-        }
-      }
-    }));
-  });
-}
-
-// node_modules/rxjs/dist/esm5/internal/operators/ignoreElements.js
-function ignoreElements2() {
-  return operate(function(source, subscriber) {
-    source.subscribe(createOperatorSubscriber(subscriber, noop));
-  });
-}
-
-// node_modules/rxjs/dist/esm5/internal/operators/mapTo.js
-function mapTo2(value) {
-  return map(function() {
-    return value;
-  });
-}
-
-// node_modules/rxjs/dist/esm5/internal/operators/delayWhen.js
-function delayWhen2(delayDurationSelector, subscriptionDelay) {
-  if (subscriptionDelay) {
-    return function(source) {
-      return concat2(subscriptionDelay.pipe(take2(1), ignoreElements2()), source.pipe(delayWhen2(delayDurationSelector)));
-    };
-  }
-  return mergeMap(function(value, index) {
-    return innerFrom(delayDurationSelector(value, index)).pipe(take2(1), mapTo2(value));
-  });
-}
-
-// node_modules/rxjs/dist/esm5/internal/operators/delay.js
-function delay2(due, scheduler) {
-  if (scheduler === undefined) {
-    scheduler = asyncScheduler;
-  }
-  var duration = timer(due, scheduler);
-  return delayWhen2(function() {
-    return duration;
-  });
-}
 // node_modules/rxjs/dist/esm5/internal/operators/filter.js
 function filter2(predicate, thisArg) {
   return operate(function(source, subscriber) {
@@ -2093,6 +2026,23 @@ function finalize2(callback) {
     }
   });
 }
+// node_modules/rxjs/dist/esm5/internal/operators/take.js
+function take2(count2) {
+  return count2 <= 0 ? function() {
+    return EMPTY;
+  } : operate(function(source, subscriber) {
+    var seen = 0;
+    source.subscribe(createOperatorSubscriber(subscriber, function(value) {
+      if (++seen <= count2) {
+        subscriber.next(value);
+        if (count2 <= seen) {
+          subscriber.complete();
+        }
+      }
+    }));
+  });
+}
+
 // node_modules/rxjs/dist/esm5/internal/operators/defaultIfEmpty.js
 function defaultIfEmpty2(defaultValue) {
   return operate(function(source, subscriber) {
@@ -2139,6 +2089,12 @@ function first2(predicate, defaultValue) {
     }));
   };
 }
+// node_modules/rxjs/dist/esm5/internal/operators/ignoreElements.js
+function ignoreElements2() {
+  return operate(function(source, subscriber) {
+    source.subscribe(createOperatorSubscriber(subscriber, noop));
+  });
+}
 // node_modules/rxjs/dist/esm5/internal/operators/retry.js
 function retry2(configOrCount) {
   if (configOrCount === undefined) {
@@ -2152,7 +2108,7 @@ function retry2(configOrCount) {
       count: configOrCount
     };
   }
-  var _a = config3.count, count2 = _a === undefined ? Infinity : _a, delay3 = config3.delay, _b = config3.resetOnSuccess, resetOnSuccess = _b === undefined ? false : _b;
+  var _a = config3.count, count2 = _a === undefined ? Infinity : _a, delay2 = config3.delay, _b = config3.resetOnSuccess, resetOnSuccess = _b === undefined ? false : _b;
   return count2 <= 0 ? identity : operate(function(source, subscriber) {
     var soFar = 0;
     var innerSub;
@@ -2174,8 +2130,8 @@ function retry2(configOrCount) {
               syncUnsub = true;
             }
           };
-          if (delay3 != null) {
-            var notifier = typeof delay3 === "number" ? timer(delay3) : innerFrom(delay3(err, soFar));
+          if (delay2 != null) {
+            var notifier = typeof delay2 === "number" ? timer(delay2) : innerFrom(delay2(err, soFar));
             var notifierSubscriber_1 = createOperatorSubscriber(subscriber, function() {
               notifierSubscriber_1.unsubscribe();
               resub_1();
@@ -2350,7 +2306,7 @@ var v7_default = v7;
 class Socket extends BehaviorSubject {
   endpoint;
   client_id = v7_default();
-  $gateway = new BehaviorSubject(undefined);
+  $gateway = new ReplaySubject(1);
   $connected = new BehaviorSubject(false);
   #topics = new Map;
   #$input = new ReplaySubject(1000);
@@ -2383,7 +2339,7 @@ class Socket extends BehaviorSubject {
       });
       console.log(this.value.session == 1 ? "Websocket connected" : `Websocket re-connected (${this.value.session})`);
       ws.send(JSON.stringify({ event: "start", data: { id: this.client_id } }));
-    }), delay2(1), tap2(() => !this.$gateway.getValue() && this.$gateway.next({ id: "" })), mergeMap(() => this.#$input), tap2((data) => ws.send(JSON.stringify(data)))), fromEvent(ws, "message").pipe(tap2((evt) => {
+    }), mergeMap(() => this.#$input), tap2((data) => ws.send(JSON.stringify(data)))), fromEvent(ws, "message").pipe(tap2((evt) => {
       const e = JSON.parse(evt.data);
       const fn = this[`$${e.event}`];
       typeof fn == "function" && fn.call(this, e);
@@ -2402,7 +2358,7 @@ class Socket extends BehaviorSubject {
     }
   }
   $hello(e) {
-    this.$gateway.next({ id: e.gid });
+    this.$gateway.next(e.gid);
   }
   subscribeWith(realtime_token) {
     this.#$input.next({ event: "subscribe", data: { realtime_token } });
@@ -2446,7 +2402,7 @@ class RestTransporter {
       ...this.socket ? {
         socket_id: this.socket.client_id,
         "x-lcid": this.socket.client_id,
-        "x-lgid": await firstValueFrom(this.socket.$gateway.pipe(filter2(Boolean), map((g) => g.id)))
+        "x-lgid": await firstValueFrom(this.socket.$gateway)
       } : {}
     };
     const original_request = {
@@ -2533,5 +2489,5 @@ export {
   RestTransporter
 };
 
-//# debugId=3F439D7A4468CF7464756E2164756E21
+//# debugId=8BDD30F9E662CEEE64756E2164756E21
 //# sourceMappingURL=index.js.map

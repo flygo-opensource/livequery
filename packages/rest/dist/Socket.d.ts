@@ -1,4 +1,4 @@
-import { Observable, BehaviorSubject } from "rxjs";
+import { Observable, BehaviorSubject, ReplaySubject } from "rxjs";
 import type { DataChangeEvent } from '@livequery/core';
 export type LivequerySocketMetadata = {
     client_id: string;
@@ -10,9 +10,7 @@ export declare class Socket extends BehaviorSubject<LivequerySocketMetadata> {
     #private;
     private endpoint;
     readonly client_id: string;
-    readonly $gateway: BehaviorSubject<{
-        id: string;
-    } | undefined>;
+    readonly $gateway: ReplaySubject<string>;
     readonly $connected: BehaviorSubject<boolean>;
     constructor(endpoint: string);
     stop(): void;

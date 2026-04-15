@@ -54,10 +54,7 @@ export class RestTransporter implements LivequeryTransporter {
             ... this.socket ? {
                 socket_id: this.socket.client_id,
                 'x-lcid': this.socket.client_id,
-                'x-lgid': await firstValueFrom(this.socket.$gateway.pipe(
-                    filter(Boolean),
-                    map(g => g.id)
-                ))
+                'x-lgid': await firstValueFrom(this.socket.$gateway)
             } : {}
         }
         const original_request: RestTransporterRequest & { ref: string } = {
@@ -81,7 +78,7 @@ export class RestTransporter implements LivequeryTransporter {
             ...req.body ? { body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body) } : {},
             ...modified as any as {},
             headers: {
-                ... req.body && typeof req.body != 'string' ? { 'Content-Type': 'application/json' } : {},
+                ...req.body && typeof req.body != 'string' ? { 'Content-Type': 'application/json' } : {},
                 ...base_headers,
                 ...headers
             },
