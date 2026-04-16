@@ -1,4 +1,4 @@
-import { BehaviorSubject, defer, finalize, Observable, Subscription, tap } from "rxjs"
+import { BehaviorSubject, combineLatest, defer, filter, finalize, map, merge, mergeAll, Observable, pairwise, Subscription, switchMap, tap, toArray } from "rxjs"
 import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
 import { LivequeryDocument } from "./LivequeryDocument"
@@ -6,22 +6,19 @@ import { LivequeryDocument } from "./LivequeryDocument"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    core?: LivequeryCore,
-    ref: string
     filters?: LivequeryFilters<T>
     lazy?: boolean
     full?: boolean
-    context?: Record<string, any>
 }
 
 export class LivequeryCollection<T extends Doc> {
 
     public readonly id = (Math.random() * 1e18).toString(36)
     #keys = new Map<keyof T, number>()
-    #linker: Subscription | undefined
     #indexes: Map<string, number>
+    #core: LivequeryCore | undefined
 
-    public readonly ref: string
+    public ref: string
 
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
@@ -33,7 +30,7 @@ export class LivequeryCollection<T extends Doc> {
 
     private options: LivequeryCollectionOptions<T>
 
-    constructor(options?: LivequeryCollectionOptions<T>) {
+    constructor(options: LivequeryCollectionOptions<T>) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
@@ -45,19 +42,20 @@ export class LivequeryCollection<T extends Doc> {
         })
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
         if (options) {
-            this.ref = options.ref
             this.options = options
         }
     }
 
-
-    initialize() {
-        if (!this.options) return
+    #subscription: Subscription | null = null
+    initialize(core: LivequeryCore, ref: string) {
         if (typeof window == 'undefined') return
-        const core = this.options.core
-        if (!core) return
-        if (this.#linker) return this.#linker
-        this.#linker = core.watch(this.options.ref, this.id, this.options.context || {}).pipe(
+        this.ref = ref
+        this.#core = core
+        const timer = this.options.lazy !== false && setTimeout(() => this.query(this.options.filters || {}))
+        this.#subscription = core.watch(this.ref, this.id).pipe(
+            finalize(() => {
+                timer && clearTimeout(timer)
+            }),
             tap(event => {
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
@@ -106,6 +104,24 @@ export class LivequeryCollection<T extends Doc> {
                     return p
                 }, this.items.value)
 
+                const new_items = (
+                    events.added
+                        .filter(a => a.data)
+                        .reduce(
+                            (p, c) => {
+                                if (!p.indexes.has(c.id)) {
+                                    const doc = new LivequeryDocument(this, { id: c.id, ...c.data } as any as T)
+                                    p.list.push(doc)
+                                    p.indexes.add(c.id)
+                                }
+                                return p
+                            },
+                            {
+                                list: [] as LivequeryDocument<DocState<T>>[],
+                                indexes: new Set(this.#indexes.keys())
+                            }
+                        )
+                )
 
                 const items = events.removed.reduce((p, { id }) => {
                     const index = this.#indexes.get(id)
@@ -118,12 +134,10 @@ export class LivequeryCollection<T extends Doc> {
                     return p
                 }, [
                     ...updated_items,
-                    ...(
-                        events.added
-                            .filter(a => a.data)
-                            .map(d => new LivequeryDocument(this, { id: d.id, ...d.data } as any as T))
-                    )
+                    ...new_items.list
                 ]).sort(sorter)
+
+
 
                 this.#indexes = items.reduce((p, c, index) => {
                     p.set(c.value.id, index)
@@ -132,15 +146,13 @@ export class LivequeryCollection<T extends Doc> {
                 chaos && this.items.next(items)
                 this.loading.next(null)
                 event.paging && this.paging.next(event.paging)
-            }
-            ) 
+            }),
         ).subscribe()
-        !this.options.lazy && setTimeout(() => this.query(this.options.filters || {}))
-        return this.#linker
+        return this.#subscription
     }
 
     async #query(filters: Partial<LivequeryFilters<T>>) {
-        if (!this.options.core || !this.options) return
+        if (!this.#core) return
         this.error.next(null)
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
@@ -149,8 +161,8 @@ export class LivequeryCollection<T extends Doc> {
             }
             return p
         }, new Map<keyof T, number>())
-        const result = await this.options.core.query<T>({
-            ref: this.options.ref,
+        const result = await this.#core.query<T>({
+            ref: this.ref,
             filters,
             collection_id: this.id
         })
@@ -204,32 +216,45 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     add(payload: Partial<T>) {
-        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
-        return this.options.core.add<T>(this.options.ref, payload)
+        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.#core.add<T>(this.ref, payload)
     }
 
 
     update(id: string, payload: Partial<T>) {
-        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
-        return this.options.core.update<T>(this.options.ref, id, payload)
+        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.#core.update<T>(this.ref, id, payload)
     }
 
 
     delete(id: string) {
-        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
-        return this.options.core.delete<T>(this.options.ref, id)
+        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.#core.delete<T>(this.ref, id)
     }
 
     trigger<T>(action: string, payload?: Record<string, any>) {
-        if (!this.options.core) throw new Error('LivequeryCollection is not initialized with a core instance')
-        return this.options.core.trigger<T>({
+        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
+        return this.#core.trigger<T>({
             action,
             payload,
-            ref: this.options.ref
+            ref: this.ref
         }) as Observable<{ data: T, error?: Error }>
     }
 
     resetError() {
         this.error.next(null)
     }
-}
+
+    watch(check: (a: T, b: T) => boolean) {
+        return this.items.pipe(
+            switchMap(items => merge(
+                ...items.map(item => item.pipe(
+                    pairwise(),
+                    filter(([p, n]) => {
+                        return check(p, n)
+                    })
+                ))
+            ))
+        )
+    }
+} 
