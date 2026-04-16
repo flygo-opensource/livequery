@@ -1,4 +1,4 @@
-import { BehaviorSubject, filter, map, mergeMap, Subject, takeUntil, tap } from "rxjs";
+import { BehaviorSubject, filter, finalize, map, mergeMap, Subject, takeUntil } from "rxjs";
 import type { RpcChannel } from "./RpcChannel";
 
 function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => any } {
@@ -8,7 +8,7 @@ function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => 
 export class WorkerManager {
 
     #services = new BehaviorSubject(new Map<string, any>())
-    #stopper$ = new Subject<number>()
+
 
     async #call<T>(target: any, paths: string[], args: any[]): Promise<T | null> {
         const [first, ...rest] = paths
@@ -25,10 +25,14 @@ export class WorkerManager {
     }
 
     constructor(private channel: RpcChannel) {
+        const running = new Set<number>()
+        const stopper$ = new Subject<number>()
+
         this.channel.pipe(
             map(({ id, cancel, request, respond }) => {
                 if (cancel) {
-                    cancel.ids.forEach((id: number) => this.#stopper$.next(id))
+                    stopper$.next(cancel.id)
+                    running.delete(cancel.id)
                     return
                 }
                 if (!request) return
@@ -43,19 +47,22 @@ export class WorkerManager {
             filter(Boolean),
             map(a => a!),
             mergeMap(async ({ id, request, respond, service }) => {
+                running.add(id)
                 try {
                     const result = await this.#call<any>(service, request.method, request.args)
-                    const state = { stopped: false }
+                    if (!running.has(id)) return
                     if (isObservableLike(result)) {
                         result.pipe(
-                            takeUntil(this.#stopper$.pipe(
-                                filter(stop_id => stop_id === id),
-                                tap(() => { state.stopped = true })
-                            ))
+                            takeUntil(stopper$.pipe(
+                                filter(stop_id => stop_id === id)
+                            )),
+                            finalize(() => {
+                                running.delete(id)
+                            })
                         ).subscribe(
                             (data: any) => respond({ data }),
                             (err: any) => respond({ error: err?.message ?? String(err), completed: true }),
-                            () => !state.stopped && respond({ completed: true })
+                            () => respond({ completed: true })
                         )
                     } else {
                         const data = await result
@@ -67,6 +74,7 @@ export class WorkerManager {
                         completed: true
                     })
                 }
+                running.delete(id)
             })
         ).subscribe()
     }

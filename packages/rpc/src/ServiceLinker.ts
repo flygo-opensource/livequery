@@ -1,4 +1,4 @@
-import { BehaviorSubject, bufferTime, combineLatest, defer, EMPTY, filter, finalize, firstValueFrom, from, lastValueFrom, map, merge, mergeMap, Observable, of, ReplaySubject, share, skip, Subject, take, tap, timer } from "rxjs";
+import { BehaviorSubject, combineLatest, defer, finalize, firstValueFrom, lastValueFrom, map, merge, Observable, Subject, tap } from "rxjs";
 import type { RpcChannel } from "./RpcChannel";
 import type { WorkerService } from "./WorkerService";
 
@@ -43,33 +43,33 @@ export class ServiceLinker {
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             if (paths.length == 0 || paths[0] == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
-            const id = this.#request_id++
-            const o = new Subject<any>()
-            this.#requests.set(id, { o, completed: false })
-            setTimeout(() => {
-                this.channel.send({
-                    id,
-                    request: {
-                        service: name,
-                        method: paths,
-                        args,
-                    }
+            const observable = defer(() => {
+                const id = this.#request_id++
+                const o = new Subject<any>()
+                this.#requests.set(id, { o, completed: false })
+                setTimeout(() => {
+                    this.channel.send({
+                        id,
+                        request: {
+                            service: name,
+                            method: paths,
+                            args,
+                        }
+                    })
                 })
+                return o.pipe(
+                    finalize(() => {
+                        this.channel.send({ id: 0, cancel: { id } })
+                        this.#requests.delete(id)
+                    })
+                )
             })
-            const observable = o.pipe(
-                finalize(() => {
-                    const request = this.#requests.get(id)
-                    if (!request || request.completed) return 
-                    this.#requests.delete(id)
-                    this.channel.send({ id: 0, cancel: { ids: [id] } })
-                })
-            )
-            const result = Object.assign(observable, {
+
+            return Object.assign(observable, {
                 then(onFulfilled?: (value: any) => any, onRejected?: (reason: any) => any) {
                     return firstValueFrom(observable, { defaultValue: { data: null } }).then(onFulfilled, onRejected)
                 }
             }) as ThenableObservable<any>
-            return result
         }
 
         const build = (paths: string[] = []) => {
@@ -102,7 +102,7 @@ export class ServiceLinker {
         rpc<Record<string, any>>(['____initialize____'], []).then(states => {
             for (const [key, value] of Object.entries(states)) {
                 behaviot_subject_values.set(key, value)
-            } 
+            }
             ready$.next(true)
         })
         this.#services.set(name, service)
