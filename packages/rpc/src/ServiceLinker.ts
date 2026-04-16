@@ -43,28 +43,29 @@ export class ServiceLinker {
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             if (paths.length == 0 || paths[0] == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
-            const observable = defer(() => {
-                const id = this.#request_id++
-                const o = new Subject<any>()
-                this.#requests.set(id, { o, completed: false })
-                setTimeout(() => {
-                    this.channel.send({
-                        id,
-                        request: {
-                            service: name,
-                            method: paths,
-                            args,
-                        }
-                    })
-                })
-                return o.pipe(
-                    finalize(() => {
+            const id = this.#request_id++
+            const o = new Subject<any>()
+            this.#requests.set(id, { o, completed: false })
+            const observable = o.pipe(
+                finalize(() => {
+                    const request = this.#requests.get(id)
+                    this.#requests.delete(id)
+                    if (!request || request.completed) return
+                    setTimeout(() => {
                         this.channel.send({ id: 0, cancel: { id } })
-                        this.#requests.delete(id)
-                    })
-                )
+                    }) 
+                })
+            )
+            setTimeout(() => {
+                this.channel.send({
+                    id,
+                    request: {
+                        service: name,
+                        method: paths,
+                        args,
+                    }
+                })
             })
-
             return Object.assign(observable, {
                 then(onFulfilled?: (value: any) => any, onRejected?: (reason: any) => any) {
                     return firstValueFrom(observable, { defaultValue: { data: null } }).then(onFulfilled, onRejected)

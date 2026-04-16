@@ -1,4 +1,4 @@
-import { BehaviorSubject, filter, finalize, map, mergeMap, Subject, takeUntil } from "rxjs";
+import { BehaviorSubject, EMPTY, filter, finalize, map, merge, mergeMap, of, Subject, Subscription, takeUntil, tap } from "rxjs";
 import type { RpcChannel } from "./RpcChannel";
 
 function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => any } {
@@ -8,6 +8,7 @@ function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => 
 export class WorkerManager {
 
     #services = new BehaviorSubject(new Map<string, any>())
+
 
 
     async #call<T>(target: any, paths: string[], args: any[]): Promise<T | null> {
@@ -25,14 +26,16 @@ export class WorkerManager {
     }
 
     constructor(private channel: RpcChannel) {
-        const running = new Set<number>()
-        const stopper$ = new Subject<number>()
+        const responses = new Map<number, Subscription>()
 
         this.channel.pipe(
             map(({ id, cancel, request, respond }) => {
                 if (cancel) {
-                    stopper$.next(cancel.id)
-                    running.delete(cancel.id)
+                    const subscription = responses.get(cancel.id)
+                    if(subscription){
+                        subscription.unsubscribe()
+                        responses.delete(cancel.id)
+                    } 
                     return
                 }
                 if (!request) return
@@ -47,23 +50,19 @@ export class WorkerManager {
             filter(Boolean),
             map(a => a!),
             mergeMap(async ({ id, request, respond, service }) => {
-                running.add(id)
                 try {
                     const result = await this.#call<any>(service, request.method, request.args)
-                    if (!running.has(id)) return
                     if (isObservableLike(result)) {
-                        result.pipe(
-                            takeUntil(stopper$.pipe(
-                                filter(stop_id => stop_id === id)
-                            )),
+                        const subscription = result.pipe(
                             finalize(() => {
-                                running.delete(id)
+                                responses.delete(id)
                             })
                         ).subscribe(
                             (data: any) => respond({ data }),
                             (err: any) => respond({ error: err?.message ?? String(err), completed: true }),
                             () => respond({ completed: true })
                         )
+                        responses.set(id, subscription)
                     } else {
                         const data = await result
                         respond({ data, completed: true })
@@ -74,7 +73,6 @@ export class WorkerManager {
                         completed: true
                     })
                 }
-                running.delete(id)
             })
         ).subscribe()
     }
