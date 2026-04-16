@@ -62,7 +62,7 @@ export type LivequeryFilters<T extends Doc> = LivequeryPagingFilters & Livequery
 export type DataChangeEvent = {
     collection_ref: string
     id: string
-    type: 'added' | 'removed' | 'updated'
+    type: 'added' | 'removed' | 'modified'
     data?: Record<string, any>
 }
 

@@ -1,4 +1,4 @@
-import { catchError, concatMap, EMPTY, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber } from "rxjs"
+import { catchError, concatMap, EMPTY, filter, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber, tap } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
@@ -50,42 +50,43 @@ export class LivequeryCore {
 
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
-    #queries$ = new Subject<LivequeryQueryParams<any> & { collection: CollectionMetadata }>()
+    #queries$ = new Subject<LivequeryQueryParams<any> & { collection: CollectionMetadata, collection_id: string }>()
 
     constructor(private readonly config: LivequeryCoreConfig) {
         this.#start()
     }
 
     #start() {
-        const cache = new Map<string, Observable<any>>()
+        const cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
         this.#queries$.pipe(
-            mergeMap(({ collection, ref, filters, headers }) => {
+            mergeMap(({ collection, ref, filters, headers, collection_id }) => {
                 return from(Object.values(this.config.transporters)).pipe(
                     map(transporter => {
                         const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
                         const cached = cache.get(key)
-                        if (cached) return cached
+                        if (cached) return cached.pipe(
+                            tap(result => {
+                                result.error && collection.o.error(result.error)
+                            })
+                        )
                         const query = transporter.query({
                             ref,
                             filters,
                             headers,
                         }).pipe(
-                            mergeMap(async (result, index) => {
-                                result.changes && await lastValueFrom(from(result.changes).pipe(
-                                    mergeMap(async change => {
-                                        await this.config.storage.add(change.collection_ref, {
-                                            id: change.id,
-                                            ...change.data
-                                        } as any)
-                                    })
-                                ))
-                                result.error && collection.o.error(result.error)
-                                return result
-                            }),
                             map((result, index) => {
-                                index == 0 && cache.delete(key)
-                                return result
+                                if (index == 0) {
+                                    cache.delete(key)
+                                    return result
+                                }
+                                for (const change of result.changes || []) {
+                                    this.#sync('realtime', {
+                                        ...change,
+                                        id: change.data ? change.data.id : collection.document_id || '#'
+                                    })
+                                }
                             }),
+                            filter(Boolean),
                             shareReplay()
                         )
                         cache.set(key, query)
@@ -93,15 +94,11 @@ export class LivequeryCore {
                     }),
                     mergeMap($ => $),
                     map((result, index) => {
-                        if (index == 0) {
-                            collection.o.next({
-                                ...result,
-                                from: index === 0 ? 'query' : 'realtime'
-                            })
-                        }
-                        for (const change of result.changes || []) {
-                            this.#sync('realtime', change)
-                        }
+                        result.error && collection.o.error(result.error)
+                        collection.o.next({
+                            ...result,
+                            from: index === 0 ? 'query' : 'realtime'
+                        })
                     })
                 )
             })
@@ -122,7 +119,6 @@ export class LivequeryCore {
             const refCollections = this.#refs.get(collection_ref) || new Set<CollectionId>()
             refCollections.add(collection_id)
             this.#refs.set(collection_ref, refCollections)
-
             return () => {
                 this.#collections.delete(collection_id)
                 refCollections.delete(collection_id)
@@ -173,7 +169,7 @@ export class LivequeryCore {
                             await this.config.storage.update<T>(collection_ref, doc.id, { id: new_doc.id })
                             this.#sync('realtime', {
                                 collection_ref,
-                                type: 'updated',
+                                type: 'modified',
                                 id: doc.id,
                                 data: {
                                     id: new_doc.id
@@ -250,7 +246,7 @@ export class LivequeryCore {
         this.#sync('action', {
             collection_ref,
             id,
-            type: 'updated',
+            type: 'modified',
             data: {
                 ...data,
                 _prev

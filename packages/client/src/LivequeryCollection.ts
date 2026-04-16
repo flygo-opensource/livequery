@@ -1,4 +1,4 @@
-import { BehaviorSubject, Observable, Subscription, tap } from "rxjs"
+import { BehaviorSubject, defer, finalize, Observable, Subscription, tap } from "rxjs"
 import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
 import { LivequeryDocument } from "./LivequeryDocument"
@@ -54,8 +54,10 @@ export class LivequeryCollection<T extends Doc> {
     initialize() {
         if (!this.options) return
         if (typeof window == 'undefined') return
-        if (!this.options.core) return
-        this.#linker = this.options.core.watch(this.options.ref, this.id, this.options.context || {}).pipe(
+        const core = this.options.core
+        if (!core) return
+        if (this.#linker) return this.#linker
+        this.#linker = core.watch(this.options.ref, this.id, this.options.context || {}).pipe(
             tap(event => {
                 event.summary && this.summary.next(event.summary)
                 event.metadata && this.metadata.next(event.metadata)
@@ -87,17 +89,17 @@ export class LivequeryCollection<T extends Doc> {
                     return {
                         ...p,
                         [c.type]: [
-                            ...p[c.type],
+                            ...(p[c.type] || []),
                             c
                         ]
                     }
                 }, {
                     added: [] as DataChangeEvent[],
-                    updated: [] as DataChangeEvent[],
+                    modified: [] as DataChangeEvent[],
                     removed: [] as DataChangeEvent[]
                 })
 
-                const updated_items = events.updated.reduce((p, { data, id }) => {
+                const updated_items = events.modified.reduce((p, { data, id }) => {
                     const index = this.#indexes.get(id)
                     const target = index != undefined && index >= 0 ? p[index] : null
                     target && target.next({ ...target.value, ...data })
@@ -127,14 +129,13 @@ export class LivequeryCollection<T extends Doc> {
                     p.set(c.value.id, index)
                     return p
                 }, new Map<string, number>())
-
-
                 chaos && this.items.next(items)
                 this.loading.next(null)
                 event.paging && this.paging.next(event.paging)
             }
-            )).subscribe()
-        !this.options.lazy && this.query(this.options.filters || {})
+            ) 
+        ).subscribe()
+        !this.options.lazy && setTimeout(() => this.query(this.options.filters || {}))
         return this.#linker
     }
 
@@ -198,7 +199,7 @@ export class LivequeryCollection<T extends Doc> {
             ':after': cursor,
             ':before': cursor
         }
-        this.loading.next('all') 
+        this.loading.next('all')
         await this.#query(filters || {})
     }
 
