@@ -1,5 +1,5 @@
 import { fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject, Subscription, of, interval, EMPTY } from "rxjs";
-import { catchError, delay, finalize, ignoreElements, map, mergeMap, retry, switchMap, takeUntil, tap } from "rxjs/operators";
+import { catchError, finalize, ignoreElements, map, mergeMap, retry, switchMap, takeUntil, tap } from "rxjs/operators";
 import type { DataChangeEvent } from '@livequery/core'
 import { v7 as uuidv7 } from 'uuid';
 
