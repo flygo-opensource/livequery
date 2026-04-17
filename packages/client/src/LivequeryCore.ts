@@ -65,7 +65,9 @@ export class LivequeryCore {
                 mergeMap(change => {
                     if (change.type == 'modified' || change.type == 'removed') return of(change)
                     const lock$ = this.#adding.get(change.collection_ref)
-                    if (lock$) return lock$.pipe(map(() => change))
+                    if (lock$) {
+                        return lock$.pipe(map(() => change))
+                    }
                     return of(change)
                 }),
                 tap(change => this.#sync('realtime', change))
@@ -177,9 +179,6 @@ export class LivequeryCore {
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
                         const data = await transporter.add<T>(collection_ref, cleanDoc as T)
-                        o.next()
-                        o.complete()
-                        this.#adding.delete(collection_ref)
                         // unlock 
                         if (data.id) {
                             await this.config.storage.update<T>(collection_ref, doc.id, data)
@@ -190,6 +189,9 @@ export class LivequeryCore {
                                 data
                             })
                         }
+                        o.next()
+                        o.complete()
+                        this.#adding.delete(collection_ref)
                     }
 
                     // _deleting flag → soft-delete on remote then hard-delete locally
