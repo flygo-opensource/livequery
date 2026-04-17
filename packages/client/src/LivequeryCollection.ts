@@ -6,7 +6,7 @@ import { LivequeryDocument } from "./LivequeryDocument"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    filters?: LivequeryFilters<T>
+    filters?: Partial<LivequeryFilters<T>>
     lazy?: boolean
     full?: boolean
 }
@@ -95,7 +95,7 @@ export class LivequeryCollection<T extends Doc> {
                     added: [] as DataChangeEvent[],
                     modified: [] as DataChangeEvent[],
                     removed: [] as DataChangeEvent[]
-                })
+                }) 
 
                 const updated_items = events.modified.reduce((p, { data, id }) => {
                     const index = this.#indexes.get(id)

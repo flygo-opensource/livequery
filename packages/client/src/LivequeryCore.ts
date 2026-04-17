@@ -1,4 +1,4 @@
-import { catchError, concatMap, EMPTY, filter, finalize, from, lastValueFrom, map, mergeMap, Observable, shareReplay, Subject, Subscriber, tap } from "rxjs"
+import { BehaviorSubject, catchError, concatMap, EMPTY, filter, finalize, from, lastValueFrom, map, merge, mergeMap, Observable, of, shareReplay, Subject, Subscriber, tap } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
@@ -51,6 +51,7 @@ export class LivequeryCore {
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<LivequeryQueryParams<any> & { collection: CollectionMetadata }>()
+    #adding = new Map<string, Subject<void>>()
 
     constructor(private readonly config: LivequeryCoreConfig) {
         this.#start()
@@ -58,46 +59,57 @@ export class LivequeryCore {
 
     #start() {
         const cache = new Map<string, Observable<{ result: Partial<LivequeryQueryResult> }>>()
-        this.#queries$.pipe(
-            mergeMap(({ collection, ref, filters, headers, }) => {
-                return from(Object.values(this.config.transporters)).pipe(
-                    map(transporter => {
-                        const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
-                        const cached = cache.get(key)
-                        if (cached) return cached
-                        const query = transporter.query({
-                            ref,
-                            filters,
-                            headers,
-                        }).pipe(
-                            map((result, index) => {
-                                if (index == 0) {
-                                    cache.delete(key)
-                                    return { result }
-                                }
-                                for (const change of result.changes || []) {
-                                    this.#sync('realtime', {
+        const changes$ = new Subject<DataChangeEvent>()
+        merge(
+            changes$.pipe(
+                mergeMap(change => {
+                    if (change.type == 'modified' || change.type == 'removed') return of(change)
+                    const lock$ = this.#adding.get(change.collection_ref)
+                    if (lock$) return lock$.pipe(map(() => change))
+                    return of(change)
+                }),
+                tap(change => this.#sync('realtime', change))
+            ),
+
+            this.#queries$.pipe(
+                mergeMap(({ collection, ref, filters, headers, }) => {
+                    return from(Object.values(this.config.transporters)).pipe(
+                        map(transporter => {
+                            const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
+                            const cached = cache.get(key)
+                            if (cached) return cached
+                            const query = transporter.query({
+                                ref,
+                                filters,
+                                headers,
+                            }).pipe(
+                                map((result, index) => {
+                                    if (index == 0) {
+                                        cache.delete(key)
+                                        return { result }
+                                    }
+                                    result.changes?.forEach(change => changes$.next({
                                         ...change,
                                         id: change.data ? change.data.id : collection.document_id || '#'
-                                    })
-                                }
-                            }),
-                            filter(Boolean),
-                            shareReplay()
-                        )
-                        cache.set(key, query)
-                        return query
-                    }),
-                    mergeMap($ => $),
-                    map(({ result }, index) => {
-                        result.error && collection.o.error(result.error)
-                        collection.o.next({
-                            ...result,
-                            from: index === 0 ? 'query' : 'realtime'
+                                    }))
+                                }),
+                                filter(Boolean),
+                                shareReplay()
+                            )
+                            cache.set(key, query)
+                            return query
+                        }),
+                        mergeMap($ => $),
+                        map(({ result }, index) => {
+                            result.error && collection.o.error(result.error)
+                            collection.o.next({
+                                ...result,
+                                from: index === 0 ? 'query' : 'realtime'
+                            })
                         })
-                    })
-                )
-            })
+                    )
+                })
+            )
         ).subscribe()
     }
 
@@ -127,7 +139,7 @@ export class LivequeryCore {
     }
 
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
-        const collection = this.#collections.get(req.collection_id) 
+        const collection = this.#collections.get(req.collection_id)
         collection && this.#queries$.next({ ...req, collection })
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
@@ -161,27 +173,31 @@ export class LivequeryCore {
             from(Object.entries(this.config.transporters)).pipe(
                 concatMap(async ([_transporterId, transporter]) => {
                     if (String(doc.id).startsWith('local:')) {
-                        const new_doc = await transporter.add<T>(collection_ref, cleanDoc as T)
-                        if (new_doc.id) {
-                            await this.config.storage.update<T>(collection_ref, doc.id, { id: new_doc.id })
-                            this.#sync('realtime', {
+                        // lock by collection_ref 
+                        const o = new Subject<void>()
+                        this.#adding.set(collection_ref, o)
+                        const data = await transporter.add<T>(collection_ref, cleanDoc as T)
+                        o.next()
+                        o.complete()
+                        this.#adding.delete(collection_ref)
+                        // unlock 
+                        if (data.id) {
+                            await this.config.storage.update<T>(collection_ref, doc.id, data)
+                            this.#sync('action', {
                                 collection_ref,
                                 type: 'modified',
                                 id: doc.id,
-                                data: {
-                                    id: new_doc.id
-                                }
+                                data
                             })
                         }
                     }
 
                     // _deleting flag → soft-delete on remote then hard-delete locally
-
                     const ref = `${collection_ref}/${doc.id}`
                     if (doc._deleting) {
                         const deleted_doc = await transporter.delete(ref, doc.id)
                         await this.config.storage.delete<T>(ref, doc.id)
-                        this.#sync('realtime', {
+                        this.#sync('action', {
                             collection_ref,
                             type: 'removed',
                             id: doc.id
@@ -209,7 +225,7 @@ export class LivequeryCore {
             collection_ref,
             doc as T
         )
-        await this.#sync('action', {
+        this.#sync('action', {
             id: data.id,
             type: 'added',
             data,
