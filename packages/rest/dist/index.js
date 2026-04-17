@@ -2471,8 +2471,11 @@ class RestTransporter {
       return e;
     })));
   }
-  add(ref, data) {
-    return this.#call({ method: "POST", ref, body: data, query: {} });
+  async add(ref, data) {
+    const r = await this.#call({ method: "POST", ref, body: data, query: {} });
+    if (r.id)
+      return r;
+    return r.item;
   }
   update(ref, id, data) {
     return this.#call({ method: "PATCH", ref: ref + "/" + id, body: data, query: {} });
@@ -2489,5 +2492,5 @@ export {
   RestTransporter
 };
 
-//# debugId=8BDD30F9E662CEEE64756E2164756E21
+//# debugId=3D47613E61FD504C64756E2164756E21
 //# sourceMappingURL=index.js.map

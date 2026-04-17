@@ -140,8 +140,10 @@ export class RestTransporter implements LivequeryTransporter {
         )
     }
 
-    add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
-        return this.#call<T>({ method: 'POST', ref, body: data, query: {} })
+    async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
+        const r = await this.#call<{ item: T, id: string }>({ method: 'POST', ref, body: data, query: {} })
+        if (r.id) return r as any as T
+        return r.item
     }
 
     update<T extends Doc>(ref: string, id: string, data: Partial<T>) {
