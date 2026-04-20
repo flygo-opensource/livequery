@@ -102,7 +102,7 @@ export class LivequeryCore {
                             return query
                         }),
                         mergeMap($ => $),
-                        map(({ result }, index) => { 
+                        map(({ result }, index) => {
                             collection.o.next({
                                 ...result,
                                 from: index === 0 ? 'query' : 'realtime'
@@ -141,7 +141,7 @@ export class LivequeryCore {
 
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
         const collection = this.#collections.get(req.collection_id)
-        collection && this.#queries$.next({ ...req, collection })
+        collection && setTimeout(() => this.#queries$.next({ ...req, collection }))
         return await this.config.storage.query<T>(req.ref, req.filters)
     }
 

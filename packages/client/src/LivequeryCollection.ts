@@ -145,14 +145,12 @@ export class LivequeryCollection<T extends Doc> {
                         ...new_items.list
                     ]).sort(sorter)
 
-
-
                     this.#indexes = items.reduce((p, c, index) => {
                         p.set(c.value.id, index)
                         return p
                     }, new Map<string, number>())
                     chaos && this.items.next(items)
-                    this.loading.next(null)
+                    event.from == 'query' && this.loading.next(null)
                     event.paging && this.paging.next(event.paging)
                 }),
             )
@@ -170,6 +168,11 @@ export class LivequeryCollection<T extends Doc> {
             }
             return p
         }, new Map<keyof T, number>())
+        this.filters.next(filters)
+        const next = filters[':after']
+        const prev = filters[':before']
+        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : null
+        this.loading.next(loading)
         const result = await this.#core.query<T>({
             ref: this.ref,
             filters,
@@ -177,12 +180,7 @@ export class LivequeryCollection<T extends Doc> {
         })
         const documents = result.documents || []
         const items = documents.map(doc => new LivequeryDocument(this, doc))
-        this.filters.next(filters)
         this.items.next(items)
-        const prev = result.paging?.prev
-        const next = result.paging?.next
-        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : null
-        this.loading.next(loading)
         result.paging && this.paging.next(result.paging)
     }
 
