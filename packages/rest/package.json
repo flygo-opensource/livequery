@@ -3,7 +3,7 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.75",
+    "version": "2.0.78",
     "type": "module",
     "description": "",
     "main": "build/index.js",
