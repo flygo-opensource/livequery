@@ -117,7 +117,7 @@ type RpcMessage = {
     method: string[]
     args: any[]
   }
-  cancel?: boolean
+  cancel?: { id: number }
   response?: Partial<{
     data: any
     error: string
@@ -262,7 +262,7 @@ Notes:
 If a client unsubscribes from an in-flight call, `ServiceLinker` sends:
 
 ```ts
-{ id, cancel: true }
+{ id: 0, cancel: { id } }
 ```
 
 `WorkerManager` listens for that id and stops streaming output for matching Observable calls.
