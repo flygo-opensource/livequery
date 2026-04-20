@@ -102,8 +102,7 @@ export class LivequeryCore {
                             return query
                         }),
                         mergeMap($ => $),
-                        map(({ result }, index) => {
-                            result.error && collection.o.error(result.error)
+                        map(({ result }, index) => { 
                             collection.o.next({
                                 ...result,
                                 from: index === 0 ? 'query' : 'realtime'

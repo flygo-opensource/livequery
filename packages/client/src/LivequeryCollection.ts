@@ -18,6 +18,7 @@ export class LivequeryCollection<T extends Doc> {
     #keys = new Map<keyof T, number>()
     #indexes: Map<string, number>
     #core: LivequeryCore | undefined
+    #filters = new Subject<Partial<LivequeryFilters<T>>>()
 
     public ref: string
 
@@ -52,7 +53,7 @@ export class LivequeryCollection<T extends Doc> {
         if (typeof window == 'undefined') return
         this.ref = ref
         this.#core = core
-        const timer = this.options.lazy !== false && setTimeout(() => this.query(this.options.filters || {}))
+        const timer = this.options.lazy !== true && setTimeout(() => this.query(this.options.filters || {}))
         this.#subscription = merge(
             this.options.debounce ? this.#filters.pipe(
                 debounceTime(this.options.debounce),
@@ -190,7 +191,6 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters)
     }
 
-    #filters = new Subject<Partial<LivequeryFilters<T>>>()
     async debounceQuery(filters: Partial<LivequeryFilters<T>>) {
         this.#filters.next(filters)
     }
