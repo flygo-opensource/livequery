@@ -1,4 +1,4 @@
-import { BehaviorSubject, combineLatest, defer, filter, finalize, map, merge, mergeAll, Observable, pairwise, Subscription, switchMap, tap, toArray } from "rxjs"
+import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
 import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
 import { LivequeryDocument } from "./LivequeryDocument"
@@ -9,6 +9,7 @@ export type LivequeryCollectionOptions<T extends Doc> = {
     filters?: Partial<LivequeryFilters<T>>
     lazy?: boolean
     full?: boolean
+    debounce?: number
 }
 
 export class LivequeryCollection<T extends Doc> {
@@ -52,101 +53,108 @@ export class LivequeryCollection<T extends Doc> {
         this.ref = ref
         this.#core = core
         const timer = this.options.lazy !== false && setTimeout(() => this.query(this.options.filters || {}))
-        this.#subscription = core.watch(this.ref, this.id).pipe(
-            finalize(() => {
-                timer && clearTimeout(timer)
-            }),
-            tap(event => {
-                event.summary && this.summary.next(event.summary)
-                event.metadata && this.metadata.next(event.metadata)
-                event.paging && this.paging.next(event.paging)
-                event.error && this.error.next(event.error)
+        this.#subscription = merge(
+            this.options.debounce ? this.#filters.pipe(
+                debounceTime(this.options.debounce),
+                switchMap(filters => this.query(filters))
+            ) : EMPTY,
 
-                if (!event.changes || event.changes.length == 0) return
-                const chaos = event.changes && event.changes.some(change => {
-                    if (change.type == 'added' || change.type == 'removed') return true
-                    return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
-                })
-                const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
-                    for (const [key, order] of this.#keys) {
-                        const va = a.value[key]
-                        const vb = b.value[key]
-                        if (typeof va === 'number' && typeof vb === 'number') {
-                            if (va < vb) return -order
-                            if (va > vb) return order
-                        }
-                        if (typeof va === 'string' && typeof vb === 'string') {
-                            if (va < vb) return -order
-                            if (va > vb) return order
-                        }
-                    }
-                    return 0
-                }
+            core.watch(this.ref, this.id).pipe(
+                finalize(() => {
+                    timer && clearTimeout(timer)
+                }),
+                tap(event => {
+                    event.summary && this.summary.next(event.summary)
+                    event.metadata && this.metadata.next(event.metadata)
+                    event.paging && this.paging.next(event.paging)
+                    event.error && this.error.next(event.error)
 
-                const events = event.changes.reduce((p, c) => {
-                    return {
-                        ...p,
-                        [c.type]: [
-                            ...(p[c.type] || []),
-                            c
-                        ]
-                    }
-                }, {
-                    added: [] as DataChangeEvent[],
-                    modified: [] as DataChangeEvent[],
-                    removed: [] as DataChangeEvent[]
-                }) 
-
-                const updated_items = events.modified.reduce((p, { data, id }) => {
-                    const index = this.#indexes.get(id)
-                    const target = index != undefined && index >= 0 ? p[index] : null
-                    target && target.next({ ...target.value, ...data })
-                    return p
-                }, this.items.value)
-
-                const new_items = (
-                    events.added
-                        .filter(a => a.data)
-                        .reduce(
-                            (p, c) => {
-                                if (!p.indexes.has(c.id)) {
-                                    const doc = new LivequeryDocument(this, { id: c.id, ...c.data } as any as T)
-                                    p.list.push(doc)
-                                    p.indexes.add(c.id)
-                                }
-                                return p
-                            },
-                            {
-                                list: [] as LivequeryDocument<DocState<T>>[],
-                                indexes: new Set(this.#indexes.keys())
+                    if (!event.changes || event.changes.length == 0) return
+                    const chaos = event.changes && event.changes.some(change => {
+                        if (change.type == 'added' || change.type == 'removed') return true
+                        return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
+                    })
+                    const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
+                        for (const [key, order] of this.#keys) {
+                            const va = a.value[key]
+                            const vb = b.value[key]
+                            if (typeof va === 'number' && typeof vb === 'number') {
+                                if (va < vb) return -order
+                                if (va > vb) return order
                             }
-                        )
-                )
-
-                const items = events.removed.reduce((p, { id }) => {
-                    const index = this.#indexes.get(id)
-                    if (index != undefined) {
-                        return [
-                            ...p.slice(0, index),
-                            ...p.slice(index + 1)
-                        ]
+                            if (typeof va === 'string' && typeof vb === 'string') {
+                                if (va < vb) return -order
+                                if (va > vb) return order
+                            }
+                        }
+                        return 0
                     }
-                    return p
-                }, [
-                    ...updated_items,
-                    ...new_items.list
-                ]).sort(sorter)
+
+                    const events = event.changes.reduce((p, c) => {
+                        return {
+                            ...p,
+                            [c.type]: [
+                                ...(p[c.type] || []),
+                                c
+                            ]
+                        }
+                    }, {
+                        added: [] as DataChangeEvent[],
+                        modified: [] as DataChangeEvent[],
+                        removed: [] as DataChangeEvent[]
+                    })
+
+                    const updated_items = events.modified.reduce((p, { data, id }) => {
+                        const index = this.#indexes.get(id)
+                        const target = index != undefined && index >= 0 ? p[index] : null
+                        target && target.next({ ...target.value, ...data })
+                        return p
+                    }, this.items.value)
+
+                    const new_items = (
+                        events.added
+                            .filter(a => a.data)
+                            .reduce(
+                                (p, c) => {
+                                    if (!p.indexes.has(c.id)) {
+                                        const doc = new LivequeryDocument(this, { id: c.id, ...c.data } as any as T)
+                                        p.list.push(doc)
+                                        p.indexes.add(c.id)
+                                    }
+                                    return p
+                                },
+                                {
+                                    list: [] as LivequeryDocument<DocState<T>>[],
+                                    indexes: new Set(this.#indexes.keys())
+                                }
+                            )
+                    )
+
+                    const items = events.removed.reduce((p, { id }) => {
+                        const index = this.#indexes.get(id)
+                        if (index != undefined) {
+                            return [
+                                ...p.slice(0, index),
+                                ...p.slice(index + 1)
+                            ]
+                        }
+                        return p
+                    }, [
+                        ...updated_items,
+                        ...new_items.list
+                    ]).sort(sorter)
 
 
 
-                this.#indexes = items.reduce((p, c, index) => {
-                    p.set(c.value.id, index)
-                    return p
-                }, new Map<string, number>())
-                chaos && this.items.next(items)
-                this.loading.next(null)
-                event.paging && this.paging.next(event.paging)
-            }),
+                    this.#indexes = items.reduce((p, c, index) => {
+                        p.set(c.value.id, index)
+                        return p
+                    }, new Map<string, number>())
+                    chaos && this.items.next(items)
+                    this.loading.next(null)
+                    event.paging && this.paging.next(event.paging)
+                }),
+            )
         ).subscribe()
         return this.#subscription
     }
@@ -180,6 +188,11 @@ export class LivequeryCollection<T extends Doc> {
     async query(filters: Partial<LivequeryFilters<T>>) {
         this.loading.next('all')
         await this.#query(filters)
+    }
+
+    #filters = new Subject<Partial<LivequeryFilters<T>>>()
+    async debounceQuery(filters: Partial<LivequeryFilters<T>>) {
+        this.#filters.next(filters)
     }
 
     async loadMore() {
