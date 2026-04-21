@@ -5,3 +5,4 @@ export * from "./WorkerService"
 export * from './WorkerManager'
 export * from './LimitConcurrency'
 export * from './StorageBehaviorSubject'
+export * from './RxjsQueue'
