@@ -80,7 +80,7 @@ export class LivequeryCore {
                                 filters,
                                 headers,
                             }).pipe(
-                                tap(result => { 
+                                tap(result => {
                                     for (const change of result.changes || []) {
                                         change.type == 'added' && change.data && this.config.storage.add(change.collection_ref, {
                                             id: change.data.id,
@@ -108,7 +108,7 @@ export class LivequeryCore {
                             collection.o.next({
                                 ...result,
                                 from: index === 0 ? 'query' : 'realtime'
-                            }) 
+                            })
                         })
                     )
                 })
@@ -214,12 +214,12 @@ export class LivequeryCore {
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
                         await transporter.update<T>(collection_ref, id, changedFields)
-                        await this.config.storage.update<T>(collection_ref, id, { _prev: undefined })
+                        await this.config.storage.update<T>(collection_ref, id, { _prev: undefined, _updating: undefined })
                         this.#sync('action', {
                             collection_ref,
                             type: 'modified',
                             id,
-                            data: { _prev: undefined }
+                            data: { _prev: undefined, _updating: undefined }
                         })
                     }
 
@@ -233,7 +233,7 @@ export class LivequeryCore {
     async add<T extends Doc>(collection_ref: string, doc: Record<string, any>) {
         const data = await this.config.storage.add<T>(
             collection_ref,
-            doc as T
+            { ...doc, _adding: true } as DocState<T>
         )
         this.#sync('action', {
             id: data.id,
@@ -258,17 +258,18 @@ export class LivequeryCore {
                 [key]: (old as any)[key]
             }
         }, old._prev || {})
-        await this.config.storage.update<T>(collection_ref, id, { _prev, ...data, })
+        await this.config.storage.update<T>(collection_ref, id, { _prev, _updating: true, ...data, })
         const doc = await this.#sync('action', {
             collection_ref,
             id,
             type: 'modified',
             data: {
+                _prev,
+                _updating: true,
                 ...data,
-                _prev
             }
         })
-        await this.#push(collection_ref, id, { ...data, _prev })
+        await this.#push(collection_ref, id, { ...data, _prev, _updating: true })
         return doc
     }
 
