@@ -115,28 +115,32 @@ export class RestTransporter implements LivequeryTransporter {
                         map(collection => {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
                             // If collection
-                            if (collection.items) return {
-                                summary: collection.summary, 
-                                paging: {
-                                    current: collection.count.current,
-                                    total: collection.count.total,
-                                    next: collection.has.next ? {
-                                        count: collection.count.next,
-                                        cursor: collection.cursor.last
-                                    } : undefined,
-                                    prev: collection.has.prev ? {
-                                        count: collection.count.prev,
-                                        cursor: collection.cursor.first
-                                    } : undefined
-                                },
-                                changes: collection.items.map(data => ({
-                                    data,
-                                    type: 'added',
-                                    id: data.id,
-                                    collection_ref
-                                })),
-                                source: "query"
-                            } as Partial<LivequeryQueryResult>
+                            if (collection.items) {
+                                const items = Array.isArray(collection.items) ? collection.items : []
+                                const length = items.length
+                                return {
+                                    summary: collection.summary,
+                                    paging: {
+                                        current: collection?.count?.current ?? length,
+                                        total: collection?.count?.total ?? length,
+                                        next: collection?.has?.next ? {
+                                            count: collection?.count?.next || 0,
+                                            cursor: collection?.cursor?.last
+                                        } : undefined,
+                                        prev: collection?.has?.prev ? {
+                                            count: collection?.count?.prev || 0,
+                                            cursor: collection?.cursor?.first
+                                        } : undefined
+                                    },
+                                    changes: items.map(data => ({
+                                        data,
+                                        type: 'added',
+                                        id: data.id,
+                                        collection_ref
+                                    })),
+                                    source: "query"
+                                } as Partial<LivequeryQueryResult>
+                            }
 
                             // If document  
                             return {

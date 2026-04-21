@@ -2451,22 +2451,24 @@ class RestTransporter {
       query: filters
     })).pipe(map((collection) => {
       collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token);
-      if (collection.items)
+      if (collection.items) {
+        const items = Array.isArray(collection.items) ? collection.items : [];
+        const length = items.length;
         return {
           summary: collection.summary,
           paging: {
-            current: collection.count.current,
-            total: collection.count.total,
-            next: collection.has.next ? {
-              count: collection.count.next,
-              cursor: collection.cursor.last
+            current: collection?.count?.current ?? length,
+            total: collection?.count?.total ?? length,
+            next: collection?.has?.next ? {
+              count: collection?.count?.next || 0,
+              cursor: collection?.cursor?.last
             } : undefined,
-            prev: collection.has.prev ? {
-              count: collection.count.prev,
-              cursor: collection.cursor.first
+            prev: collection?.has?.prev ? {
+              count: collection?.count?.prev || 0,
+              cursor: collection?.cursor?.first
             } : undefined
           },
-          changes: collection.items.map((data) => ({
+          changes: items.map((data) => ({
             data,
             type: "added",
             id: data.id,
@@ -2474,6 +2476,7 @@ class RestTransporter {
           })),
           source: "query"
         };
+      }
       return {
         summary: collection.summary,
         changes: [{
@@ -2525,5 +2528,5 @@ export {
   RestTransporter
 };
 
-//# debugId=3C3612524FC823B664756E2164756E21
+//# debugId=88C69AF4AF01B65F64756E2164756E21
 //# sourceMappingURL=index.js.map
