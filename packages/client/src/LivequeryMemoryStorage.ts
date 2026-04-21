@@ -5,13 +5,13 @@ import { filterDocs } from "./helpers/filterDocs"
 
 
 export class LivequeryMemoryStorage implements LivequeryStorge {
-    #collections = new Map<string, Doc[]>()
+    #collections = new Map<string, Map<string, Doc>>()
 
     async query<T extends Doc>(collection: string, filters?: Record<string, any>): Promise<{
         documents: T[]
         paging: LivequeryPaging
     }> {
-        const sources = (this.#collections.get(collection) || []) as T[]
+        const sources = Array.from((this.#collections.get(collection) || new Map<string, Doc>()).values()) as T[]
         const f = filters || {}
         const sorters = Object.entries(f).filter(([k]) => k.endsWith(":sort")) as Array<[string, "asc" | "desc"]>
         const items = filterDocs(sources, f)
@@ -26,79 +26,56 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
     }
 
     get<T extends Doc>(ref: string, id: string): Promise<T | null> {
-        const docs = this.#collections.get(ref) as T[] | undefined
+        const docs = this.#collections.get(ref)
         if (!docs) return Promise.resolve(null)
-        const doc = docs.find((d) => d.id === id) || null
+        const doc = (docs.get(id) as T) || null
         return Promise.resolve(doc)
     }
 
     async add<T extends Doc>(collection: string, document: T): Promise<T> {
-        const docs = this.#clone(collection) as T[]
+        const docs = this.#collections.get(collection) || new Map<string, Doc>()
         const doc = {
             ...document,
             id: document.id || `local:${crypto.randomUUID()}`
-        }
-        if (!document.id) {
-            docs.push(doc)
-        } else {
-            const index = docs.findIndex((doc) => doc.id === document.id)
-            if (index >= 0) {
-                docs[index] = document
-            } else {
-                docs.push(document)
-            }
-        }
+        } as T
+        docs.set(doc.id, doc)
         this.#collections.set(collection, docs)
         return doc
     }
 
     async update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<T | null> {
-        const docs = this.#clone(collection) as T[]
-        const index = docs.findIndex((doc) => doc.id === id)
-        if (index < 0) return null
+        const docs = this.#collections.get(collection)
+        if (!docs) return null
+        const existing = docs.get(id)
+        if (!existing) return null
         const next = {
-            id,
-            ...docs[index],
+            ...existing,
             ...document,
         } as T
-        docs[index] = next
-        this.#collections.set(collection, docs)
+        if (document.id && document.id !== id) {
+            docs.delete(id)
+            docs.set(document.id, next)
+        } else {
+            docs.set(id, next)
+        }
         return next
     }
 
     async delete<T extends Doc>(collection: string, id: string): Promise<T | null> {
-        const docs = this.#clone(collection) as T[]
-        const index = docs.findIndex((doc) => doc.id === id)
-        if (index < 0) return null
-        const [deleted] = docs.splice(index, 1)
-        this.#collections.set(collection, docs)
-        return (deleted || null) as T | null
+        const docs = this.#collections.get(collection)
+        if (!docs) return null
+        const deleted = docs.get(id) as T || null
+        docs.delete(id)
+        return deleted
     }
 
-    clear(collection?: string) {
-        if (collection) {
-            this.#collections.delete(collection)
-            return
-        }
-        this.#collections.clear()
-    }
-
-    seed<T extends Doc>(collection: string, docs: T[]) {
-        this.#collections.set(collection, [...docs])
-    }
-
-    #clone(collection: string) {
-        const current = this.#collections.get(collection) || []
-        return [...current]
-    }
 
     #sortItems<T extends Doc>(
         items: T[],
         sorters: Array<[string, 'asc' | 'desc']>
     ): T[] {
-        if (sorters.length === 0) return items
-        const copied = [...items]
-        copied.sort((a, b) => {
+        if (sorters.length === 0) return [...items]
+        return [...items].sort((a, b) => {
             for (const [sortKey, direction] of sorters) {
                 const fieldPath = sortKey.slice(0, -5)
                 const va = this.#getByPath(a, fieldPath)
@@ -109,7 +86,6 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
             }
             return 0
         })
-        return copied
     }
 
 

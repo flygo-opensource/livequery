@@ -48,12 +48,21 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
+    #reindex() {
+        this.#indexes = this.items.value.reduce((p, c, index) => {
+            p.set(c.value.id, index)
+            return p
+        }, new Map<string, number>())
+    }
+
+
     #subscription: Subscription | null = null
     initialize(core: LivequeryCore, ref: string) {
         if (typeof window == 'undefined') return
         this.ref = ref
         this.#core = core
-        const timer = this.options.lazy !== true && setTimeout(() => this.query(this.options.filters || {}))
+        const timer = this.options.lazy !== true && setTimeout(() => this.query(this.filters.value || {}))
+        this.#subscription?.unsubscribe()
         this.#subscription = merge(
             this.options.debounce ? this.#filters.pipe(
                 debounceTime(this.options.debounce),
@@ -70,9 +79,13 @@ export class LivequeryCollection<T extends Doc> {
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
 
-                    if (!event.changes || event.changes.length == 0) return
+                    if (!event.changes || event.changes.length == 0) {
+                        event.from == 'query' && this.loading.next(null)
+                        return
+                    }
                     const chaos = event.changes && event.changes.some(change => {
                         if (change.type == 'added' || change.type == 'removed') return true
+                        if (change.data && change.data.id != change.id) return true
                         return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
                     })
                     const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
@@ -131,27 +144,31 @@ export class LivequeryCollection<T extends Doc> {
                             )
                     )
 
-                    const items = events.removed.reduce((p, { id }) => {
-                        const index = this.#indexes.get(id)
-                        if (index != undefined) {
-                            return [
-                                ...p.slice(0, index),
-                                ...p.slice(index + 1)
-                            ]
-                        }
-                        return p
+                    const remove_indexes = (
+                        events.removed
+                            .map(r => this.#indexes.get(r.id))
+                            .filter(i => i != undefined)
+                            .sort((a, b) => b - a)
+                    )
+
+                    const unsort_items = remove_indexes.reduce((p, index) => {
+                        return [
+                            ...p.slice(0, index),
+                            ...p.slice(index + 1)
+                        ]
                     }, [
                         ...updated_items,
                         ...new_items.list
-                    ]).sort(sorter)
+                    ])
 
-                    this.#indexes = items.reduce((p, c, index) => {
-                        p.set(c.value.id, index)
-                        return p
-                    }, new Map<string, number>())
-                    chaos && this.items.next(items)
+                    const items = chaos ? unsort_items.sort(sorter) : unsort_items
+                    if (chaos) {
+                        this.items.next(items)
+                        this.#reindex()
+                    }
                     event.from == 'query' && this.loading.next(null)
                     event.paging && this.paging.next(event.paging)
+                    event.from == 'query' && this.loading.next(null)
                 }),
             )
         ).subscribe()
@@ -171,17 +188,18 @@ export class LivequeryCollection<T extends Doc> {
         this.filters.next(filters)
         const next = filters[':after']
         const prev = filters[':before']
-        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : null
-        this.loading.next(loading)
-        const result = await this.#core.query<T>({
+        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : 'all'
+        this.loading.next(loading) 
+        await this.#core.query<T>({
             ref: this.ref,
             filters,
             collection_id: this.id
         })
-        const documents = result.documents || []
-        const items = documents.map(doc => new LivequeryDocument(this, doc))
-        this.items.next(items)
-        result.paging && this.paging.next(result.paging)
+        // const documents = result.documents || []
+        // const items = documents.map(doc => new LivequeryDocument(this, doc))
+        // this.items.next(items)
+        // this.#reindex()
+        // result.paging && this.paging.next(result.paging)
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {

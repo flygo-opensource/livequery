@@ -18,8 +18,8 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<T> {
         return this.collection.update(id, data)
     }
 
-    del() {
-        const id = this.value.id
+    del() {  
+        const id = this.value.id 
         return this.collection.delete(id)
     }
 
