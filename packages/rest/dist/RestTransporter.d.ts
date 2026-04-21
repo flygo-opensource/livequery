@@ -36,8 +36,8 @@ export declare class RestTransporter implements LivequeryTransporter {
         filters: LivequeryFilters<T>;
     }): import("rxjs").Observable<Partial<LivequeryQueryResult>>;
     add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>): Promise<T>;
-    update<T extends Doc>(ref: string, id: string, data: Partial<T>): Promise<T>;
-    delete<T extends Doc>(ref: string, id: string): Promise<T>;
+    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>): Promise<T>;
+    delete<T extends Doc>(collection_ref: string, id: string): Promise<T>;
     trigger<T>({ ref, action, payload }: LivequeryAction): Promise<T>;
 }
 //# sourceMappingURL=RestTransporter.d.ts.map

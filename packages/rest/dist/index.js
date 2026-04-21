@@ -2443,6 +2443,8 @@ class RestTransporter {
   query({ ref, filters }) {
     const ready$ = from(this.socket ? this.socket.pipe(filter2((s) => !!s.connected), map(() => Date.now())) : of(1)).pipe(first2());
     const watch$ = !this.socket || !filters || filters[":after"] || filters[":before"] || filters[":around"] ? EMPTY : this.socket.listen(ref);
+    const refs = ref.split("/");
+    const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join("/") : ref;
     return merge(ready$.pipe(take2(1), mergeMap(() => from(this.#call({
       ref,
       method: "GET",
@@ -2452,24 +2454,43 @@ class RestTransporter {
       if (collection.items)
         return {
           summary: collection.summary,
-          changes: collection.items.map((data) => ({ data, type: "added", id: data.id })),
+          changes: collection.items.map((data) => ({
+            data,
+            type: "added",
+            id: data.id,
+            collection_ref
+          })),
           source: "query"
         };
       return {
         summary: collection.summary,
-        changes: [{ data: collection.item, type: "added", id: collection.item.id }],
+        changes: [{
+          data: collection.item,
+          type: "added",
+          id: collection.item.id,
+          collection_ref
+        }],
         source: "query"
       };
     }), catchError2((e) => {
       const error = e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || "UnknownError", message: e.message || "An unknown error occurred" };
       return of({ error, source: "query" });
     })))), watch$.pipe(map((change) => {
-      const e = {
-        changes: [change],
-        source: "realtime"
-      };
-      return e;
-    })));
+      const id = change.data?.id;
+      if (id) {
+        const e = {
+          changes: [
+            {
+              ...change,
+              collection_ref,
+              id
+            }
+          ],
+          source: "realtime"
+        };
+        return e;
+      }
+    }), filter2(Boolean)));
   }
   async add(ref, data) {
     const r = await this.#call({ method: "POST", ref, body: data, query: {} });
@@ -2477,11 +2498,11 @@ class RestTransporter {
       return r;
     return r.item;
   }
-  update(ref, id, data) {
-    return this.#call({ method: "PATCH", ref: ref + "/" + id, body: data, query: {} });
+  update(collection_ref, id, data) {
+    return this.#call({ method: "PATCH", ref: collection_ref + "/" + id, body: data, query: {} });
   }
-  delete(ref, id) {
-    return this.#call({ method: "DELETE", ref: ref + "/" + id, body: undefined, query: {} });
+  delete(collection_ref, id) {
+    return this.#call({ method: "DELETE", ref: collection_ref + "/" + id, body: undefined, query: {} });
   }
   trigger({ ref, action, payload }) {
     return this.#call({ method: "POST", ref, action, body: payload, query: {} });
@@ -2492,5 +2513,5 @@ export {
   RestTransporter
 };
 
-//# debugId=3D47613E61FD504C64756E2164756E21
+//# debugId=AB141D9F4D9D2D8A64756E2164756E21
 //# sourceMappingURL=index.js.map

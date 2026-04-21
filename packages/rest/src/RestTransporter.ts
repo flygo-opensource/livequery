@@ -94,6 +94,8 @@ export class RestTransporter implements LivequeryTransporter {
     query<T extends Doc>({ ref, filters }: { ref: string, filters: LivequeryFilters<T> }) {
         const ready$ = from(this.socket ? (this.socket.pipe(filter(s => !!s.connected), map(() => Date.now()))) : of(1)).pipe(first())
         const watch$ = (!this.socket || !filters || filters[':after'] || filters[':before'] || filters[':around']) ? EMPTY : this.socket.listen(ref)
+        const refs = ref.split('/')
+        const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
 
         return merge(
 
@@ -111,14 +113,24 @@ export class RestTransporter implements LivequeryTransporter {
                             // If collection
                             if (collection.items) return {
                                 summary: collection.summary,
-                                changes: collection.items.map(data => ({ data, type: 'added', id: data.id })),
+                                changes: collection.items.map(data => ({
+                                    data,
+                                    type: 'added',
+                                    id: data.id,
+                                    collection_ref
+                                })),
                                 source: "query"
                             } as Partial<LivequeryQueryResult>
 
                             // If document  
                             return {
                                 summary: collection.summary,
-                                changes: [{ data: collection.item, type: 'added', id: collection.item.id }],
+                                changes: [{
+                                    data: collection.item,
+                                    type: 'added',
+                                    id: collection.item.id,
+                                    collection_ref
+                                }],
                                 source: "query"
                             } as Partial<LivequeryQueryResult>
                         }),
@@ -130,13 +142,25 @@ export class RestTransporter implements LivequeryTransporter {
                     )))
             ),
 
-            watch$.pipe(map((change) => {
-                const e: Partial<LivequeryQueryResult> = {
-                    changes: [change],
-                    source: "realtime"
-                }
-                return e
-            }))
+            watch$.pipe(
+                map((change) => {
+                    const id = change.data?.id
+                    if (id) {
+                        const e: Partial<LivequeryQueryResult> = {
+                            changes: [
+                                {
+                                    ...change,
+                                    collection_ref,
+                                    id
+                                }
+                            ],
+                            source: "realtime"
+                        }
+                        return e
+                    }
+                }),
+                filter(Boolean)
+            )
         )
     }
 
@@ -146,12 +170,12 @@ export class RestTransporter implements LivequeryTransporter {
         return r.item
     }
 
-    update<T extends Doc>(ref: string, id: string, data: Partial<T>) {
-        return this.#call<T>({ method: 'PATCH', ref: ref + '/' + id, body: data, query: {} })
+    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>) {
+        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: data, query: {} })
     }
 
-    delete<T extends Doc>(ref: string, id: string) {
-        return this.#call<T>({ method: 'DELETE', ref: ref + '/' + id, body: undefined, query: {} })
+    delete<T extends Doc>(collection_ref: string, id: string) {
+        return this.#call<T>({ method: 'DELETE', ref: collection_ref + '/' + id, body: undefined, query: {} })
     }
 
 
