@@ -2,6 +2,7 @@ import { BehaviorSubject, catchError, concatMap, delayWhen, EMPTY, filter, final
 import type { LivequeryStorge } from "./LivequeryStorge"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState } from "./types"
+import { tryCatch } from "./helpers/tryCatch"
 
 
 export type LivequeryCoreOptions = {
@@ -177,18 +178,24 @@ export class LivequeryCore {
             from(Object.entries(this.config.transporters)).pipe(
                 concatMap(async ([_transporterId, transporter]) => {
                     if (String(id).startsWith('local:')) {
+
                         // lock by collection_ref 
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
-                        const data = await transporter.add<T>(collection_ref, cleanDoc as T)
+                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, cleanDoc as T))
                         // unlock 
-                        if (data.id) {
-                            await this.config.storage.update<T>(collection_ref, id, data)
+                        if (data && data.id) {
+                            const fnd = {
+                                ...data,
+                                _adding: undefined,
+                                ...e ? { _adding_error: e } : {}
+                            }
+                            await this.config.storage.update<T>(collection_ref, id, fnd)
                             this.#sync('action', {
                                 collection_ref,
                                 type: 'modified',
                                 id,
-                                data
+                                data: fnd
                             })
                         }
                         o.next()
@@ -198,13 +205,27 @@ export class LivequeryCore {
 
                     // _deleting flag → soft-delete on remote then hard-delete locally 
                     if (doc._deleting) {
-                        await transporter.delete(collection_ref, id)
-                        await this.config.storage.delete<T>(collection_ref, id)
-                        this.#sync('action', {
-                            collection_ref,
-                            type: 'removed',
-                            id
-                        })
+                        const [e] = await tryCatch(() => transporter.delete(collection_ref, id))
+                        if (e) {
+                            const fnd = {
+                                _deleting: undefined,
+                                _deleting_error: e
+                            }
+                            await this.config.storage.update<T>(collection_ref, id, fnd)
+                            this.#sync('action', {
+                                collection_ref,
+                                type: 'modified',
+                                id,
+                                data: fnd
+                            })
+                        } else {
+                            await this.config.storage.delete<T>(collection_ref, id)
+                            this.#sync('action', {
+                                collection_ref,
+                                type: 'removed',
+                                id
+                            })
+                        }
                     }
 
                     // _prev present → document was updated locally, push changed fields to remote
@@ -213,13 +234,18 @@ export class LivequeryCore {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        await transporter.update<T>(collection_ref, id, changedFields)
-                        await this.config.storage.update<T>(collection_ref, id, { _prev: undefined, _updating: undefined })
+                        const [e] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields))
+                        const fnd = {
+                            _prev: undefined,
+                            _updating: undefined,
+                            _updating_error: e
+                        }
+                        await this.config.storage.update<T>(collection_ref, id, fnd)
                         this.#sync('action', {
                             collection_ref,
                             type: 'modified',
                             id,
-                            data: { _prev: undefined, _updating: undefined }
+                            data: fnd
                         })
                     }
 

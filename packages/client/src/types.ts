@@ -2,10 +2,15 @@ export type Doc<T = {}> = T & {
     id: string
 }
 
+export type DocError = { code: string, message: string, transporter_id: string }
+
 export type DocState<T extends Doc> = T & {
     _deleting?: boolean
+    _deleting_error?: DocError
     _updating?: boolean
+    _updating_error?: DocError
     _adding?: boolean
+    _adding_error?: DocError
     _remotes?: Record<string, string | number>
     _prev?: Partial<T>
 }
