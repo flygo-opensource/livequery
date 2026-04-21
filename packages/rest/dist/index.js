@@ -2454,6 +2454,18 @@ class RestTransporter {
       if (collection.items)
         return {
           summary: collection.summary,
+          paging: {
+            current: collection.count.current,
+            total: collection.count.total,
+            next: collection.has.next ? {
+              count: collection.count.next,
+              cursor: collection.cursor.last
+            } : undefined,
+            prev: collection.has.prev ? {
+              count: collection.count.prev,
+              cursor: collection.cursor.first
+            } : undefined
+          },
           changes: collection.items.map((data) => ({
             data,
             type: "added",
@@ -2513,5 +2525,5 @@ export {
   RestTransporter
 };
 
-//# debugId=AB141D9F4D9D2D8A64756E2164756E21
+//# debugId=3C3612524FC823B664756E2164756E21
 //# sourceMappingURL=index.js.map

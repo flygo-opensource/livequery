@@ -29,7 +29,11 @@ export type LivequeryCollectionResponse<T extends Doc> = {
     items: T[],
     item: T
     subscription_token?: string,
-    paging: LivequeryPaging
+    count: {
+        prev: number, next: number, total: number, current: number
+    }
+    has: { prev: boolean, next: boolean }
+    cursor: { first: string, last: string }
 }
 
 
@@ -112,7 +116,19 @@ export class RestTransporter implements LivequeryTransporter {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
                             // If collection
                             if (collection.items) return {
-                                summary: collection.summary,
+                                summary: collection.summary, 
+                                paging: {
+                                    current: collection.count.current,
+                                    total: collection.count.total,
+                                    next: collection.has.next ? {
+                                        count: collection.count.next,
+                                        cursor: collection.cursor.last
+                                    } : undefined,
+                                    prev: collection.has.prev ? {
+                                        count: collection.count.prev,
+                                        cursor: collection.cursor.first
+                                    } : undefined
+                                },
                                 changes: collection.items.map(data => ({
                                     data,
                                     type: 'added',

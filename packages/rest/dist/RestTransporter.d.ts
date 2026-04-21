@@ -1,4 +1,4 @@
-import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core';
+import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core';
 export type RestTransporterRequest = {
     url: string;
     method: string;
@@ -24,7 +24,20 @@ export type LivequeryCollectionResponse<T extends Doc> = {
     items: T[];
     item: T;
     subscription_token?: string;
-    paging: LivequeryPaging;
+    count: {
+        prev: number;
+        next: number;
+        total: number;
+        current: number;
+    };
+    has: {
+        prev: boolean;
+        next: boolean;
+    };
+    cursor: {
+        first: string;
+        last: string;
+    };
 };
 export declare class RestTransporter implements LivequeryTransporter {
     #private;
