@@ -175,9 +175,10 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
-    async #query(filters: Partial<LivequeryFilters<T>>) {
+    async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.#core) return
         this.error.next(null)
+        flush && this.items.next([])
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -189,7 +190,7 @@ export class LivequeryCollection<T extends Doc> {
         const next = filters[':after']
         const prev = filters[':before']
         const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : 'all'
-        this.loading.next(loading) 
+        this.loading.next(loading)
         await this.#core.query<T>({
             ref: this.ref,
             filters,
@@ -204,7 +205,7 @@ export class LivequeryCollection<T extends Doc> {
 
     async query(filters: Partial<LivequeryFilters<T>>) {
         this.loading.next('all')
-        await this.#query(filters)
+        await this.#query(filters, true)
     }
 
     async debounceQuery(filters: Partial<LivequeryFilters<T>>) {
@@ -219,7 +220,7 @@ export class LivequeryCollection<T extends Doc> {
             ':after': next.cursor
         }
         this.loading.next('next')
-        await this.#query(filters || {})
+        await this.#query(filters || {}, false)
     }
 
 
@@ -231,7 +232,7 @@ export class LivequeryCollection<T extends Doc> {
             ':before': prev.cursor
         }
         this.loading.next('prev')
-        await this.#query(filters || {})
+        await this.#query(filters || {}, false)
     }
 
     async loadAround(cursor: string) {
@@ -241,7 +242,7 @@ export class LivequeryCollection<T extends Doc> {
             ':before': cursor
         }
         this.loading.next('all')
-        await this.#query(filters || {})
+        await this.#query(filters || {}, false)
     }
 
     add(payload: Partial<T>) {
