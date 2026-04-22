@@ -11,7 +11,7 @@ export type LivequeryCollectionOptions<T extends Doc> = {
     lazy?: boolean
     full?: boolean
     debounce?: number
-
+    cache?:boolean 
 }
 
 export class LivequeryCollection<T extends Doc> {
@@ -70,9 +70,18 @@ export class LivequeryCollection<T extends Doc> {
         const timer = this.options.lazy !== true && setTimeout(() => this.query(this.filters.value || {}))
         this.#subscription?.unsubscribe()
         this.#subscription = merge(
-            this.options.debounce ? this.#filters.pipe(
-                debounceTime(this.options.debounce),
-                switchMap(filters => this.query(filters))
+            this.options.debounce ? merge(
+                this.#filters.pipe(
+                    debounceTime(this.options.debounce),
+                    switchMap(filters => this.query(filters))
+                ),
+                this.#show$.pipe(
+                    debounceTime(this.options.debounce || 0),
+                    tap(visible => {
+                        this.options.visible = visible
+                        this.items.next(this.options.visible ? this.#items.filter(i => this.options.visible!(i.value)) : this.#items)
+                    })
+                )
             ) : EMPTY,
 
             core.watch(this.ref, this.id).pipe(
@@ -169,7 +178,7 @@ export class LivequeryCollection<T extends Doc> {
 
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
                     if (chaos) {
-                        this.#items = items 
+                        this.#items = items
                         this.items.next(this.options.visible ? items.filter(i => this.options.visible!(i.value)) : items)
                         this.#reindex()
                     }
@@ -182,19 +191,19 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
+    #show$ = new Subject<((item: T) => boolean) | undefined>()
     async show(visible?: (item: T) => boolean) {
-        this.options.visible = visible
-        this.items.next(this.options.visible ? this.#items.filter(i => this.options.visible!(i.value)) : this.#items) 
+        this.#show$.next(visible)
     }
 
     async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.#core) return
         if (!this.ref) return
         this.error.next(null)
-        if(flush){
+        if (flush) {
             this.#items = []
             this.items.next([])
-        } 
+        }
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -207,11 +216,16 @@ export class LivequeryCollection<T extends Doc> {
         const prev = filters[':before']
         const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : 'all'
         this.loading.next(loading)
-        await this.#core.query<T>({
+        const items = await this.#core.query<T>({
             ref: this.ref,
             filters,
             collection_id: this.id
-        }) 
+        })
+        if(flush && this.options.cache && Object.keys(filters || {}).length == 0){
+            this.#items = (this.options.visible ? items.documents.filter(i => this.options.visible!(i)) : items.documents).map(i => new LivequeryDocument(this, i))
+            this.items.next(this.#items) 
+            this.loading.next(null)
+        }
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {

@@ -162,7 +162,7 @@ export class LivequeryCore {
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
         const collection = this.#collections.get(req.collection_id)
         collection && setTimeout(() => this.#queries$.next({ ...req, collection }))
-        return []//await this.config.storage.query<T>(req.ref, req.filters)
+        return await this.config.storage.query<T>(req.ref, req.filters)
     }
 
 
