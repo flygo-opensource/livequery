@@ -6,10 +6,12 @@ import { LivequeryDocument } from "./LivequeryDocument"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
+    visible?: (item: T) => boolean
     filters?: Partial<LivequeryFilters<T>>
     lazy?: boolean
     full?: boolean
     debounce?: number
+
 }
 
 export class LivequeryCollection<T extends Doc> {
@@ -22,6 +24,7 @@ export class LivequeryCollection<T extends Doc> {
 
     public ref: string | undefined
     public collection_ref: string | undefined
+    #items: LivequeryDocument<DocState<T>>[] = []
 
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
@@ -50,7 +53,7 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     #reindex() {
-        this.#indexes = this.items.value.reduce((p, c, index) => {
+        this.#indexes = this.#items.reduce((p, c, index) => {
             p.set(c.value.id, index)
             return p
         }, new Map<string, number>())
@@ -126,7 +129,7 @@ export class LivequeryCollection<T extends Doc> {
                         const target = index != undefined && index >= 0 ? p[index] : null
                         target && target.next({ ...target.value, ...data })
                         return p
-                    }, this.items.value)
+                    }, this.#items)
 
                     const new_items = (
                         events.added
@@ -166,7 +169,8 @@ export class LivequeryCollection<T extends Doc> {
 
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
                     if (chaos) {
-                        this.items.next(items)
+                        this.#items = items 
+                        this.items.next(this.options.visible ? items.filter(i => this.options.visible!(i.value)) : items)
                         this.#reindex()
                     }
                     event.from == 'query' && this.loading.next(null)
@@ -178,11 +182,19 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
+    async show(visible?: (item: T) => boolean) {
+        this.options.visible = visible
+        this.items.next(this.options.visible ? this.#items.filter(i => this.options.visible!(i.value)) : this.#items) 
+    }
+
     async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.#core) return
         if (!this.ref) return
         this.error.next(null)
-        flush && this.items.next([])
+        if(flush){
+            this.#items = []
+            this.items.next([])
+        } 
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -199,12 +211,7 @@ export class LivequeryCollection<T extends Doc> {
             ref: this.ref,
             filters,
             collection_id: this.id
-        })
-        // const documents = result.documents || []
-        // const items = documents.map(doc => new LivequeryDocument(this, doc))
-        // this.items.next(items)
-        // this.#reindex()
-        // result.paging && this.paging.next(result.paging)
+        }) 
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {

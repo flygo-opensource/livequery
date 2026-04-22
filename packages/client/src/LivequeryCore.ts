@@ -44,6 +44,7 @@ export type CollectionMetadata = {
     o: Subject<Partial<LivequeryQueryResult> & {
         from: 'query' | 'realtime' | 'action'
     }>
+    collection_ref: string
 }
 
 export class LivequeryCore {
@@ -63,14 +64,29 @@ export class LivequeryCore {
         merge(
             changes$.pipe(
                 delayWhen(change => {
-                    if (change.type == 'modified' || change.type == 'removed') return of(1)
+                    if (change.type == 'modified' || change.type == 'removed' ) return of(1)
                     return this.#adding.get(change.collection_ref) || of(1)
                 }),
                 tap(change => this.#sync('realtime', change))
             ),
 
             this.#queries$.pipe(
-                mergeMap(({ collection, ref, filters, headers, }) => {
+                mergeMap(async ({ collection, ref, filters, headers, }) => {
+                    if (collection.document_id) {
+                        const doc = await this.config.storage.get(collection.collection_ref, collection.document_id)
+                        if (doc) {
+                            collection.o.next({
+                                from: 'query',
+                                changes: [{
+                                    type: 'added',
+                                    collection_ref: collection.collection_ref,
+                                    id: doc.id,
+                                    data: doc
+                                }]
+                            })
+                            return EMPTY
+                        }
+                    }
                     return from(Object.values(this.config.transporters)).pipe(
                         map(transporter => {
                             const key = `${ref}?${new URLSearchParams(filters as Record<string, string> || {}).toString()}`
@@ -112,7 +128,8 @@ export class LivequeryCore {
                             })
                         })
                     )
-                })
+                }),
+                mergeMap($ => $)
             )
         ).subscribe()
     }
@@ -129,6 +146,7 @@ export class LivequeryCore {
             o,
             document_id,
             collection_id,
+            collection_ref
         })
         return o.pipe(
             finalize(() => {
