@@ -13,7 +13,12 @@ export type DocState<T extends Doc> = T & {
     _adding_error?: DocError
     _remotes?: Record<string, string | number>
     _prev?: Partial<T>
+
+
 }
+
+
+export type RealtimeChangeSource = 'realtime' | 'action' | 'query' 
 
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
     K extends string ? (
@@ -55,6 +60,7 @@ export type LivequeryInlineFilters<T extends Doc> = (
     QueryBuilder<T, number[], 'include', number> &
     QueryBuilder<T, boolean, 'boolean', 'true' | 'false' | 'not-true' | 'not-false'> &
     QueryBuilder<T, string, 'like', string> &
+    QueryBuilder<T, string, 1, string> &
     QueryBuilder<T, string, 'in', string[]> &
     QueryBuilder<T, string, 'nin', string[]> &
     QueryBuilder<T, string[], 'include', string> &

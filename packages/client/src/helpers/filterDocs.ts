@@ -5,7 +5,7 @@ type Primitive = string | number | boolean | null | undefined
 export type LivequeryFilterInput<T extends Doc> = Partial<LivequeryFilters<T>> | Record<string, any>
 
 export function filterDocs<T extends Doc>(
-    documents:T[],
+    documents: T[],
     filters?: LivequeryFilterInput<T>
 ): T[] {
     if (!filters) return documents
@@ -13,7 +13,7 @@ export function filterDocs<T extends Doc>(
     return documents.filter((doc) => matchesAllFilters(doc, normalized))
 }
 
-export function matchesAllFilters<T extends Doc>(doc: T, filters: Record<string, any>) {
+export function matchesAllFilters(doc: Record<string, any>, filters: Record<string, any>) {
     for (const [key, expected] of Object.entries(filters)) {
         if (key.startsWith(':') || key.endsWith(':sort')) continue
 

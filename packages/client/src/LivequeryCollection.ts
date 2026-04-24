@@ -1,17 +1,15 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
-import { LivequeryCore, type LivequeryLoadingState } from "./LivequeryCore"
+import { LivequeryCore, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryCore"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
 import { LivequeryDocument } from "./LivequeryDocument"
 
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    visible?: (item: T) => boolean
-    filters?: Partial<LivequeryFilters<T>>
-    lazy?: boolean
-    full?: boolean
-    debounce?: number
-    cache?:boolean 
+    filters: Partial<LivequeryFilters<T>>
+    lazy: boolean
+    debounce: number
+    mode: CollectionMetadata['mode']
 }
 
 export class LivequeryCollection<T extends Doc> {
@@ -24,7 +22,6 @@ export class LivequeryCollection<T extends Doc> {
 
     public ref: string | undefined
     public collection_ref: string | undefined
-    #items: LivequeryDocument<DocState<T>>[] = []
 
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
     public readonly summary: BehaviorSubject<Record<string, any>>
@@ -34,9 +31,8 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
-    private options: LivequeryCollectionOptions<T>
 
-    constructor(options: LivequeryCollectionOptions<T>) {
+    constructor(private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
@@ -52,8 +48,9 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
-    #reindex() {
-        this.#indexes = this.#items.reduce((p, c, index) => {
+    #commit(items: LivequeryDocument<T>[]) {
+        this.items.next(items)
+        this.#indexes = items.reduce((p, c, index) => {
             p.set(c.value.id, index)
             return p
         }, new Map<string, number>())
@@ -74,21 +71,15 @@ export class LivequeryCollection<T extends Doc> {
                 this.#filters.pipe(
                     debounceTime(this.options.debounce),
                     switchMap(filters => this.query(filters))
-                ),
-                this.#show$.pipe(
-                    debounceTime(this.options.debounce || 0),
-                    tap(visible => {
-                        this.options.visible = visible
-                        this.items.next(this.options.visible ? this.#items.filter(i => this.options.visible!(i.value)) : this.#items)
-                    })
                 )
             ) : EMPTY,
 
-            core.watch(this.ref, this.id).pipe(
+            core.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
                 finalize(() => {
                     timer && clearTimeout(timer)
                 }),
                 tap(event => {
+
                     event.summary && this.summary.next(event.summary)
                     event.metadata && this.metadata.next(event.metadata)
                     event.paging && this.paging.next(event.paging)
@@ -138,7 +129,7 @@ export class LivequeryCollection<T extends Doc> {
                         const target = index != undefined && index >= 0 ? p[index] : null
                         target && target.next({ ...target.value, ...data })
                         return p
-                    }, this.#items)
+                    }, this.items.value)
 
                     const new_items = (
                         events.added
@@ -177,11 +168,7 @@ export class LivequeryCollection<T extends Doc> {
                     ])
 
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
-                    if (chaos) {
-                        this.#items = items
-                        this.items.next(this.options.visible ? items.filter(i => this.options.visible!(i.value)) : items)
-                        this.#reindex()
-                    }
+                    chaos && this.#commit(items)
                     event.from == 'query' && this.loading.next(null)
                     event.paging && this.paging.next(event.paging)
                     event.from == 'query' && this.loading.next(null)
@@ -191,19 +178,12 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
-    #show$ = new Subject<((item: T) => boolean) | undefined>()
-    async show(visible?: (item: T) => boolean) {
-        this.#show$.next(visible)
-    }
 
     async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.#core) return
         if (!this.ref) return
         this.error.next(null)
-        if (flush) {
-            this.#items = []
-            this.items.next([])
-        }
+        flush && this.#commit([])
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -221,9 +201,8 @@ export class LivequeryCollection<T extends Doc> {
             filters,
             collection_id: this.id
         })
-        if(flush && this.options.cache && Object.keys(filters || {}).length == 0){
-            this.#items = (this.options.visible ? items.documents.filter(i => this.options.visible!(i)) : items.documents).map(i => new LivequeryDocument(this, i))
-            this.items.next(this.#items) 
+        if (items && flush && Object.keys(filters || {}).length == 0) {
+            this.#commit(items.documents.map(i => new LivequeryDocument(this, i)))
             this.loading.next(null)
         }
     }
