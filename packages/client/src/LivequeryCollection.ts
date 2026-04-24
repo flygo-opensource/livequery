@@ -64,7 +64,7 @@ export class LivequeryCollection<T extends Doc> {
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
         this.#core = core
-        const timer = this.options.lazy !== true && setTimeout(() => this.query(this.filters.value || {}))
+        const timer = this.options.lazy !== true && setTimeout(() => !ref.includes('undefined') && this.query(this.filters.value || {}))
         this.#subscription?.unsubscribe()
         this.#subscription = merge(
             this.options.debounce ? merge(
