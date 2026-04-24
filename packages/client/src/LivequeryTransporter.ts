@@ -9,6 +9,7 @@ export type LivequeryQueryResult = {
     paging: LivequeryPaging
     metadata: Record<string, any>
     source: 'query' | 'action' | 'realtime'
+    loading?: 'all' | 'next' | 'prev' | null
 }
 
 

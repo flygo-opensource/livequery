@@ -79,16 +79,13 @@ export class LivequeryCollection<T extends Doc> {
                     timer && clearTimeout(timer)
                 }),
                 tap(event => {
-
+                    event.loading !== undefined && event.loading !== this.loading.value && this.loading.next(event.loading)
                     event.summary && this.summary.next(event.summary)
                     event.metadata && this.metadata.next(event.metadata)
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
 
-                    if (!event.changes || event.changes.length == 0) {
-                        event.from == 'query' && this.loading.next(null)
-                        return
-                    }
+                    if (!event.changes || event.changes.length == 0) return
                     const chaos = event.changes && event.changes.some(change => {
                         if (change.type == 'added' || change.type == 'removed') return true
                         if (change.data && change.data.id != change.id) return true
@@ -169,9 +166,7 @@ export class LivequeryCollection<T extends Doc> {
 
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
                     chaos && this.#commit(items)
-                    event.from == 'query' && this.loading.next(null)
-                    event.paging && this.paging.next(event.paging)
-                    event.from == 'query' && this.loading.next(null)
+                    event.paging && this.paging.next(event.paging) 
                 }),
             )
         ).subscribe()
@@ -192,23 +187,17 @@ export class LivequeryCollection<T extends Doc> {
             return p
         }, new Map<keyof T, number>())
         this.filters.next(filters)
-        const next = filters[':after']
-        const prev = filters[':before']
-        const loading = next && prev ? 'all' : next ? 'next' : prev ? 'prev' : 'all'
-        this.loading.next(loading)
-        const items = await this.#core.query<T>({
+        const cache = await this.#core.query<T>({
             ref: this.ref,
             filters,
             collection_id: this.id
         })
-        if (items && flush && Object.keys(filters || {}).length == 0) {
-            this.#commit(items.documents.map(i => new LivequeryDocument(this, i)))
-            this.loading.next(null)
+        if (cache && cache.documents && flush) {
+            this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
         }
     }
 
-    async query(filters: Partial<LivequeryFilters<T>>) {
-        this.loading.next('all')
+    async query(filters: Partial<LivequeryFilters<T>>) { 
         await this.#query(filters, true)
     }
 
@@ -222,8 +211,7 @@ export class LivequeryCollection<T extends Doc> {
         const filters = {
             ...this.filters.value,
             ':after': next.cursor
-        }
-        this.loading.next('next')
+        } 
         await this.#query(filters || {}, false)
     }
 
@@ -234,8 +222,7 @@ export class LivequeryCollection<T extends Doc> {
         const filters = {
             ...this.filters.value,
             ':before': prev.cursor
-        }
-        this.loading.next('prev')
+        } 
         await this.#query(filters || {}, false)
     }
 
@@ -244,8 +231,7 @@ export class LivequeryCollection<T extends Doc> {
             ...this.filters.value,
             ':after': cursor,
             ':before': cursor
-        }
-        this.loading.next('all')
+        } 
         await this.#query(filters || {}, false)
     }
 

@@ -123,12 +123,21 @@ export class LivequeryCore {
                 filter(req => req.collection.mode == 'server-first' || req.collection.mode == 'cache-first'),
                 mergeMap(e => {
                     const deduplicate_key = `${e.collection.collection_id}:${JSON.stringify(e.filters)}`
+                    const before = e.filters?.[':before']
+                    const after = e.filters?.[':after']
+                    const around = e.filters?.[':around']
+                    const loading = ((!before && !after) || (before && after) || around) ? 'all' : (before ? 'prev' : 'next')
+                    e.collection.data$.next({
+                        from: 'query',
+                        loading: e.collection.document_id ? 'all' : loading
+                    })
                     return this.#query(e, deduplicate_key).pipe(
                         takeUntil(whenCompleted(e.collection.data$)),
                         tap(result => {
                             e.collection.data$.next({
                                 ...result,
-                                from: 'query'
+                                from: 'query',
+                                loading: null
                             })
                         })
                     )
@@ -141,25 +150,31 @@ export class LivequeryCore {
                 filter(req => req.collection.mode == 'local-first'),
                 groupBy(e => `${e.collection.collection_ref}/${e.collection.document_id || '::'}`),
                 mergeMap($ => $.pipe(
-                    mergeMap((e, index) => merge(
-                        of(e),
-                        index > 0 ? EMPTY : defer(() => {
-                            return this.#query(e).pipe(
-                                expand(res => {
-                                    const next = res.paging?.next
-                                    if (!next) return EMPTY
-                                    return this.#query({
-                                        ...e,
-                                        filters: { ':after': next.cursor }
+                    mergeMap((e, index) => {
+                        index == 0 && e.collection.data$.next({
+                            from: 'query',
+                            loading: 'all'
+                        })
+                        return merge(
+                            of(e),
+                            index > 0 ? EMPTY : defer(() => {
+                                return this.#query(e).pipe( 
+                                    expand(res => {
+                                        const next = res.paging?.next
+                                        if (!next) return EMPTY
+                                        return this.#query({
+                                            ...e,
+                                            filters: { ':after': next.cursor }
+                                        })
+                                    }),
+                                    tap(result => {
+                                        this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])
                                     })
-                                }),
-                                tap(result => {
-                                    this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])
-                                })
 
-                            )
-                        }).pipe(switchMap(() => EMPTY))
-                    )),
+                                )
+                            }).pipe(switchMap(() => EMPTY))
+                        )
+                    }),
                     scan(
                         (p, c) => new Set([...p, c.collection.data$].filter($ => !$.closed)),
                         new Set<Subject<any>>()
@@ -203,31 +218,37 @@ export class LivequeryCore {
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
         const collection = this.#collections.get(req.collection_id)
         if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
+
+        // If document 
+        if (collection.document_id) {
+            const ids = this.#refs.get(collection.collection_ref)
+            const collections = ids ? [...ids].map(id => this.#collections.get(id)).filter(c => c && c.document_id) : []
+            const doc = await this.config.storage.get<T>(collection.collection_ref, collection.document_id)
+            if (collections.length > 0 && doc) return {
+                documents: [doc]
+            }
+        }
+
+
+
         setTimeout(() => this.#queries$.next({
             ...req,
             filters: collection.mode == 'local-first' ? {} : req.filters,
             collection
         }))
 
-        // If document 
-        if (collection.document_id) {
-            const doc = await this.config.storage.get<T>(collection.collection_ref, collection.document_id)
-            return {
-                documents: doc ? [doc] : [],
-            }
-        }
 
         // If collection 
         collection.filters = req.filters || {}
         if (collection.mode == 'local-first') {
             return await this.config.storage.query<T>(req.ref, req.filters)
         }
+
         if (collection.mode == 'cache-first') {
             const before = req.filters?.[':before']
             const after = req.filters?.[':after']
             const is_first_query = !before && !after
             if (is_first_query) {
-                // try to query from storage first 
                 return await this.config.storage.query<T>(req.ref, req.filters)
             }
         }
@@ -235,19 +256,18 @@ export class LivequeryCore {
 
 
     #broadcast(collection_ref: string, from: RealtimeChangeSource, events: Array<DataChangeEvent>) {
-
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         for (const collection_id of collections) {
             const collection = this.#collections.get(collection_id)
             if (!collection) continue
 
             if (collection.document_id) {
-
                 // Is document
                 const change = events.find(c => c.id == collection.document_id)
                 change && collection.data$.next({
                     changes: [change],
-                    from
+                    from,
+                    loading: null
                 })
                 continue
             }
@@ -256,26 +276,28 @@ export class LivequeryCore {
             if (collection.mode == 'local-first') {
                 const changes = events.filter(e => {
                     if (e.type == 'added') return e.data && matchesAllFilters(e.data, collection.filters)
-                    if (e.type == 'modified') {
-                        if (!e.data) return false
-                        // TODO: Delete on data not matched
-                        if (!matchesAllFilters(e.data, collection.filters)) {
-                            e.type = 'removed'
-                        }
-                    }
+                    // if (e.type == 'modified') {
+                    //     if (!e.data) return false
+                    //     // TODO: Delete on data not matched
+                    //     if (!matchesAllFilters(e.data, collection.filters)) {
+                    //         e.type = 'removed'
+                    //     }
+                    // }
                     return true
                 })
                 // Is collection
                 changes.length > 0 && collection.data$.next({
                     changes,
-                    from
+                    from,
+                    ...from == 'query' ? { loading: null } : {}
                 })
                 continue
             }
 
             collection.data$.next({
                 changes: events,
-                from
+                from,
+                ...from == 'query' ? { loading: null } : {}
             })
 
 
