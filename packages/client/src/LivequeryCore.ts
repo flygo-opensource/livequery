@@ -158,7 +158,7 @@ export class LivequeryCore {
                         return merge(
                             of(e),
                             index > 0 ? EMPTY : defer(() => {
-                                return this.#query(e).pipe( 
+                                return this.#query(e).pipe(
                                     expand(res => {
                                         const next = res.paging?.next
                                         if (!next) return EMPTY
@@ -168,6 +168,7 @@ export class LivequeryCore {
                                         })
                                     }),
                                     tap(result => {
+
                                         this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])
                                     })
 
@@ -286,7 +287,7 @@ export class LivequeryCore {
                     return true
                 })
                 // Is collection
-                changes.length > 0 && collection.data$.next({
+                collection.data$.next({
                     changes,
                     from,
                     ...from == 'query' ? { loading: null } : {}

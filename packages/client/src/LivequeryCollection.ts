@@ -166,7 +166,7 @@ export class LivequeryCollection<T extends Doc> {
 
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
                     chaos && this.#commit(items)
-                    event.paging && this.paging.next(event.paging) 
+                    event.paging && this.paging.next(event.paging)
                 }),
             )
         ).subscribe()
@@ -197,7 +197,7 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
-    async query(filters: Partial<LivequeryFilters<T>>) { 
+    async query(filters: Partial<LivequeryFilters<T>>) {
         await this.#query(filters, true)
     }
 
@@ -211,7 +211,7 @@ export class LivequeryCollection<T extends Doc> {
         const filters = {
             ...this.filters.value,
             ':after': next.cursor
-        } 
+        }
         await this.#query(filters || {}, false)
     }
 
@@ -222,7 +222,7 @@ export class LivequeryCollection<T extends Doc> {
         const filters = {
             ...this.filters.value,
             ':before': prev.cursor
-        } 
+        }
         await this.#query(filters || {}, false)
     }
 
@@ -231,7 +231,7 @@ export class LivequeryCollection<T extends Doc> {
             ...this.filters.value,
             ':after': cursor,
             ':before': cursor
-        } 
+        }
         await this.#query(filters || {}, false)
     }
 
