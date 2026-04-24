@@ -3,6 +3,7 @@ import { catchError, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core'
+import { parseJson } from './helpers/parseJson.js';
 
 
 export type RestTransporterRequest = {
@@ -87,9 +88,19 @@ export class RestTransporter implements LivequeryTransporter {
                 ...headers
             },
         }
-        const response: LivequeryResult<T> = fake_response ? fake_response : await fetch(request.url, request).then(r => r.json()).catch(e => {
-            return { error: { code: e.name, message: e.message }, data: undefined } as LivequeryResult<T>
-        })
+        const response: LivequeryResult<T> = fake_response ? fake_response : await (async () => {
+            try {
+                const result = await fetch(request.url, request);
+                return parseJson(await result.text())
+            } catch (e) {
+                return {
+                    error: {
+                        code: e instanceof Error ? e.name : 'UnknownError',
+                        message: e instanceof Error ? e.message : 'An unknown error occurred'
+                    }
+                }
+            }
+        })();
         this.config.onResponse && await this.config.onResponse(request, response)
         if (response.error) throw response.error
         return response.data

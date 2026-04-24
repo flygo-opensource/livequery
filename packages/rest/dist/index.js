@@ -2383,6 +2383,15 @@ class Socket extends BehaviorSubject {
   }
 }
 
+// src/helpers/parseJson.ts
+var parseJson = (str) => {
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    return null;
+  }
+};
+
 // src/RestTransporter.ts
 class RestTransporter {
   config;
@@ -2432,9 +2441,19 @@ class RestTransporter {
         ...headers
       }
     };
-    const response = fake_response ? fake_response : await fetch(request.url, request).then((r) => r.json()).catch((e) => {
-      return { error: { code: e.name, message: e.message }, data: undefined };
-    });
+    const response = fake_response ? fake_response : await (async () => {
+      try {
+        const result = await fetch(request.url, request);
+        return parseJson(await result.text());
+      } catch (e) {
+        return {
+          error: {
+            code: e instanceof Error ? e.name : "UnknownError",
+            message: e instanceof Error ? e.message : "An unknown error occurred"
+          }
+        };
+      }
+    })();
     this.config.onResponse && await this.config.onResponse(request, response);
     if (response.error)
       throw response.error;
@@ -2528,5 +2547,5 @@ export {
   RestTransporter
 };
 
-//# debugId=88C69AF4AF01B65F64756E2164756E21
+//# debugId=46694CC33A48610064756E2164756E21
 //# sourceMappingURL=index.js.map
