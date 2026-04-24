@@ -2,7 +2,7 @@ import { of, firstValueFrom, EMPTY, from } from 'rxjs';
 import { catchError, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
-import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryPaging, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core'
+import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/core'
 import { parseJson } from './helpers/parseJson.js';
 
 
