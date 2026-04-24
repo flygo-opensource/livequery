@@ -2444,7 +2444,7 @@ class RestTransporter {
     const response = fake_response ? fake_response : await (async () => {
       try {
         const result = await fetch(request.url, request);
-        return parseJson(await result.text());
+        return parseJson(await result.text()) || {};
       } catch (e) {
         return {
           error: {
@@ -2547,5 +2547,5 @@ export {
   RestTransporter
 };
 
-//# debugId=46694CC33A48610064756E2164756E21
+//# debugId=7EB45DAB51F9F0E264756E2164756E21
 //# sourceMappingURL=index.js.map

@@ -90,8 +90,8 @@ export class RestTransporter implements LivequeryTransporter {
         }
         const response: LivequeryResult<T> = fake_response ? fake_response : await (async () => {
             try {
-                const result = await fetch(request.url, request); 
-                return parseJson(await result.text())
+                const result = await fetch(request.url, request);
+                return parseJson(await result.text()) || {}
             } catch (e) {
                 return {
                     error: {
