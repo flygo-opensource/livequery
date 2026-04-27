@@ -1,24 +1,28 @@
 # @livequery/rpc
 
-Lightweight RxJS-based RPC utilities for calling services across a SharedWorker boundary.
+Lightweight RxJS-based RPC utilities for exposing services from a `SharedWorker` and consuming them from the main thread with typed proxies.
 
-This package gives you:
-- A message channel abstraction for request/response RPC
-- A worker-side manager to expose services
-- A client-side linker that creates typed service proxies
-- Promise-like Observable calls (await or subscribe)
-- A persistent BehaviorSubject helper backed by custom storage
-- A concurrency-limiting decorator helper
+This package is built for a simple model:
+
+- Expose plain classes as worker services.
+- Call worker methods from the UI as `await`-able functions.
+- Stream worker `Observable`s back to the client.
+- Mirror `BehaviorSubject`-style state across the boundary.
+- Cancel long-running streams when the client unsubscribes.
 
 ## Installation
 
 ```bash
 npm install @livequery/rpc rxjs
-# or
+```
+
+Or with Bun:
+
+```bash
 bun add @livequery/rpc rxjs
 ```
 
-## Exports
+## What It Exports
 
 ```ts
 export * from "./RpcChannel"
@@ -28,9 +32,10 @@ export * from "./WorkerService"
 export * from "./WorkerManager"
 export * from "./LimitConcurrency"
 export * from "./StorageBehaviorSubject"
+export * from "./RxjsQueue"
 ```
 
-## Architecture
+## Mental Model
 
 ```text
 Main Thread                                Shared Worker
@@ -40,9 +45,18 @@ ServiceLinker --(RpcMessage)--> SharedWorkerChannel --> WorkerManager --> your s
      |--------------------(response stream)-----------------------|
 ```
 
-## Quick Start
+## When To Use This Package
 
-### 1. Define a service contract
+Use it when you want to:
+
+- move logic or shared state into a `SharedWorker`
+- keep a typed service-style API instead of manually handling `postMessage`
+- return one-shot values, promises, or `Observable`s from worker methods
+- expose `BehaviorSubject` properties as client-consumable reactive state
+
+## End-To-End Example
+
+### 1. Define a worker service
 
 ```ts
 import { BehaviorSubject, interval, map } from "rxjs"
@@ -51,8 +65,9 @@ export class CounterService {
   value = new BehaviorSubject(0)
 
   increment(by = 1) {
-    this.value.next(this.value.getValue() + by)
-    return this.value.getValue()
+    const nextValue = this.value.getValue() + by
+    this.value.next(nextValue)
+    return nextValue
   }
 
   getCurrent() {
@@ -60,15 +75,14 @@ export class CounterService {
   }
 
   ticker() {
-    return interval(1000).pipe(map((i) => `tick-${i}`))
+    return interval(1000).pipe(map((index) => `tick-${index}`))
   }
 }
 ```
 
-### 2. Expose the service inside the SharedWorker
+### 2. Expose it inside the `SharedWorker`
 
 ```ts
-// worker.ts
 import { SharedWorkerChannel, WorkerManager } from "@livequery/rpc"
 import { CounterService } from "./CounterService"
 
@@ -78,11 +92,10 @@ const manager = new WorkerManager(channel)
 manager.exposeService("counter", new CounterService())
 ```
 
-### 3. Link and use the service on the main thread
+### 3. Connect from the main thread
 
 ```ts
-// main.ts
-import { SharedWorkerChannel, ServiceLinker, type WorkerService } from "@livequery/rpc"
+import { ServiceLinker, SharedWorkerChannel, type WorkerService } from "@livequery/rpc"
 import type { CounterService } from "./CounterService"
 
 const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module" })
@@ -90,24 +103,139 @@ const channel = new SharedWorkerChannel(worker)
 const linker = new ServiceLinker(channel)
 
 const counter = linker.linkService<WorkerService<CounterService>>("counter")
-
-// Await method calls
-const next = await counter.increment(2)
-console.log(next)
-
-// Read BehaviorSubject-backed state from worker
-counter.value.subscribe((v) => console.log("value", v))
-
-// Consume stream responses
-const sub = counter.ticker().subscribe((v) => console.log(v))
-
-// Stop stream
-sub.unsubscribe()
 ```
 
-## Core API
+### 4. Call methods with `await`
 
-## RpcMessage
+```ts
+const nextValue = await counter.increment(2)
+const currentValue = await counter.getCurrent()
+
+console.log({ nextValue, currentValue })
+```
+
+### 5. Subscribe to streamed responses
+
+```ts
+const tickerSubscription = counter.ticker().subscribe((value) => {
+  console.log("tick", value)
+})
+
+setTimeout(() => {
+  tickerSubscription.unsubscribe()
+}, 5000)
+```
+
+### 6. Consume `BehaviorSubject` state
+
+```ts
+const stateSubscription = counter.value.subscribe((value) => {
+  console.log("counter value", value)
+})
+```
+
+## How Calls Behave
+
+Every service method call is exposed on the client as an `Observable` that is also `PromiseLike`.
+
+That means you can do either of these:
+
+```ts
+const result = await service.someMethod()
+```
+
+```ts
+service.someMethod().subscribe((value) => {
+  console.log(value)
+})
+```
+
+In practice:
+
+- use `await` for one-shot values or promise-returning methods
+- use `subscribe()` for streaming results returned from worker `Observable`s
+
+## BehaviorSubject Mirroring
+
+If your service exposes a property with a `getValue()` method, `WorkerManager` will include its initial value during service initialization.
+
+This is what allows a worker-side `BehaviorSubject` to feel usable on the client:
+
+```ts
+class SettingsService {
+  theme = new BehaviorSubject("light")
+}
+```
+
+```ts
+const settings = linker.linkService<WorkerService<SettingsService>>("settings")
+
+settings.theme.subscribe((theme) => {
+  console.log(theme)
+})
+```
+
+Notes:
+
+- the initial snapshot is fetched through an internal `____initialize____` call
+- later updates are streamed by subscribing to the remote property
+- this pattern is designed around `BehaviorSubject`-like objects
+
+## Waiting For Multiple Services To Initialize
+
+`ServiceLinker` exposes a helper for waiting until all linked services have loaded their initial state.
+
+```ts
+const counter = linker.linkService<WorkerService<CounterService>>("counter")
+const settings = linker.linkService<WorkerService<SettingsService>>("settings")
+
+ServiceLinker.ready$({ counter, settings }).subscribe((ready) => {
+  if (ready) {
+    console.log("all services initialized")
+  }
+})
+```
+
+## Nested Access
+
+The client proxy supports nested member access by path.
+
+For example, a worker service like this:
+
+```ts
+class UserService {
+  profile = {
+    getName: () => "Ada",
+  }
+}
+```
+
+can be consumed like this:
+
+```ts
+const user = linker.linkService<WorkerService<UserService>>("user")
+const name = await user.profile.getName()
+```
+
+## Cancellation Model
+
+If a client unsubscribes from an in-flight request before it completes, `ServiceLinker` sends a cancellation message:
+
+```ts
+{ id: 0, cancel: { id: requestId } }
+```
+
+`WorkerManager` uses that request id to unsubscribe from the worker-side stream.
+
+This mainly matters for:
+
+- infinite or long-lived `Observable`s
+- expensive operations you no longer need
+- UI screens that mount and unmount frequently
+
+## API Reference
+
+### `RpcMessage`
 
 ```ts
 type RpcMessage = {
@@ -126,32 +254,38 @@ type RpcMessage = {
 }
 ```
 
-## RpcChannel
+### `RpcChannel`
 
-Abstract message transport.
+Abstract transport used by both client and worker.
 
 ```ts
-abstract class RpcChannel extends Subject<RpcMessage & {
-  respond: (msg: RpcMessage["response"]) => void
-}> {
+abstract class RpcChannel extends Subject<
+  RpcMessage & { respond: (msg: RpcMessage["response"]) => void }
+> {
   abstract send(message: RpcMessage): void
 }
 ```
 
-## SharedWorkerChannel
+### `SharedWorkerChannel`
 
-`SharedWorkerChannel` is a concrete `RpcChannel` implementation for both contexts:
-- Worker context: `new SharedWorkerChannel()`
-- Main thread: `new SharedWorkerChannel(sharedWorker)`
+Concrete `RpcChannel` implementation for a `SharedWorker` transport.
 
-It handles:
-- Incoming requests/responses via MessagePort events
-- Respond function wiring
-- Message dispatch with `send`
+Worker side:
 
-## WorkerManager
+```ts
+const channel = new SharedWorkerChannel()
+```
 
-Worker-side router that executes exposed service members.
+Main thread side:
+
+```ts
+const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module" })
+const channel = new SharedWorkerChannel(worker)
+```
+
+### `WorkerManager`
+
+Registers named services and routes incoming RPC requests.
 
 ```ts
 class WorkerManager {
@@ -161,47 +295,52 @@ class WorkerManager {
 ```
 
 Behavior:
-- Resolves nested method paths sent by the client
-- Calls functions with args, or returns property values
-- Streams Observable-like results back until completion
-- Supports cancellation through a `cancel` message
-- Adds an internal `____initialize____` method to gather initial values from properties that expose `getValue()`
 
-## ServiceLinker
+- resolves nested property or method paths
+- invokes functions with arguments
+- returns plain values for property access
+- streams observable-like results until completion
+- unsubscribes worker-side streams when cancellation arrives
 
-Main-thread client that builds typed proxies for services.
+### `ServiceLinker`
+
+Creates and caches client-side proxies.
 
 ```ts
 class ServiceLinker {
   constructor(channel: RpcChannel)
-  linkService<T>(name: string): T
+  linkService<T>(name: string): WorkerService<T>
+  static ready$(services: Record<string, any>): Observable<boolean>
 }
 ```
 
 Behavior:
-- Caches proxies by service name
-- Sends RPC requests with incrementing request ids
-- Returns an Observable for each call
-- Returned Observable is Promise-like, so you can use `await`
-- Subscriptions automatically send cancellation when unsubscribed
-- Initializes BehaviorSubject-like remote state via `____initialize____`
 
-## WorkerService<T>
+- caches proxies by service name
+- assigns incrementing request ids
+- returns an `Observable` that is also `PromiseLike`
+- sends cancellation when a request is unsubscribed early
+- initializes `BehaviorSubject`-style values via `____initialize____`
 
-Type helper that maps a service contract into client-consumable types:
-- `BehaviorSubject<U>` stays `BehaviorSubject<U>`
-- `Observable<U>` stays `Observable<U>`
-- Methods become async-compatible call signatures
+### `WorkerService<T>`
+
+Type helper that converts a worker-side contract into a client-side contract.
+
+Rules:
+
+- `BehaviorSubject<T>` stays `BehaviorSubject<T>`
+- `Observable<T>` stays `Observable<T>`
+- methods become async call signatures
+
+Example:
 
 ```ts
-type WorkerService<T> = {
-  [K in keyof T]: ...
-}
+type CounterClient = WorkerService<CounterService>
 ```
 
-Use it to get strong typing for linked services.
+## Utility Helpers
 
-## StorageBehaviorSubject<T>
+### `StorageBehaviorSubject<T>`
 
 `BehaviorSubject` with persistence hooks.
 
@@ -217,55 +356,62 @@ class StorageBehaviorSubject<T> extends BehaviorSubject<T> {
 }
 ```
 
-Behavior:
-- Reads initial value from storage
-- Supports sync or async `getItem`
-- Writes on every `next`
-
 Example:
 
 ```ts
 const storage = {
   getItem: <T>(key: string) => JSON.parse(localStorage.getItem(key) || "null") as T | undefined,
-  setItem: <T>(key: string, value: T) => localStorage.setItem(key, JSON.stringify(value)),
+  setItem: <T>(key: string, value: T) => {
+    localStorage.setItem(key, JSON.stringify(value))
+  },
 }
 
 const theme$ = new StorageBehaviorSubject(storage, "theme", "light")
 theme$.next("dark")
 ```
 
-## LimitConcurrency
+### `LimitConcurrency`
 
-Decorator factory for queuing decorated method calls and executing them through an internal stream.
-
-```ts
-const LimitConcurrency = (limit = 1) => (target, propertyKey, descriptor) => { ... }
-```
-
-Usage:
+Decorator factory that queues method calls and executes them with a concurrency cap.
 
 ```ts
-class Api {
-  @LimitConcurrency(1)
-  async fetchData(id: string) {
+class ApiService {
+  @LimitConcurrency(2)
+  async fetchItem(id: string) {
     return { id }
   }
 }
 ```
 
-Notes:
-- Works with values, Promises, and Observables
-- Returns an Observable that is also Promise-like
+Useful when you want a service method to:
 
-## Cancellation Model
+- limit concurrent async work
+- preserve a simple call API
+- still return something `await`-able or subscribable
 
-If a client unsubscribes from an in-flight call, `ServiceLinker` sends:
+### `RxjsQueue`
+
+Simple promise queue built on RxJS operators.
 
 ```ts
-{ id: 0, cancel: { id } }
+const queue = new RxjsQueue(2)
+
+const result = await queue.run(async () => {
+  return doWork()
+})
 ```
 
-`WorkerManager` listens for that id and stops streaming output for matching Observable calls.
+Use `updateLimit()` to change concurrency at runtime.
+
+## Constraints And Assumptions
+
+Keep these implementation details in mind:
+
+- transport is specifically designed around `SharedWorker`
+- service member paths beginning with `#` are treated as invalid
+- missing services return an RPC error response
+- errors are propagated back as `Error(message)` on the client
+- worker-to-client state mirroring is optimized for `BehaviorSubject`-style fields
 
 ## Build
 
@@ -273,13 +419,15 @@ If a client unsubscribes from an in-flight call, `ServiceLinker` sends:
 bun run build
 ```
 
-Additional scripts:
-- `bun run build:watch`
+Other scripts:
+
 - `bun run clean`
+- `bun run build:js`
+- `bun run build:types`
+- `bun run build:watch`
 
-## Package Info
+## Package Output
 
-- Name: `@livequery/rpc`
-- ESM output: `dist/index.js`
-- Types: `dist/index.d.ts`
-- Peer runtime dependency: `rxjs`
+- ESM entry: `dist/index.js`
+- type declarations: `dist/index.d.ts`
+- package name: `@livequery/rpc`
