@@ -83,7 +83,7 @@ export class ServiceLinker {
                             if (cache) return cache[prop](...args)
                             const sbj = new BehaviorSubject(null)
                             const observable = Object.assign(
-                                rpc(paths, args).pipe(
+                                rpc(paths, []).pipe(
                                     share({
                                         connector: () => sbj,
                                         resetOnRefCountZero: false,
