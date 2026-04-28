@@ -37,7 +37,7 @@ export class ServiceLinker {
         const cache = this.#services.get(name)
         if (cache) return cache
 
-        const observables = new Map<string, Observable<any>>()
+        const observables = new Map<string, any>()
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             if (paths.length == 0 || paths[0] == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
@@ -80,7 +80,7 @@ export class ServiceLinker {
                         return (...args: any) => {
                             const key = paths.join('.')
                             const cache = observables.get(key)
-                            if (cache) return cache
+                            if (cache) return cache[prop](...args)
                             const sbj = new BehaviorSubject(null)
                             const observable = Object.assign(
                                 rpc(paths, args).pipe(
@@ -96,7 +96,7 @@ export class ServiceLinker {
                                 }
                             )
                             observables.set(key, observable)
-                            return observable
+                            return observable[prop](...args)
                         }
                     }
                     return build([...paths, prop])
