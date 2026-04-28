@@ -1,6 +1,6 @@
-import { BehaviorSubject, combineLatest, defer, finalize, firstValueFrom, lastValueFrom, map, merge, Observable, Subject, tap } from "rxjs";
-import type { RpcChannel } from "./RpcChannel";
-import type { WorkerService } from "./WorkerService";
+import { BehaviorSubject, EMPTY, finalize, firstValueFrom, lastValueFrom, merge, Observable, share, Subject, tap } from "rxjs";
+import type { RpcChannel } from "./RpcChannel.js";
+import type { WorkerService } from "./WorkerService.js";
 
 type ThenableObservable<T> = Observable<T> & PromiseLike<T>
 
@@ -37,9 +37,7 @@ export class ServiceLinker {
         const cache = this.#services.get(name)
         if (cache) return cache
 
-        const behaviot_subject_values = new Map<string, any>()
-        const behavior_subjects = new Map<string, BehaviorSubject<any>>()
-        const ready$ = new BehaviorSubject(false)
+        const observables = new Map<string, Observable<any>>()
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             if (paths.length == 0 || paths[0] == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
@@ -53,7 +51,7 @@ export class ServiceLinker {
                     if (!request || request.completed) return
                     setTimeout(() => {
                         this.channel.send({ id: 0, cancel: { id } })
-                    }) 
+                    })
                 })
             )
             setTimeout(() => {
@@ -78,16 +76,28 @@ export class ServiceLinker {
             return new Proxy(fn, {
                 get: (_, prop) => {
                     if (prop == 'then' || typeof prop != 'string') return null
-                    if (prop == '###READY###') return ready$
-                    if (behavior_subjects.has(prop)) return behavior_subjects.get(prop)!
                     if (prop == 'pipe' || prop == 'subscribe' || prop == 'getValue') {
-                        const key = paths.join('.')
-                        const cache = behavior_subjects.get(key) || new BehaviorSubject(behaviot_subject_values.get(key) ?? null)
-                        if (!behavior_subjects.has(key)) {
-                            behavior_subjects.set(key, cache)
-                            rpc(paths, []).subscribe(v => cache.next(v))
+                        return (...args: any) => {
+                            const key = paths.join('.')
+                            const cache = observables.get(key)
+                            if (cache) return cache
+                            const sbj = new BehaviorSubject(null)
+                            const observable = Object.assign(
+                                rpc(paths, args).pipe(
+                                    share({
+                                        connector: () => sbj,
+                                        resetOnRefCountZero: false,
+                                        resetOnComplete: false,
+                                        resetOnError: false,
+                                    })
+                                ),
+                                {
+                                    getValue: () => sbj.getValue()
+                                }
+                            )
+                            observables.set(key, observable)
+                            return observable
                         }
-                        return (...args: any) => cache[prop](...args)
                     }
                     return build([...paths, prop])
                 },
@@ -100,20 +110,8 @@ export class ServiceLinker {
             }) as T
         }
         const service = build() as any
-        rpc<Record<string, any>>(['____initialize____'], []).then(states => {
-            for (const [key, value] of Object.entries(states)) {
-                behaviot_subject_values.set(key, value)
-            }
-            ready$.next(true)
-        })
         this.#services.set(name, service)
         return service
-    }
-
-    static ready$(services: any) {
-        return combineLatest(Object.values(services).map((s: any) => s['###READY###'] as Observable<boolean>)).pipe(
-            map(status => status.every(Boolean))
-        )
     }
 
 }

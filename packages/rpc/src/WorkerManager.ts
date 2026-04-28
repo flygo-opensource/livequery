@@ -1,5 +1,5 @@
-import { BehaviorSubject, EMPTY, filter, finalize, map, merge, mergeMap, of, Subject, Subscription, takeUntil, tap } from "rxjs";
-import type { RpcChannel } from "./RpcChannel";
+import { BehaviorSubject, filter, finalize, map, mergeMap, Subscription } from "rxjs";
+import type { RpcChannel } from "./RpcChannel.js";
 
 function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => any } {
     return !!value && typeof value === 'object' && typeof (value as any).pipe === 'function'
@@ -32,10 +32,10 @@ export class WorkerManager {
             map(({ id, cancel, request, respond }) => {
                 if (cancel) {
                     const subscription = responses.get(cancel.id)
-                    if(subscription){
+                    if (subscription) {
                         subscription.unsubscribe()
                         responses.delete(cancel.id)
-                    } 
+                    }
                     return
                 }
                 if (!request) return
@@ -79,22 +79,7 @@ export class WorkerManager {
 
     exposeService(name: string, service: any) {
         const services = this.#services.getValue()
-        services.set(name, Object.assign(service, {
-            ____initialize____: () => {
-                const states = Object.getOwnPropertyNames(service).reduce((p, k) => {
-                    if (service[k] && typeof service[k].getValue === 'function') {
-                        try {
-                            return {
-                                ...p,
-                                [k]: service[k].getValue()
-                            }
-                        } catch { }
-                    }
-                    return p
-                }, {} as Record<string, any>)
-                return states
-            }
-        }))
+        services.set(name, Object.assign(service))
         this.#services.next(services)
     }
 

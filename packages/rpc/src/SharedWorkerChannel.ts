@@ -1,5 +1,5 @@
 import { catchError, EMPTY, finalize, fromEvent, mergeMap, takeUntil, tap } from "rxjs"
-import { RpcChannel, type RpcMessage } from "./RpcChannel";
+import { RpcChannel, type RpcMessage } from "./RpcChannel.js";
 
 
 
