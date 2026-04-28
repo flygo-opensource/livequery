@@ -1,6 +1,6 @@
 import { BehaviorSubject } from "rxjs";
-import type { LivequeryCollection } from "./LivequeryCollection";
-import type { Doc, DocState } from "./types";
+import type { LivequeryCollection } from "./LivequeryCollection.js";
+import type { Doc, DocState } from "./types.js";
 
 
 

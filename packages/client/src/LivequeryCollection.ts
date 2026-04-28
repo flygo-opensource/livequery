@@ -1,11 +1,12 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
-import { LivequeryCore, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryCore"
-import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types"
-import { LivequeryDocument } from "./LivequeryDocument"
+import { LivequeryCore, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryCore.js"
+import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types.js"
+import { LivequeryDocument } from "./LivequeryDocument.js"
 
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
+    core: LivequeryCore
     filters: Partial<LivequeryFilters<T>>
     lazy: boolean
     debounce: number
@@ -17,7 +18,6 @@ export class LivequeryCollection<T extends Doc> {
     public readonly id = (Math.random() * 1e18).toString(36)
     #keys = new Map<keyof T, number>()
     #indexes: Map<string, number>
-    #core: LivequeryCore | undefined
     #filters = new Subject<Partial<LivequeryFilters<T>>>()
 
     public ref: string | undefined
@@ -31,8 +31,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
-
-    constructor(private options: Partial<LivequeryCollectionOptions<T>> = {}) {
+    constructor(private core: LivequeryCore, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
@@ -58,12 +57,12 @@ export class LivequeryCollection<T extends Doc> {
 
 
     #subscription: Subscription | null = null
-    initialize(core: LivequeryCore, ref: string) {
+    initialize(ref: string) {
+        if (!ref) return 
         if (typeof window == 'undefined') return
         this.ref = ref
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
-        this.#core = core
         const timer = this.options.lazy !== true && setTimeout(() => !ref.includes('undefined') && this.query(this.filters.value || {}))
         this.#subscription?.unsubscribe()
         this.#subscription = merge(
@@ -74,7 +73,7 @@ export class LivequeryCollection<T extends Doc> {
                 )
             ) : EMPTY,
 
-            core.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
+            this.core.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
                 finalize(() => {
                     timer && clearTimeout(timer)
                 }),
@@ -175,7 +174,6 @@ export class LivequeryCollection<T extends Doc> {
 
 
     async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
-        if (!this.#core) return
         if (!this.ref) return
         this.error.next(null)
         flush && this.#commit([])
@@ -187,7 +185,7 @@ export class LivequeryCollection<T extends Doc> {
             return p
         }, new Map<keyof T, number>())
         this.filters.next(filters)
-        const cache = await this.#core.query<T>({
+        const cache = await this.core.query<T>({
             ref: this.ref,
             filters,
             collection_id: this.id
@@ -236,29 +234,25 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     add(payload: Partial<T>) {
-        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.#core.add<T>(this.collection_ref, payload)
+        return this.core.add<T>(this.collection_ref, payload)
     }
 
 
     update(id: string, payload: Partial<T>) {
-        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.#core.update<T>(this.collection_ref, id, payload)
+        return this.core.update<T>(this.collection_ref, id, payload)
     }
 
 
     delete(id: string) {
-        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.#core.delete<T>(this.collection_ref, id)
+        return this.core.delete<T>(this.collection_ref, id)
     }
 
     trigger<T>(action: string, payload?: Record<string, any>) {
-        if (!this.#core) throw new Error('LivequeryCollection is not initialized with a core instance')
         if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.#core.trigger<T>({
+        return this.core.trigger<T>({
             action,
             payload,
             ref: this.ref

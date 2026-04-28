@@ -1,4 +1,4 @@
-import type { Doc, LivequeryPaging } from "./types"
+import type { Doc, LivequeryPaging } from "./types.js"
 
 
 

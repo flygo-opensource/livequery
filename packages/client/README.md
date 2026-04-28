@@ -1,32 +1,26 @@
 # @livequery/core
 
-Reactive local-first data primitives for browser clients. The package combines RxJS-based collections, pluggable local storage, pluggable remote transporters, optimistic mutations, and typed inline filters.
+Reactive local-first data primitives for browser clients.
 
-This package is only the core layer. You can use the built-in pieces, but you can also implement your own `LivequeryStorge` and `LivequeryTransporter` adapters to match your cache strategy, backend API, realtime channel, or persistence model.
+This package provides the core building blocks behind Livequery collections: reactive document state, pluggable local storage, pluggable transporters, optimistic mutations, and typed inline filters.
 
 ## Installation
 
 ```bash
-npm install @livequery/core rxjs
-# or
 bun add @livequery/core rxjs
 ```
 
 For React projects:
 
 ```bash
-npm install @livequery/core @livequery/react rxjs
-# or
 bun add @livequery/core @livequery/react rxjs
 ```
 
 The package is published as ESM and targets browser usage.
 
-If you are using this package with React, `@livequery/react` is the recommended companion package so collection state can be connected to React components more ergonomically.
-
 ## Public Exports
 
-The public API is re-exported from `src/index.ts`:
+The package re-exports:
 
 ```ts
 export * from "./LivequeryCollection"
@@ -39,7 +33,7 @@ export * from "./helpers/filterDocs"
 export * from "./LivequeryDocument"
 ```
 
-## Core Concepts
+## Core Types
 
 ### `Doc`
 
@@ -53,7 +47,7 @@ type Doc<T = {}> = T & {
 
 ### `DocState`
 
-Collections expose documents as `DocState<T>`, which adds optimistic mutation metadata.
+Collections and documents expose `DocState<T>`, which adds optimistic mutation metadata.
 
 ```ts
 type DocState<T extends Doc> = T & {
@@ -70,7 +64,7 @@ type DocState<T extends Doc> = T & {
 
 ### `DataChangeEvent`
 
-Remote query streams feed the core with incremental changes:
+Transporters stream incremental change events back into the core.
 
 ```ts
 type DataChangeEvent = {
@@ -93,9 +87,9 @@ LivequeryCollection / LivequeryDocument
 LivequeryStorge  LivequeryTransporter(s)
 ```
 
-- `LivequeryCollection` manages reactive state for one collection or document ref.
-- `LivequeryDocument` wraps one item as a `BehaviorSubject` with convenience mutation methods.
-- `LivequeryCore` coordinates storage, transporters, optimistic writes, and broadcast fan-out.
+- `LivequeryCollection` owns the reactive state for one collection ref or one document ref.
+- `LivequeryDocument` wraps an item as a `BehaviorSubject` with convenience mutation methods.
+- `LivequeryCore` coordinates storage, transporters, optimistic writes, and fan-out to watchers.
 - `LivequeryStorge` is the local persistence contract.
 - `LivequeryTransporter` is the remote sync contract.
 
@@ -121,11 +115,12 @@ type Todo = Doc<{
 const storage = new LivequeryMemoryStorage()
 
 const transporter: LivequeryTransporter = {
-  query() {
+  query(_query) {
     return of<Partial<LivequeryQueryResult>>({
       changes: [],
       summary: {},
       paging: { total: 0, current: 0 },
+      metadata: {},
       source: "query",
     })
   },
@@ -150,12 +145,12 @@ const core = new LivequeryCore({
   },
 })
 
-const todos = new LivequeryCollection<Todo>({
+const todos = new LivequeryCollection<Todo>(core, {
   filters: { "createdAt:sort": "desc" },
   mode: "server-first",
 })
 
-todos.initialize(core, "todos")
+todos.initialize("todos")
 
 todos.items.subscribe((items) => {
   console.log(items.map((doc) => doc.value))
@@ -195,11 +190,11 @@ Documents created locally receive ids prefixed with `local:` until a transporter
 
 Collections support three modes through `LivequeryCollectionOptions.mode`:
 
-- `server-first`: collection reads are driven by the transporter layer. In practice, the collection waits for remote query results and builds state from transporter events.
-- `cache-first`: the collection reads from local cache first, then pulls fresh data from the transporter and merges the result back in.
-- `local-first`: the collection reads only from local cache for the query result, applies filters at the storage layer, then performs background synchronization so remote changes are applied silently afterward.
+- `server-first`: queries are driven by transporters, and collection state is built from streamed change events.
+- `cache-first`: first query can hydrate from local storage, then transporters refresh the result.
+- `local-first`: queries resolve from local storage while remote sync runs in the background and rebroadcasts matching changes.
 
-Current implementation detail: in `local-first` mode, active filters are not forwarded to the transporter. The query result is filtered by the storage adapter, and added events are filtered again before they are rebroadcast into matching collections.
+Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally.
 
 ## `LivequeryCollection`
 
@@ -207,6 +202,7 @@ Current implementation detail: in `local-first` mode, active filters are not for
 
 ```ts
 type LivequeryCollectionOptions<T extends Doc> = {
+  core: LivequeryCore
   filters: Partial<LivequeryFilters<T>>
   lazy: boolean
   debounce: number
@@ -214,20 +210,33 @@ type LivequeryCollectionOptions<T extends Doc> = {
 }
 ```
 
-### Initialize a collection
+### Create and initialize a collection
+
+The current constructor takes `core` as the first argument and options as the second argument.
 
 ```ts
-const posts = new LivequeryCollection<Post>({
+const posts = new LivequeryCollection<Post>(core, {
   filters: { "publishedAt:sort": "desc" },
   lazy: false,
   debounce: 250,
   mode: "cache-first",
 })
 
-posts.initialize(core, "posts")
+posts.initialize("posts")
 ```
 
-`initialize()` subscribes the collection to `LivequeryCore.watch(ref, id, mode)`. In the current implementation, it is browser-only and returns early when `window` is unavailable.
+`initialize(ref)` subscribes the collection to `LivequeryCore.watch(ref, id, mode)`. In the current implementation, it is browser-only and returns early when `window` is unavailable.
+
+### Collection refs and document refs
+
+If a ref has an even number of path segments, the last segment is treated as a document id.
+
+```ts
+posts.initialize("posts")
+singlePost.initialize("posts/post-1")
+```
+
+For collection mutations, `add`, `update`, and `delete` always target the collection portion of the ref.
 
 ### Reactive state
 
@@ -238,18 +247,17 @@ posts.initialize(core, "posts")
 - `paging`: `BehaviorSubject<LivequeryPaging>`
 - `error`: `BehaviorSubject<{ code: string; message: string } | null>`
 
-`items` is a `BehaviorSubject`, not a plain array. Reading `collection.items.value` gives you the current snapshot only. If you need live updates, you must subscribe.
+`items` is a `BehaviorSubject`, not a plain array. Reading `collection.items.value` gives the current snapshot only. If you need live updates, subscribe.
 
 ```ts
 const subscription = posts.items.subscribe((items) => {
   console.log("realtime items", items.map((doc) => doc.value))
 })
 
-// later
 subscription.unsubscribe()
 ```
 
-In React, using only `collection.items.value` during render will not cause rerenders when new events arrive. Bridge the `BehaviorSubject` into React state with `subscribe()`.
+In React, reading only `collection.items.value` during render will not trigger rerenders when new events arrive. Bridge the `BehaviorSubject` into component state.
 
 ```tsx
 function TodoList({ collection }: { collection: LivequeryCollection<Todo> }) {
@@ -286,18 +294,17 @@ resetError(): void
 watch(check: (prev: T, next: T) => boolean): Observable<[DocState<T>, DocState<T>]>
 ```
 
-### Collection refs and document refs
+Notes about current behavior:
 
-If a ref has an even number of path segments, the last segment is treated as a document id.
-
-```ts
-posts.initialize(core, "posts")
-singlePost.initialize(core, "posts/post-1")
-```
+- `query()` requires `initialize()` to have run first so the collection has a `ref` and watcher registration.
+- `debounceQuery()` only emits through the debounced path when `options.debounce` is truthy.
+- `loadMore()` uses `paging.next.cursor` as `:after`.
+- `loadPrev()` uses `paging.prev.cursor` as `:before`.
+- `loadAround()` currently sets both `:after` and `:before` to the provided cursor.
 
 ## `LivequeryDocument`
 
-Each item inside `collection.items` is a `LivequeryDocument`, which extends `BehaviorSubject<DocState<T>>`.
+Each entry inside `collection.items` is a `LivequeryDocument`, which extends `BehaviorSubject<DocState<T>>`.
 
 ```ts
 class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T>> {
@@ -345,12 +352,12 @@ The package ships with `LivequeryMemoryStorage`, an in-memory adapter useful for
 
 ### `LivequeryMemoryStorage`
 
-Behavior of the built-in adapter:
+The built-in adapter:
 
 - stores documents in `Map<string, Map<string, Doc>>`
 - generates a local id with `local:${crypto.randomUUID()}` when `id` is missing
-- supports nested sort paths such as `profile.createdAt:sort`
-- applies filters with the exported `filterDocs()` helper
+- applies filters through the exported `filterDocs()` helper
+- supports nested sort keys such as `profile.createdAt:sort`
 
 ## `LivequeryTransporter`
 
@@ -380,7 +387,7 @@ type LivequeryQueryResult = {
 }
 ```
 
-Transporters can emit partial results. In practice, the most important fields are `changes`, `paging`, `summary`, and `error`.
+Transporters can emit partial results. In practice, the most useful fields are `changes`, `paging`, `summary`, `metadata`, and `error`.
 
 ## Query Filters
 
@@ -435,14 +442,14 @@ const visible = filterDocs(docs, {
 
 The helper module also exports `matchesAllFilters(doc, filters)` for direct predicate checks.
 
-## Notes
+## Caveats
 
-- `initialize()` is browser-only in the current implementation
-- the public storage interface name is spelled `LivequeryStorge`, matching the source
-- optimistic flags such as `_adding`, `_updating`, and `_deleting` are system fields managed by the core
-- remote query streams are expected to emit `changes` rather than full snapshots
-- `LivequeryCollection` declares a `metadata` field, but it is not initialized in the current constructor, so transporter-emitted `metadata` is not safe to rely on through the collection API yet
-- `trigger()` is typed as `Observable<{ data, error? }>` at the collection and document layer, but the current runtime implementation forwards raw transporter results without wrapping them
+- `initialize()` is browser-only because it exits early when `window` is unavailable.
+- The public storage interface name is intentionally spelled `LivequeryStorge`, matching the source.
+- Optimistic flags such as `_adding`, `_updating`, `_deleting`, and `_prev` are system-managed fields.
+- Transporter query streams are expected to emit incremental `changes`, not full snapshots.
+- `LivequeryCollection` declares a `metadata` subject but does not initialize it in the constructor, so transporter-emitted `metadata` is not safe to rely on yet.
+- `trigger()` is typed at the collection and document layer as `Observable<{ data, error? }>` but currently forwards raw transporter results from `LivequeryCore.trigger()`.
 
 ## Development
 

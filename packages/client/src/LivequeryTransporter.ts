@@ -1,5 +1,5 @@
 import type { Observable } from "rxjs";
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQueryParams, LivequeryResult } from "./types";
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQueryParams, LivequeryResult } from "./types.js";
 
 
 export type LivequeryQueryResult = {

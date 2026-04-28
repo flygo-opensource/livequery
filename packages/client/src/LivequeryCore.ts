@@ -1,10 +1,10 @@
 import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, switchMap, takeUntil, takeWhile, tap } from "rxjs"
-import type { LivequeryStorge } from "./LivequeryStorge"
-import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter"
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource } from "./types"
-import { tryCatch } from "./helpers/tryCatch"
-import { whenCompleted } from "./helpers/whenCompleted"
-import { matchesAllFilters } from "./helpers/filterDocs"
+import type { LivequeryStorge } from "./LivequeryStorge.js"
+import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource } from "./types.js"
+import { tryCatch } from "./helpers/tryCatch.js"
+import { whenCompleted } from "./helpers/whenCompleted.js"
+import { matchesAllFilters } from "./helpers/filterDocs.js"
 
 
 export type LivequeryCoreOptions = {

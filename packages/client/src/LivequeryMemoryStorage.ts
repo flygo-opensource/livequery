@@ -1,6 +1,6 @@
-import type { Doc, LivequeryPaging } from "./types"
-import type { LivequeryStorge } from "./LivequeryStorge"
-import { filterDocs } from "./helpers/filterDocs"
+import type { Doc, LivequeryPaging } from "./types.js"
+import type { LivequeryStorge } from "./LivequeryStorge.js"
+import { filterDocs } from "./helpers/filterDocs.js"
 
 
 

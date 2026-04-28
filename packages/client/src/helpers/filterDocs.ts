@@ -1,4 +1,4 @@
-import type { Doc, LivequeryFilters } from "../types"
+import type { Doc, LivequeryFilters } from "../types.js"
 
 type Primitive = string | number | boolean | null | undefined
 
