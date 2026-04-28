@@ -3,16 +3,31 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.92",
+    "version": "2.0.96",
     "type": "module",
     "description": "",
-    "main": "build/index.js",
-    "types": "build/index.d.ts",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js",
             "default": "./dist/index.js"
+        },
+        "./RestTransporter": {
+            "types": "./dist/RestTransporter.d.ts",
+            "import": "./dist/RestTransporter.js",
+            "default": "./dist/RestTransporter.js"
+        },
+        "./Socket": {
+            "types": "./dist/Socket.d.ts",
+            "import": "./dist/Socket.js",
+            "default": "./dist/Socket.js"
+        },
+        "./helpers/parseJson": {
+            "types": "./dist/helpers/parseJson.d.ts",
+            "import": "./dist/helpers/parseJson.js",
+            "default": "./dist/helpers/parseJson.js"
         }
     },
     "files": [
@@ -29,10 +44,8 @@
     "peerDependencies": {},
   "scripts": {
     "clean": "rm -rf dist",
-    "build:js": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --sourcemap",
-    "build:types": "bunx tsc -p tsconfig.build.json",
-    "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:watch": "bun build ./src/index.ts --outdir ./dist --target browser --format esm --watch",
+        "build": "bun run clean && bunx tsc -p tsconfig.build.json",
+        "build:watch": "bunx tsc -p tsconfig.build.json --watch",
     "prepublishOnly": "bun run build"
   },
     "author": "",

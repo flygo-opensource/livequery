@@ -432,6 +432,12 @@ Methods:
 import { Socket } from '@livequery/rest'
 ```
 
+Subpath import is also available:
+
+```ts
+import { Socket } from '@livequery/rest/Socket'
+```
+
 The socket class is exported for low-level integrations and debugging.
 
 Example:
@@ -472,8 +478,15 @@ bun run build
 Build steps:
 
 - clean `dist/`
-- bundle ESM output with Bun
-- generate `.d.ts` files with TypeScript
+- emit Node.js ESM files with TypeScript (`module: NodeNext`)
+- generate `.js`, `.d.ts`, `.js.map`, and `.d.ts.map`
+
+The published package is strict ESM (`"type": "module"`) and exposes these entrypoints:
+
+- `@livequery/rest`
+- `@livequery/rest/RestTransporter`
+- `@livequery/rest/Socket`
+- `@livequery/rest/helpers/parseJson`
 
 ## License
 
