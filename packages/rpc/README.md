@@ -2,6 +2,10 @@
 
 Lightweight RxJS-based RPC utilities for exposing services from a `SharedWorker` and consuming them from the main thread with typed proxies.
 
+## AI Agent Notes
+
+Repository-specific guidance for coding agents lives in `AGENTS.md`.
+
 This package is built for a simple model:
 
 - Expose plain classes as worker services.
@@ -157,7 +161,7 @@ In practice:
 
 ## BehaviorSubject Mirroring
 
-If your service exposes a property with a `getValue()` method, `WorkerManager` will include its initial value during service initialization.
+If your service exposes a `BehaviorSubject` property, the client can treat it like remote reactive state.
 
 This is what allows a worker-side `BehaviorSubject` to feel usable on the client:
 
@@ -177,24 +181,12 @@ settings.theme.subscribe((theme) => {
 
 Notes:
 
-- the initial snapshot is fetched through an internal `____initialize____` call
-- later updates are streamed by subscribing to the remote property
+- `ServiceLinker` special-cases only `subscribe()`, `pipe()`, and `getValue()` on remote properties
+- updates are fetched by subscribing to the remote property path, not through a separate initialization API
+- `getValue()` reads the locally cached value, so subscribe first if you need the current worker value to be populated locally
 - this pattern is designed around `BehaviorSubject`-like objects
 
-## Waiting For Multiple Services To Initialize
-
-`ServiceLinker` exposes a helper for waiting until all linked services have loaded their initial state.
-
-```ts
-const counter = linker.linkService<WorkerService<CounterService>>("counter")
-const settings = linker.linkService<WorkerService<SettingsService>>("settings")
-
-ServiceLinker.ready$({ counter, settings }).subscribe((ready) => {
-  if (ready) {
-    console.log("all services initialized")
-  }
-})
-```
+There is currently no built-in readiness helper in `ServiceLinker`.
 
 ## Nested Access
 
@@ -310,7 +302,6 @@ Creates and caches client-side proxies.
 class ServiceLinker {
   constructor(channel: RpcChannel)
   linkService<T>(name: string): WorkerService<T>
-  static ready$(services: Record<string, any>): Observable<boolean>
 }
 ```
 
@@ -320,7 +311,7 @@ Behavior:
 - assigns incrementing request ids
 - returns an `Observable` that is also `PromiseLike`
 - sends cancellation when a request is unsubscribed early
-- initializes `BehaviorSubject`-style values via `____initialize____`
+- special-cases `subscribe`, `pipe`, and `getValue` for remote observable-like properties
 
 ### `WorkerService<T>`
 
@@ -330,7 +321,7 @@ Rules:
 
 - `BehaviorSubject<T>` stays `BehaviorSubject<T>`
 - `Observable<T>` stays `Observable<T>`
-- methods become async call signatures
+- methods become async call signatures unless their awaited return type is already an `Observable`
 
 Example:
 
@@ -422,8 +413,6 @@ bun run build
 Other scripts:
 
 - `bun run clean`
-- `bun run build:js`
-- `bun run build:types`
 - `bun run build:watch`
 
 ## Package Output
