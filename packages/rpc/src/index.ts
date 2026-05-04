@@ -1,4 +1,5 @@
 export * from "./RpcChannel.js"
+export * from "./ExtensionChannel.js"
 export * from "./SharedWorkerChannel.js"
 export * from "./ServiceLinker.js"
 export * from "./WorkerService.js"

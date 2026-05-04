@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This repository contains `@livequery/rpc`, a small TypeScript library for RPC-style communication between the main thread and a `SharedWorker` using RxJS.
+This repository contains `@livequery/rpc`, a small TypeScript library for RPC-style communication between the main thread and a `SharedWorker` or extension runtime using RxJS.
 
 The package focuses on three concerns:
 
@@ -21,6 +21,7 @@ The package focuses on three concerns:
 ## Repository Layout
 
 - `src/RpcChannel.ts`: core message contract and abstract transport
+- `src/ExtensionChannel.ts`: concrete transport for Chrome extension runtime messaging
 - `src/SharedWorkerChannel.ts`: concrete transport for foreground and worker contexts
 - `src/ServiceLinker.ts`: client proxy builder, request tracking, cancellation, and observable bridging
 - `src/WorkerManager.ts`: worker-side request router and response streaming
@@ -108,6 +109,23 @@ const linker = new ServiceLinker(channel)
 const counter = linker.linkService<WorkerService<CounterService>>("counter")
 ```
 
+### 3b. Connect through a Chrome extension runtime
+
+For a Chrome extension Manifest V3 background service worker, popup, options page, or content script, use `ExtensionChannel`.
+
+```ts
+import { ExtensionChannel, ServiceLinker, WorkerManager, type WorkerService } from "@livequery/rpc"
+import type { CounterService } from "./CounterService"
+
+const channel = new ExtensionChannel()
+const linker = new ServiceLinker(channel)
+const manager = new WorkerManager(channel)
+
+const counter = linker.linkService<WorkerService<CounterService>>("counter")
+```
+
+`ExtensionChannel` currently uses `chrome.runtime.onMessage` and `chrome.runtime.sendMessage` directly.
+
 ### 4. Consume one-shot methods with `await`
 
 When the worker method returns a plain value or a promise, prefer `await`.
@@ -170,6 +188,7 @@ The proxy builds the path lazily from property access and only sends the RPC req
 When generating code that uses this library, follow these rules.
 
 - Use `WorkerService<T>` when typing a linked service on the client.
+- Use `ExtensionChannel()` only inside Chrome extension contexts where `chrome.runtime` is available.
 - Use `SharedWorkerChannel()` with no argument in worker code and `SharedWorkerChannel(worker)` in browser code.
 - Return RxJS observables from worker methods when the client should stream values.
 - Expose `BehaviorSubject` properties directly when the client should observe shared state.
@@ -180,7 +199,7 @@ When generating code that uses this library, follow these rules.
 
 Agents should not infer features that are not in the current source.
 
-- There is no alternate transport implementation in this repository besides `SharedWorkerChannel`.
+- The repository includes `ExtensionChannel` as a Chrome extension runtime transport in addition to `SharedWorkerChannel`.
 - There is no test suite to lean on for behavior discovery.
 - `WorkerManager` detects streams by checking for a `pipe()` method, not by RxJS class identity.
 - `ServiceLinker` currently does not expose a built-in readiness API in source; do not generate code that depends on one unless you add it.
@@ -280,6 +299,14 @@ If you adjust method-path behavior, keep validation symmetrical on both sides.
 
 Transport edits should preserve both modes.
 
+### Extension runtime transport
+
+`ExtensionChannel` is a Chrome extension transport built on `chrome.runtime.onMessage` and `chrome.runtime.sendMessage`.
+
+- it assumes `chrome.runtime` exists at module evaluation time
+- it is intended for extension contexts such as background service worker, popup, options page, or content script
+- transport edits should stay aligned with the `RpcMessage` contract expected by `ServiceLinker` and `WorkerManager`
+
 ## Type Expectations
 
 `WorkerService<T>` maps worker-side members into client-side types:
@@ -317,5 +344,5 @@ If you change message flow or typing behavior, also manually inspect these files
 ## Known Gaps
 
 - No automated tests are present.
-- The repository is optimized for `SharedWorker`; other transports are not implemented here.
+- The repository is optimized for `SharedWorker`; `ExtensionChannel` is available for Chrome extension runtime messaging.
 - Streaming and promise-like behavior share the same primitive, so seemingly small changes in `ServiceLinker` can alter public API behavior significantly.

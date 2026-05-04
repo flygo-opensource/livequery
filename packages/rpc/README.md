@@ -1,6 +1,6 @@
 # @livequery/rpc
 
-Lightweight RxJS-based RPC utilities for exposing services from a `SharedWorker` and consuming them from the main thread with typed proxies.
+Lightweight RxJS-based RPC utilities for exposing services from a `SharedWorker` or an extension background runtime and consuming them from the main thread with typed proxies.
 
 ## AI Agent Notes
 
@@ -29,6 +29,7 @@ bun add @livequery/rpc rxjs
 ## What It Exports
 
 ```ts
+export * from "./ExtensionChannel"
 export * from "./RpcChannel"
 export * from "./SharedWorkerChannel"
 export * from "./ServiceLinker"
@@ -48,6 +49,36 @@ ServiceLinker --(RpcMessage)--> SharedWorkerChannel --> WorkerManager --> your s
      ^                                                            |
      |--------------------(response stream)-----------------------|
 ```
+
+For extension Manifest V3, the same flow can run over `ExtensionChannel` and `chrome.runtime` messaging instead of `SharedWorker`.
+
+## Extension MV3 Example
+
+### Background service worker
+
+```ts
+import { ExtensionChannel, WorkerManager } from "@livequery/rpc"
+import { CounterService } from "./CounterService"
+
+const channel = new ExtensionChannel()
+const manager = new WorkerManager(channel)
+
+manager.exposeService("counter", new CounterService())
+```
+
+### Popup, options page, or content script
+
+```ts
+import { ExtensionChannel, ServiceLinker, type WorkerService } from "@livequery/rpc"
+import type { CounterService } from "./CounterService"
+
+const channel = new ExtensionChannel()
+const linker = new ServiceLinker(channel)
+
+const counter = linker.linkService<WorkerService<CounterService>>("counter")
+```
+
+`ExtensionChannel` is a transport for extension contexts such as a background service worker, popup, options page, or content script. Its current implementation listens on `chrome.runtime.onMessage` and sends messages with `chrome.runtime.sendMessage`.
 
 ## When To Use This Package
 
