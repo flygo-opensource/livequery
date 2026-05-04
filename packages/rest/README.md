@@ -2,6 +2,8 @@
 
 `@livequery/rest` is a REST + WebSocket transporter for `@livequery/core`.
 
+This repository is the transport library package, not an application. Changes here should preserve reusable transport behavior unless a task explicitly targets a breaking change.
+
 It adapts the `LivequeryTransporter` interface to:
 
 - HTTP requests for `query`, `add`, `update`, `delete`, and `trigger`
@@ -9,6 +11,15 @@ It adapts the `LivequeryTransporter` interface to:
 - request/response hooks for auth, caching, logging, or mocking
 
 This package does not implement local cache or collection state management. That stays in `@livequery/core`. This package is only the transport layer between a livequery client and your backend.
+
+## AI Agent Guidance
+
+Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instructions.md`.
+
+- `AGENTS.md` is the implementation-focused guide for coding agents modifying this package.
+- `copilot-instructions.md` provides repo-level instructions for Copilot when generating or reviewing code in this workspace.
+- Both documents assume this repo is a transport library package, so agent changes should avoid app-specific scaffolding and should preserve public API compatibility by default.
+- Agents generating consumer code should build around a shared `RestTransporter` inside a shared `LivequeryCore` instance.
 
 ## Installation
 
