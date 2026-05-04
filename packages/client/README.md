@@ -2,7 +2,18 @@
 
 Reactive local-first data primitives for browser clients.
 
+This repository is the core library package, not an application. Changes here should preserve reusable public API behavior unless a task explicitly targets a breaking change.
+
 This package provides the core building blocks behind Livequery collections: reactive document state, pluggable local storage, pluggable transporters, optimistic mutations, and typed inline filters.
+
+## AI Agent Guidance
+
+Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instructions.md`.
+
+- `AGENTS.md` is the implementation-focused guide for coding agents modifying this package.
+- `copilot-instructions.md` provides repo-level instructions for Copilot when generating or reviewing code in this workspace.
+- Both documents assume this repo is a library package, so agent changes should avoid app-specific scaffolding and should preserve public API compatibility by default.
+- Agents generating consumer code should also follow the usage patterns documented below: create a shared `LivequeryCore`, initialize collections before querying, and subscribe to collection state instead of relying on one-time `.value` reads.
 
 ## Installation
 
