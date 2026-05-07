@@ -1,4 +1,4 @@
-import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, switchMap, takeUntil, takeWhile, tap } from "rxjs"
+import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, reduce, scan, shareReplay, Subject, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource } from "./types.js"
@@ -339,11 +339,12 @@ export class LivequeryCore {
                         o.next()
                         o.complete()
                         this.#adding.delete(collection_ref)
+                        return { [_transporterId]: data }
                     }
 
                     // _deleting flag → soft-delete on remote then hard-delete locally 
                     if (doc._deleting) {
-                        const [e] = await tryCatch(() => transporter.delete(collection_ref, id))
+                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id))
                         if (e) {
                             const fnd = {
                                 _deleting: undefined,
@@ -364,6 +365,7 @@ export class LivequeryCore {
                                 id
                             }])
                         }
+                        return { [_transporterId]: data }
                     }
 
                     // _prev present → document was updated locally, push changed fields to remote
@@ -372,7 +374,7 @@ export class LivequeryCore {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        const [e] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields))
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields))
                         const fnd = {
                             _prev: undefined,
                             _updating: undefined,
@@ -385,28 +387,33 @@ export class LivequeryCore {
                             id,
                             data: fnd
                         }])
+                        return { [_transporterId]: data }
                     }
 
                     return EMPTY
-                })
+                }),
+                reduce((acc, curr) => ({ ...acc, ...curr }), {} as Record<string, any>)
             ),
-            { defaultValue: undefined }
+            { defaultValue: [] }
         )
     }
 
     async add<T extends Doc>(collection_ref: string, doc: Record<string, any>) {
-        const data = await this.config.storage.add<T>(
+        const local = await this.config.storage.add<T>(
             collection_ref,
             { ...doc, _adding: true } as DocState<T>
         )
         this.#broadcast(collection_ref, 'action', [{
             collection_ref,
-            id: data.id,
+            id: local.id,
             type: 'added',
-            data
+            data: local
         }])
-        await this.#push(collection_ref, data.id, data)
-        return data
+        const remotes = await this.#push(collection_ref, local.id, local)
+        return {
+            local,
+            remotes
+        }
     }
 
     async update<T extends Doc>(collection_ref: string, id: string, data: Record<string, any>) {
