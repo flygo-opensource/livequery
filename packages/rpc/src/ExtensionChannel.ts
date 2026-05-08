@@ -1,6 +1,6 @@
 import { RpcChannel, type RpcMessage } from "./RpcChannel.js"
 
-type RuntimeMessageListener = (message: unknown, sender: unknown, sendResponse: (response?: unknown) => void) => void
+type RuntimeMessageListener = (message: unknown, sender: { tab?: { id: string } }, sendResponse: (response?: unknown) => void) => void
 
 type ExtensionRuntime = {
     sendMessage(message: unknown): void
@@ -10,17 +10,14 @@ type ExtensionRuntime = {
     }
 }
 
-const runtime = (() => {
-    const runtime = (globalThis as typeof globalThis & {
-        chrome?: { runtime?: ExtensionRuntime }
-    }).chrome?.runtime
-
-    if (!runtime) {
-        throw new Error("chrome.runtime is not available")
+const chrome = (globalThis as typeof globalThis & {
+    chrome?: {
+        runtime: ExtensionRuntime
+        tabs: {
+            sendMessage(tabId: string, message: unknown): void
+        }
     }
-
-    return runtime
-})()
+}).chrome
 
 function isRpcMessage(value: unknown): value is RpcMessage {
     return !!value && typeof value === "object" && "id" in value
@@ -28,26 +25,57 @@ function isRpcMessage(value: unknown): value is RpcMessage {
 
 export class ExtensionChannel extends RpcChannel {
 
+
+
     constructor() {
         super()
-
-        runtime.onMessage.addListener(this.#onMessage)
-    }
-
-    #onMessage = (message: unknown) => {
-        if (!isRpcMessage(message)) return
-
-        const respond = (response: RpcMessage['response']) => {
-            runtime.sendMessage({
-                id: message.id,
-                response
-            } satisfies RpcMessage)
+        if (typeof window == 'undefined') {
+            this.#initBackground()
+        } else {
+            this.#initForegound()
         }
-
-        this.next({ ...message, respond })
     }
+
+    #initForegound() {
+        if (!chrome) return
+        const runtime = chrome.runtime
+        runtime?.onMessage.addListener((message, sender, sendResponse) => {
+            if (!isRpcMessage(message)) return
+            const respond = (response: RpcMessage['response']) => {
+                runtime?.sendMessage({
+                    id: message.id,
+                    response
+                } satisfies RpcMessage)
+            }
+            this.next({ ...message, respond })
+        });
+    }
+
+    #initBackground() {
+        if (!chrome) return
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            if (!isRpcMessage(message)) return
+            const tabId = sender.tab?.id
+            const respond = (response: RpcMessage['response']) => {
+                if (tabId) {
+                    chrome.tabs.sendMessage(tabId, {
+                        id: message.id,
+                        response
+                    } satisfies RpcMessage)
+                } else {
+                    chrome.runtime.sendMessage({
+                        id: message.id,
+                        response
+                    } satisfies RpcMessage)
+                }
+            }
+            this.next({ ...message, respond })
+        });
+    }
+
 
     send(message: RpcMessage): void {
-        runtime.sendMessage(message)
+        if (!chrome) return
+        chrome.runtime.sendMessage(message)
     }
 }
