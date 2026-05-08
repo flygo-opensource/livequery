@@ -314,9 +314,8 @@ export class LivequeryCore {
 
         return lastValueFrom(
             from(Object.entries(this.config.transporters)).pipe(
-                concatMap(async ([_transporterId, transporter]) => {
+                concatMap(async ([tid, transporter]) => {
                     if (String(id).startsWith('local:')) {
-
                         // lock by collection_ref 
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
@@ -339,7 +338,7 @@ export class LivequeryCore {
                         o.next()
                         o.complete()
                         this.#adding.delete(collection_ref)
-                        return { [_transporterId]: data }
+                        return { [tid]: data }
                     }
 
                     // _deleting flag → soft-delete on remote then hard-delete locally 
@@ -365,7 +364,7 @@ export class LivequeryCore {
                                 id
                             }])
                         }
-                        return { [_transporterId]: data }
+                        return { [tid]: data }
                     }
 
                     // _prev present → document was updated locally, push changed fields to remote
@@ -387,10 +386,9 @@ export class LivequeryCore {
                             id,
                             data: fnd
                         }])
-                        return { [_transporterId]: data }
+                        return { [tid ]: data }
                     }
-
-                    return EMPTY
+                    return {}
                 }),
                 reduce((acc, curr) => ({ ...acc, ...curr }), {} as Record<string, any>)
             ),
@@ -412,7 +410,7 @@ export class LivequeryCore {
         const remotes = await this.#push(collection_ref, local.id, local)
         return {
             local,
-            remotes
+            ...remotes
         }
     }
 
