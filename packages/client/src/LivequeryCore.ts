@@ -386,13 +386,13 @@ export class LivequeryCore {
                             id,
                             data: fnd
                         }])
-                        return { [tid ]: data }
+                        return { [tid]: data }
                     }
                     return {}
                 }),
-                reduce((acc, curr) => ({ ...acc, ...curr }), {} as Record<string, any>)
+                reduce((acc, curr) => ({ ...acc, ...curr as any as T }), {} as Record<string, T>)
             ),
-            { defaultValue: [] }
+            { defaultValue: {} as Record<string, T> }
         )
     }
 
@@ -411,7 +411,7 @@ export class LivequeryCore {
         return {
             local,
             ...remotes
-        }
+        } as { [key: string]: T }
     }
 
     async update<T extends Doc>(collection_ref: string, id: string, data: Record<string, any>) {
@@ -428,7 +428,7 @@ export class LivequeryCore {
             }
         }, old._prev || {})
         await this.config.storage.update<T>(collection_ref, id, { _prev, _updating: true, ...data, })
-        const doc = await this.#broadcast(collection_ref, 'action', [{
+        await this.#broadcast(collection_ref, 'action', [{
             collection_ref,
             id,
             type: 'modified',
@@ -438,8 +438,8 @@ export class LivequeryCore {
                 ...data,
             }
         }])
-        await this.#push(collection_ref, id, { ...data, _prev, _updating: true })
-        return doc
+        const updated = await this.#push(collection_ref, id, { ...data, _prev, _updating: true })
+        return updated as { [key: string]: { id: string } & Partial<T> }
     }
 
     async delete<T extends Doc>(collection_ref: string, id: string) {
@@ -463,8 +463,8 @@ export class LivequeryCore {
                 _deleting: true
             }
         }])
-        await this.#push(collection_ref, id, { _deleting: true })
-        return doc
+        const deleted = await this.#push(collection_ref, id, { _deleting: true })
+        return deleted as { [key: string]: { id: string } }
     }
 
     trigger<Response>(action: LivequeryAction) {

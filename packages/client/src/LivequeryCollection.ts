@@ -58,7 +58,7 @@ export class LivequeryCollection<T extends Doc> {
 
     #subscription: Subscription | null = null
     initialize(ref: string) {
-        if (!ref) return 
+        if (!ref) return
         if (typeof window == 'undefined') return
         this.ref = ref
         const refs = ref.split('/')
@@ -233,9 +233,9 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    add(payload: Partial<T>) {
+    async add(payload: Partial<T>) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.core.add<T>(this.collection_ref, payload)
+        return await this.core.add<T>(this.collection_ref, payload)
     }
 
 
