@@ -78,7 +78,12 @@ const linker = new ServiceLinker(channel)
 const counter = linker.linkService<WorkerService<CounterService>>("counter")
 ```
 
-`ExtensionChannel` is a transport for extension contexts such as a background service worker, popup, options page, or content script. Its current implementation listens on `chrome.runtime.onMessage` and sends messages with `chrome.runtime.sendMessage`.
+`ExtensionChannel` auto-detects its context at construction time:
+
+- **Background service worker** (`typeof window === 'undefined'`): listens on `chrome.runtime.onMessage` and routes responses back to the originating tab via `chrome.tabs.sendMessage`, or falls back to `chrome.runtime.sendMessage` when the message did not originate from a tab.
+- **Foreground context** (popup, options page, content script): listens on `chrome.runtime.onMessage` for responses arriving from the background and sends requests with `chrome.runtime.sendMessage`.
+
+If `chrome` is not available (e.g. during SSR), all operations silently no-op.
 
 ## When To Use This Package
 
@@ -305,6 +310,29 @@ Main thread side:
 const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module" })
 const channel = new SharedWorkerChannel(worker)
 ```
+
+### `ExtensionChannel`
+
+Concrete `RpcChannel` implementation for Chrome extension Manifest V3 messaging.
+
+Auto-detects its context at construction time — no argument is required.
+
+```ts
+const channel = new ExtensionChannel()
+```
+
+**Background service worker** (`typeof window === 'undefined'`):
+
+- listens on `chrome.runtime.onMessage`
+- responds to tab-originated messages via `chrome.tabs.sendMessage(tabId, …)`
+- responds to non-tab messages via `chrome.runtime.sendMessage(…)`
+
+**Foreground context** (popup, options page, content script):
+
+- listens on `chrome.runtime.onMessage` for responses from the background
+- sends requests with `chrome.runtime.sendMessage`
+
+If `chrome` is unavailable (e.g. during SSR), all operations silently no-op.
 
 ### `WorkerManager`
 

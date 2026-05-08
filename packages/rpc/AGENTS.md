@@ -301,11 +301,15 @@ Transport edits should preserve both modes.
 
 ### Extension runtime transport
 
-`ExtensionChannel` is a Chrome extension transport built on `chrome.runtime.onMessage` and `chrome.runtime.sendMessage`.
+`ExtensionChannel` is a Chrome extension transport that auto-detects context at construction time.
 
-- it assumes `chrome.runtime` exists at module evaluation time
-- it is intended for extension contexts such as background service worker, popup, options page, or content script
+- **context detection**: if `typeof window == 'undefined'`, it is in a background service worker context; otherwise it is in a foreground context (popup, options page, content script)
+- **background mode**: listens on `chrome.runtime.onMessage`; responds via `chrome.tabs.sendMessage(tabId, …)` when the message arrived from a tab, or `chrome.runtime.sendMessage(…)` when it did not
+- **foreground mode**: listens on `chrome.runtime.onMessage` for responses from the background; sends requests with `chrome.runtime.sendMessage`
+- the `send()` method always uses `chrome.runtime.sendMessage` to forward the message to the background
+- it assumes `chrome.runtime` exists at module evaluation time; if `chrome` is unavailable (e.g. during SSR or in a plain browser page), all operations silently no-op
 - transport edits should stay aligned with the `RpcMessage` contract expected by `ServiceLinker` and `WorkerManager`
+- path: `src/ExtensionChannel.ts`
 
 ## Type Expectations
 
