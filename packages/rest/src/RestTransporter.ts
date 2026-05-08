@@ -196,9 +196,17 @@ export class RestTransporter implements LivequeryTransporter {
     }
 
     async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
-        const r = await this.#call<{ item: T, id: string }>({ method: 'POST', ref, body: data, query: {} })
-        if (r.id) return r as any as T
-        return r.item
+        type DT = { id: string, _id: string } & T
+        const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body: data, query: {} })
+        for (const [k, v] of [['', r], ...Object.entries(r)]) {
+            const target = v as any as DT
+            const id = target.id || target._id
+            if (id) return {
+                ...target,
+                id
+            } as any as T
+        }
+        throw { code: 'InvalidResponse', message: 'The server did not return a valid response containing the created document.' }
     }
 
     update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>) {
