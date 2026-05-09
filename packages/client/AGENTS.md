@@ -1,12 +1,12 @@
 # AGENTS.md
 
-This file is for AI coding agents working in `@livequery/core`.
+This file is for AI coding agents working in `@livequery/client`.
 
 ## Purpose
 
-`@livequery/core` provides local-first reactive data primitives for browser clients.
+`@livequery/client` provides local-first reactive data primitives for browser clients.
 
-This repository is a library package. Agents should optimize for reusable API design and backward compatibility, not application scaffolding or product-specific behavior.
+This repository is a client library package. Agents should optimize for reusable API design and backward compatibility, not application scaffolding or product-specific behavior.
 
 - `LivequeryCollection` is the main consumer-facing collection/document wrapper.
 - `LivequeryDocument` wraps one document in a `BehaviorSubject` and forwards mutations.

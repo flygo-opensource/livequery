@@ -4,7 +4,7 @@ This workspace is a library package, not an application.
 
 When generating code, reviewing changes, or answering questions in this repository:
 
-- Treat `@livequery/core` as a reusable public API package. Prefer backward-compatible changes unless the task explicitly asks for a breaking change.
+- Treat `@livequery/client` as a reusable public API package. Prefer backward-compatible changes unless the task explicitly asks for a breaking change.
 - Edit `src/`, never `dist/`. Build output is generated.
 - Keep TypeScript source imports in ESM form with explicit `.js` suffixes.
 - Preserve the public API shape exported from `src/index.ts` unless the task explicitly changes the package surface.

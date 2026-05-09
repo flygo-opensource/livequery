@@ -1,8 +1,8 @@
-# @livequery/core
+# @livequery/client
 
 Reactive local-first data primitives for browser clients.
 
-This repository is the core library package, not an application. Changes here should preserve reusable public API behavior unless a task explicitly targets a breaking change.
+This repository is the client library package, not an application. Changes here should preserve reusable public API behavior unless a task explicitly targets a breaking change.
 
 This package provides the core building blocks behind Livequery collections: reactive document state, pluggable local storage, pluggable transporters, optimistic mutations, and typed inline filters.
 
@@ -18,13 +18,13 @@ Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instruction
 ## Installation
 
 ```bash
-bun add @livequery/core rxjs
+bun add @livequery/client rxjs
 ```
 
 For React projects:
 
 ```bash
-bun add @livequery/core @livequery/react rxjs
+bun add @livequery/client @livequery/react rxjs
 ```
 
 The package is published as ESM and targets browser usage.
@@ -114,7 +114,7 @@ import {
   type Doc,
   type LivequeryQueryResult,
   type LivequeryTransporter,
-} from "@livequery/core"
+} from "@livequery/client"
 import { of } from "rxjs"
 
 type Todo = Doc<{
@@ -441,7 +441,7 @@ await todos.query({
 ### `filterDocs()`
 
 ```ts
-import { filterDocs } from "@livequery/core"
+import { filterDocs } from "@livequery/client"
 
 const visible = filterDocs(docs, {
   "done:boolean": "false",
