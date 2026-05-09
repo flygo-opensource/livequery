@@ -1,0 +1,37 @@
+{
+    "name": "@livequery/core",
+    "author": "Duong Van Ba",
+    "license": "MIT",
+    "repository": {
+        "url": "git@github.com:livequery/core.git"
+    },
+    "version": "1.0.0",
+    "description": "Framework-agnostic core utilities for @livequery ecosystem",
+    "main": "./build/src/index.js",
+    "types": "./build/src/index.d.ts",
+    "files": [
+        "build/**/*"
+    ],
+    "scripts": {
+        "build": "tsc -b .",
+        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    },
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./build/src/index.d.ts",
+                "default": "./build/src/index.js"
+            }
+        }
+    },
+    "type": "module",
+    "devDependencies": {
+        "@livequery/types": "2.0.7",
+        "@types/node": "x",
+        "typescript": "^5.1.6"
+    },
+    "dependencies": {
+        "rxjs": "x",
+        "msgpackr": "^1.11.9"
+    }
+}
