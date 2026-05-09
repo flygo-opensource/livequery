@@ -1,9 +1,19 @@
-import { Subject, Observable, Subscription, BehaviorSubject, of, merge, EMPTY, timer } from 'rxjs'
-import { map, filter, mergeAll, finalize, tap, switchMap, retry, takeWhile } from 'rxjs/operators'
+import { Subject, Observable, Subscription, BehaviorSubject, of, merge, EMPTY, timer, from } from 'rxjs'
+import { map, filter, mergeAll, finalize, tap, switchMap, retry, takeWhile, mergeMap } from 'rxjs/operators'
 import { UpdatedData, LivequeryBaseEntity } from '@livequery/types'
 import { randomUUID } from 'crypto'
 import { hidePrivateFields } from './helpers/hidePrivateFields.js'
 import { NODE_ID, WEBSOCKET_PATH } from './const.js'
+
+const isBun = typeof (globalThis as any).Bun !== 'undefined'
+
+async function createWsClient(url: string): Promise<WebSocket> {
+    if (typeof (globalThis as any).WebSocket !== 'undefined') {
+        return new (globalThis as any).WebSocket(url)
+    }
+    const { default: WS } = await import('ws')
+    return new WS(url) as unknown as WebSocket
+}
 
 export type WebSocketHelloEvent = {
     event: 'hello'
@@ -172,13 +182,37 @@ export class LivequeryWebsocketSync extends Subject<UpdatedData> {
         }
     }
 
+    // Start a standalone WebSocket server — uses Bun.serve() if available, falls back to Node.js http + ws
+    async startServer(port: number, path = WEBSOCKET_PATH): Promise<{ close(): void }> {
+        if (isBun) {
+            const handlers = this.createBunHandlers(path)
+            const server = (globalThis as any).Bun.serve({ port, ...handlers })
+            return { close: () => server.stop() }
+        }
+
+        const { createServer } = await import('http')
+        const { WebSocketServer } = await import('ws')
+
+        const httpServer = createServer()
+        const wss = new WebSocketServer({ server: httpServer, path })
+
+        wss.on('connection', (ws: any) => {
+            const socket = this.handleOpen(ws)
+            ws.on('message', (msg: Buffer | string) => this.handleMessage(socket, msg.toString()))
+            ws.on('close', () => this.handleClose(socket))
+        })
+
+        await new Promise<void>(resolve => httpServer.listen(port, resolve))
+        return { close: () => httpServer.close() }
+    }
+
     // Connect to another node's WebSocket (gateway → service, or client → gateway)
     connect(url: string, auth: string, ondisconnect?: Function): Subscription {
         const gateway$ = new BehaviorSubject({ id: '', stop: false })
 
         return of(0).pipe(
             takeWhile(() => !gateway$.getValue().stop),
-            map(() => new WebSocket(url)),
+            mergeMap(() => from(createWsClient(url))),
             switchMap((ws: WebSocket) => {
                 const open$ = new Observable<void>(sub => {
                     ws.addEventListener('open', () => {

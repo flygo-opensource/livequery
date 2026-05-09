@@ -31,6 +31,12 @@
         "@types/node": "x",
         "typescript": "^5.1.6"
     },
+    "peerDependencies": {
+        "ws": ">=8"
+    },
+    "peerDependenciesMeta": {
+        "ws": { "optional": true }
+    },
     "dependencies": {
         "rxjs": "x",
         "msgpackr": "^1.11.9"
