@@ -1,5 +1,5 @@
 import { Observable, BehaviorSubject, ReplaySubject } from "rxjs";
-import type { DataChangeEvent } from '@livequery/core';
+import type { DataChangeEvent } from '@livequery/client';
 export type LivequerySocketMetadata = {
     client_id: string;
     gateway_id?: string;

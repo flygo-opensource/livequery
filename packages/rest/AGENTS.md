@@ -4,7 +4,7 @@ This file is for AI coding agents working in `@livequery/rest`.
 
 ## Purpose
 
-`@livequery/rest` is a transport-layer library for `@livequery/core`.
+`@livequery/rest` is a transport-layer library for `@livequery/client`.
 
 This repository is a library package, not an application. Agents should preserve reusable transport behavior and public API compatibility by default.
 
@@ -30,17 +30,17 @@ This repository is a library package, not an application. Agents should preserve
 
 When writing real consumer code with this package, prefer these patterns:
 
-- Create one `RestTransporter` per backend boundary and reuse it in a shared `LivequeryCore` instance.
+- Create one `RestTransporter` per backend boundary and reuse it in a shared `LivequeryClient` instance.
 - Pass `api` for REST-only usage and add `ws` only when the backend supports realtime sync.
-- Install the transporter into `LivequeryCore` through the `transporters` map, for example `{ rest: transporter }`.
+- Install the transporter into `LivequeryClient` through the `transporters` map, for example `{ rest: transporter }`.
 - Use `onRequest` to inject auth headers, override requests, or short-circuit with cached responses.
 - Use `onResponse` for logging, metrics, or centralized error inspection.
-- Treat this package as transport-only. Local cache, optimistic state, query modes, and reactive collections belong to `@livequery/core`.
+- Treat this package as transport-only. Local cache, optimistic state, query modes, and reactive collections belong to `@livequery/client`.
 
 Preferred consumer shape:
 
 1. Create `RestTransporter({ api, ws?, onRequest?, onResponse? })`.
-2. Create `LivequeryCore({ storage, transporters: { rest: transporter } })`.
+2. Create `LivequeryClient({ storage, transporters: { rest: transporter } })`.
 3. Create collections from that core in app code.
 
 Avoid these common mistakes in generated code:
@@ -49,7 +49,7 @@ Avoid these common mistakes in generated code:
 - Do not instantiate a new transporter per component render.
 - Do not assume realtime is available when `ws` is omitted.
 - Do not assume the backend returns raw arrays or raw documents; this transporter expects the `LivequeryResult<T>` envelope.
-- Do not model query responses as full snapshot replacement. The returned observable emits `changes` compatible with `@livequery/core`.
+- Do not model query responses as full snapshot replacement. The returned observable emits `changes` compatible with `@livequery/client`.
 
 ## Runtime Model
 
@@ -70,7 +70,7 @@ Avoid these common mistakes in generated code:
 - `onRequest` may return a `response` to skip the network entirely.
 - `onResponse` runs for both fake responses and network responses.
 - Realtime watching is skipped when there is no socket or when paging filters contain `:after`, `:before`, or `:around`.
-- Collection refs and document refs are passed through to `@livequery/core`; this package should not reinterpret their meaning.
+- Collection refs and document refs are passed through to `@livequery/client`; this package should not reinterpret their meaning.
 
 ## Known Sharp Edges
 

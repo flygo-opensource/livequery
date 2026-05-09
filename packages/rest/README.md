@@ -1,6 +1,6 @@
 # @livequery/rest
 
-`@livequery/rest` is a REST + WebSocket transporter for `@livequery/core`.
+`@livequery/rest` is a REST + WebSocket transporter for `@livequery/client`.
 
 This repository is the transport library package, not an application. Changes here should preserve reusable transport behavior unless a task explicitly targets a breaking change.
 
@@ -10,7 +10,7 @@ It adapts the `LivequeryTransporter` interface to:
 - optional WebSocket subscriptions for realtime collection updates
 - request/response hooks for auth, caching, logging, or mocking
 
-This package does not implement local cache or collection state management. That stays in `@livequery/core`. This package is only the transport layer between a livequery client and your backend.
+This package does not implement local cache or collection state management. That stays in `@livequery/client`. This package is only the transport layer between a livequery client and your backend.
 
 ## AI Agent Guidance
 
@@ -19,7 +19,7 @@ Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instruction
 - `AGENTS.md` is the implementation-focused guide for coding agents modifying this package.
 - `copilot-instructions.md` provides repo-level instructions for Copilot when generating or reviewing code in this workspace.
 - Both documents assume this repo is a transport library package, so agent changes should avoid app-specific scaffolding and should preserve public API compatibility by default.
-- Agents generating consumer code should build around a shared `RestTransporter` inside a shared `LivequeryCore` instance.
+- Agents generating consumer code should build around a shared `RestTransporter` inside a shared `LivequeryClient` instance.
 
 ## Installation
 
@@ -33,7 +33,7 @@ bun add @livequery/rest
 
 ## What It Implements
 
-`RestTransporter` implements the `LivequeryTransporter` contract from `@livequery/core`:
+`RestTransporter` implements the `LivequeryTransporter` contract from `@livequery/client`:
 
 - `query()` returns an `Observable<Partial<LivequeryQueryResult>>`
 - `add()` sends `POST`
@@ -66,10 +66,10 @@ const transporter = new RestTransporter({
 })
 ```
 
-### With `@livequery/core`
+### With `@livequery/client`
 
 ```ts
-import { LivequeryCore } from '@livequery/core'
+import { LivequeryClient } from '@livequery/client'
 import { RestTransporter } from '@livequery/rest'
 
 const transporter = new RestTransporter({
@@ -77,7 +77,7 @@ const transporter = new RestTransporter({
   ws: 'wss://api.example.com/ws'
 })
 
-const core = new LivequeryCore({
+const core = new LivequeryClient({
   storage,
   transporters: {
     rest: transporter
@@ -323,7 +323,7 @@ For document reads, `data` should contain `item`:
 
 ## Query Output Shape
 
-`query()` converts server data into the shape expected by `@livequery/core`:
+`query()` converts server data into the shape expected by `@livequery/client`:
 
 ```ts
 type LivequeryQueryResult = {
