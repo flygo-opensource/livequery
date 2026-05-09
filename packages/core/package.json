@@ -28,7 +28,9 @@
     "type": "module",
     "devDependencies": {
         "@livequery/types": "2.0.7",
+        "@types/bun": "latest",
         "@types/node": "x",
+        "@types/ws": "^8",
         "typescript": "^5.1.6"
     },
     "peerDependencies": {
