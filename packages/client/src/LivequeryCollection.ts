@@ -1,12 +1,12 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
-import { LivequeryCore, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryCore.js"
+import { LivequeryClient, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
 
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    core: LivequeryCore
+    core: LivequeryClient
     filters: Partial<LivequeryFilters<T>>
     lazy: boolean
     debounce: number
@@ -31,7 +31,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
-    constructor(private core: LivequeryCore, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
+    constructor(private core: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})

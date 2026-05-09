@@ -13,7 +13,7 @@ Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instruction
 - `AGENTS.md` is the implementation-focused guide for coding agents modifying this package.
 - `copilot-instructions.md` provides repo-level instructions for Copilot when generating or reviewing code in this workspace.
 - Both documents assume this repo is a library package, so agent changes should avoid app-specific scaffolding and should preserve public API compatibility by default.
-- Agents generating consumer code should also follow the usage patterns documented below: create a shared `LivequeryCore`, initialize collections before querying, and subscribe to collection state instead of relying on one-time `.value` reads.
+- Agents generating consumer code should also follow the usage patterns documented below: create a shared `LivequeryClient`, initialize collections before querying, and subscribe to collection state instead of relying on one-time `.value` reads.
 
 ## Installation
 
@@ -35,7 +35,7 @@ The package re-exports:
 
 ```ts
 export * from "./LivequeryCollection"
-export * from "./LivequeryCore"
+export * from "./LivequeryClient"
 export * from "./LivequeryMemoryStorage"
 export * from "./LivequeryStorge"
 export * from "./LivequeryTransporter"
@@ -92,7 +92,7 @@ type DataChangeEvent = {
 LivequeryCollection / LivequeryDocument
             |
             v
-        LivequeryCore
+        LivequeryClient
         /          \
        v            v
 LivequeryStorge  LivequeryTransporter(s)
@@ -100,7 +100,7 @@ LivequeryStorge  LivequeryTransporter(s)
 
 - `LivequeryCollection` owns the reactive state for one collection ref or one document ref.
 - `LivequeryDocument` wraps an item as a `BehaviorSubject` with convenience mutation methods.
-- `LivequeryCore` coordinates storage, transporters, optimistic writes, and fan-out to watchers.
+- `LivequeryClient` coordinates storage, transporters, optimistic writes, and fan-out to watchers.
 - `LivequeryStorge` is the local persistence contract.
 - `LivequeryTransporter` is the remote sync contract.
 
@@ -109,7 +109,7 @@ LivequeryStorge  LivequeryTransporter(s)
 ```ts
 import {
   LivequeryCollection,
-  LivequeryCore,
+  LivequeryClient,
   LivequeryMemoryStorage,
   type Doc,
   type LivequeryQueryResult,
@@ -149,7 +149,7 @@ const transporter: LivequeryTransporter = {
   },
 }
 
-const core = new LivequeryCore({
+const core = new LivequeryClient({
   storage,
   transporters: {
     primary: transporter,
@@ -173,12 +173,12 @@ await todos.update("todo-1", { done: true })
 await todos.delete("todo-1")
 ```
 
-## `LivequeryCore`
+## `LivequeryClient`
 
 Create one core with a storage adapter and one or more transporters:
 
 ```ts
-const core = new LivequeryCore({
+const core = new LivequeryClient({
   storage,
   transporters: {
     primary: transporter,
@@ -213,7 +213,7 @@ Implementation detail: in `local-first` mode, filters are applied by the storage
 
 ```ts
 type LivequeryCollectionOptions<T extends Doc> = {
-  core: LivequeryCore
+  core: LivequeryClient
   filters: Partial<LivequeryFilters<T>>
   lazy: boolean
   debounce: number
@@ -236,7 +236,7 @@ const posts = new LivequeryCollection<Post>(core, {
 posts.initialize("posts")
 ```
 
-`initialize(ref)` subscribes the collection to `LivequeryCore.watch(ref, id, mode)`. In the current implementation, it is browser-only and returns early when `window` is unavailable.
+`initialize(ref)` subscribes the collection to `LivequeryClient.watch(ref, id, mode)`. In the current implementation, it is browser-only and returns early when `window` is unavailable.
 
 ### Collection refs and document refs
 

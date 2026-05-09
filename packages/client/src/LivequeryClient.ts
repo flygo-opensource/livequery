@@ -7,7 +7,7 @@ import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesAllFilters } from "./helpers/filterDocs.js"
 
 
-export type LivequeryCoreOptions = {
+export type LivequeryClientOptions = {
     transporters: Record<string, LivequeryTransporter>
     storage: LivequeryStorge
 }
@@ -35,7 +35,7 @@ export type ConflictResolverFunction = <T extends Doc>(e: {
 }
 
 
-export type LivequeryCoreConfig = {
+export type LivequeryClientConfig = {
     storage: LivequeryStorge
     transporters: Record<string, LivequeryTransporter>
 }
@@ -55,14 +55,14 @@ type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
 
 
 
-export class LivequeryCore {
+export class LivequeryClient {
 
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<Query>()
     #adding = new Map<string, Subject<void>>()
 
-    constructor(private readonly config: LivequeryCoreConfig) {
+    constructor(private readonly config: LivequeryClientConfig) {
         this.#start()
     }
 

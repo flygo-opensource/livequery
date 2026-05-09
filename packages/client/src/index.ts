@@ -1,5 +1,5 @@
 export * from "./LivequeryCollection.js"
-export * from "./LivequeryCore.js"
+export * from "./LivequeryClient.js"
 export * from "./LivequeryMemoryStorage.js"
 export * from "./LivequeryStorge.js"
 export * from "./LivequeryTransporter.js"

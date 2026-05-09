@@ -1,6 +1,6 @@
 {
   "name": "@livequery/client",
-  "version": "2.0.104",
+  "version": "2.0.105",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -16,10 +16,10 @@
       "import": "./dist/LivequeryCollection.js",
       "default": "./dist/LivequeryCollection.js"
     },
-    "./LivequeryCore": {
-      "types": "./dist/LivequeryCore.d.ts",
-      "import": "./dist/LivequeryCore.js",
-      "default": "./dist/LivequeryCore.js"
+    "./LivequeryClient": {
+      "types": "./dist/LivequeryClient.d.ts",
+      "import": "./dist/LivequeryClient.js",
+      "default": "./dist/LivequeryClient.js"
     },
     "./LivequeryDocument": {
       "types": "./dist/LivequeryDocument.d.ts",
@@ -58,8 +58,8 @@
       "LivequeryCollection": [
         "./dist/LivequeryCollection.d.ts"
       ],
-      "LivequeryCore": [
-        "./dist/LivequeryCore.d.ts"
+      "LivequeryClient": [
+        "./dist/LivequeryClient.d.ts"
       ],
       "LivequeryDocument": [
         "./dist/LivequeryDocument.d.ts"

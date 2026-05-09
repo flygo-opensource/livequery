@@ -10,7 +10,7 @@ This repository is a client library package. Agents should optimize for reusable
 
 - `LivequeryCollection` is the main consumer-facing collection/document wrapper.
 - `LivequeryDocument` wraps one document in a `BehaviorSubject` and forwards mutations.
-- `LivequeryCore` coordinates storage, transporters, queries, broadcasts, and optimistic mutation state.
+- `LivequeryClient` coordinates storage, transporters, queries, broadcasts, and optimistic mutation state.
 - `LivequeryStorge` is the storage contract. The `Storge` spelling is intentional in the public API and must not be renamed casually.
 - `LivequeryMemoryStorage` is the in-memory reference implementation of the storage contract.
 - `LivequeryTransporter` defines the remote sync contract.
@@ -25,7 +25,7 @@ This repository is a client library package. Agents should optimize for reusable
 ## Project Map
 
 - `src/LivequeryCollection.ts`: collection lifecycle, watcher subscription, sorting, local item state.
-- `src/LivequeryCore.ts`: query orchestration, cache/deduping, optimistic mutation flow, collection registry, broadcasts.
+- `src/LivequeryClient.ts`: query orchestration, cache/deduping, optimistic mutation flow, collection registry, broadcasts.
 - `src/LivequeryDocument.ts`: per-document wrapper over `BehaviorSubject`.
 - `src/LivequeryMemoryStorage.ts`: default local storage implementation, filtering, sorting.
 - `src/LivequeryStorge.ts`: storage interface.
@@ -38,7 +38,7 @@ This repository is a client library package. Agents should optimize for reusable
 
 - A collection ref has an odd number of path segments, for example `posts`.
 - A document ref has an even number of path segments, for example `posts/post-1`.
-- `LivequeryCollection.initialize(ref)` derives `collection_ref` from that rule and subscribes through `LivequeryCore.watch`.
+- `LivequeryCollection.initialize(ref)` derives `collection_ref` from that rule and subscribes through `LivequeryClient.watch`.
 - `initialize()` returns early when `window` is unavailable, so the current implementation is browser-only.
 - `items`, `summary`, `loading`, `filters`, `paging`, and `error` are reactive `BehaviorSubject`s.
 - Consumers needing live updates must subscribe; reading `.value` gives only a snapshot.
@@ -47,7 +47,7 @@ This repository is a client library package. Agents should optimize for reusable
 
 When writing real consumer code with this package, prefer these patterns:
 
-- Create one `LivequeryCore` per app data boundary with a storage adapter and transporter map.
+- Create one `LivequeryClient` per app data boundary with a storage adapter and transporter map.
 - Create `LivequeryCollection` instances from that shared core instead of creating isolated transport layers per component.
 - Call `initialize(ref)` before `query()`, `add()`, `update()`, `delete()`, or `trigger()`.
 - Use collection refs like `posts` for list access and document refs like `posts/post-1` for single-document access.
@@ -60,7 +60,7 @@ When writing real consumer code with this package, prefer these patterns:
 
 Preferred consumer shape:
 
-1. Create `LivequeryCore` with storage and transporters.
+1. Create `LivequeryClient` with storage and transporters.
 2. Create `LivequeryCollection` with filters and mode.
 3. Call `initialize(ref)`.
 4. Subscribe to reactive subjects.
@@ -82,9 +82,9 @@ Avoid these common mistakes in generated code:
 
 Important local-first detail:
 
-- `LivequeryCore.query()` sends empty filters to transporters in `local-first` mode.
+- `LivequeryClient.query()` sends empty filters to transporters in `local-first` mode.
 - Local filtering is enforced by storage query results and `matchesAllFilters()` during rebroadcast of `added` events.
-- If you change filter behavior, check both `LivequeryMemoryStorage.query()` and `LivequeryCore.#broadcast()`.
+- If you change filter behavior, check both `LivequeryMemoryStorage.query()` and `LivequeryClient.#broadcast()`.
 
 ## Mutation Model
 
@@ -106,9 +106,9 @@ Important local-first detail:
 ## Known Sharp Edges
 
 - `LivequeryCollection` declares `metadata` but does not initialize it in the constructor. Any task touching metadata flow should verify this path carefully.
-- `LivequeryCore.#broadcast()` only re-checks filter matching for `added` events in `local-first` mode. Modified documents that stop matching are not currently converted into removals.
+- `LivequeryClient.#broadcast()` only re-checks filter matching for `added` events in `local-first` mode. Modified documents that stop matching are not currently converted into removals.
 - `watch(check)` in `LivequeryCollection` observes pairwise changes from each `LivequeryDocument`; it depends on document subjects being updated in place.
-- Query deduplication in `LivequeryCore.#query()` is keyed by collection id plus serialized filters.
+- Query deduplication in `LivequeryClient.#query()` is keyed by collection id plus serialized filters.
 
 ## Validation
 
