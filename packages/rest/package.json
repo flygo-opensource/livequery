@@ -3,7 +3,7 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.105",
+    "version": "2.0.106",
     "type": "module",
     "description": "",
     "main": "./dist/index.js",
@@ -33,21 +33,20 @@
     "files": [
         "dist/**/*"
     ],
-    "dependencies": {
+    "devDependencies": {
+        "@livequery/client": "^2.0.106",
+        "typescript": "5.6.3"
+    },
+    "peerDependencies": {
         "rxjs": "^7.8.1",
         "uuid": "^13.0.0"
     },
-    "devDependencies": {
-        "@livequery/client": "^2.0.105",
-        "typescript": "5.6.3"
-    },
-    "peerDependencies": {},
-  "scripts": {
-    "clean": "rm -rf dist",
+    "scripts": {
+        "clean": "rm -rf dist",
         "build": "bun run clean && bunx tsc -p tsconfig.build.json",
         "build:watch": "bunx tsc -p tsconfig.build.json --watch",
-    "prepublishOnly": "bun run build"
-  },
+        "prepublishOnly": "bun run build"
+    },
     "author": "",
     "license": "ISC"
 }

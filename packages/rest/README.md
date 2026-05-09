@@ -77,7 +77,7 @@ const transporter = new RestTransporter({
   ws: 'wss://api.example.com/ws'
 })
 
-const core = new LivequeryClient({
+const client = new LivequeryClient({
   storage,
   transporters: {
     rest: transporter
