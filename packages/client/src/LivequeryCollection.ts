@@ -6,7 +6,7 @@ import { LivequeryDocument } from "./LivequeryDocument.js"
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    core: LivequeryClient
+    client: LivequeryClient
     filters: Partial<LivequeryFilters<T>>
     lazy: boolean
     debounce: number
@@ -31,7 +31,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
-    constructor(private core: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
+    constructor(private client: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         this.#indexes = new Map()
         this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
         this.summary = new BehaviorSubject({})
@@ -73,7 +73,7 @@ export class LivequeryCollection<T extends Doc> {
                 )
             ) : EMPTY,
 
-            this.core.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
+            this.client.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
                 finalize(() => {
                     timer && clearTimeout(timer)
                 }),
@@ -185,7 +185,7 @@ export class LivequeryCollection<T extends Doc> {
             return p
         }, new Map<keyof T, number>())
         this.filters.next(filters)
-        const cache = await this.core.query<T>({
+        const cache = await this.client.query<T>({
             ref: this.ref,
             filters,
             collection_id: this.id
@@ -235,24 +235,24 @@ export class LivequeryCollection<T extends Doc> {
 
     async add(payload: Partial<T>) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return await this.core.add<T>(this.collection_ref, payload)
+        return await this.client.add<T>(this.collection_ref, payload)
     }
 
 
     update(id: string, payload: Partial<T>) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.core.update<T>(this.collection_ref, id, payload)
+        return this.client.update<T>(this.collection_ref, id, payload)
     }
 
 
     delete(id: string) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.core.delete<T>(this.collection_ref, id)
+        return this.client.delete<T>(this.collection_ref, id)
     }
 
     trigger<T>(action: string, payload?: Record<string, any>) {
         if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.core.trigger<T>({
+        return this.client.trigger<T>({
             action,
             payload,
             ref: this.ref

@@ -75,7 +75,7 @@ type DocState<T extends Doc> = T & {
 
 ### `DataChangeEvent`
 
-Transporters stream incremental change events back into the core.
+Transporters stream incremental change events back into the client.
 
 ```ts
 type DataChangeEvent = {
@@ -149,14 +149,14 @@ const transporter: LivequeryTransporter = {
   },
 }
 
-const core = new LivequeryClient({
+const client = new LivequeryClient({
   storage,
   transporters: {
     primary: transporter,
   },
 })
 
-const todos = new LivequeryCollection<Todo>(core, {
+const todos = new LivequeryCollection<Todo>(client, {
   filters: { "createdAt:sort": "desc" },
   mode: "server-first",
 })
@@ -175,10 +175,10 @@ await todos.delete("todo-1")
 
 ## `LivequeryClient`
 
-Create one core with a storage adapter and one or more transporters:
+Create one client with a storage adapter and one or more transporters:
 
 ```ts
-const core = new LivequeryClient({
+const client = new LivequeryClient({
   storage,
   transporters: {
     primary: transporter,
@@ -188,7 +188,7 @@ const core = new LivequeryClient({
 
 ### Mutation flow
 
-For `add`, `update`, and `delete`, the core:
+For `add`, `update`, and `delete`, the client:
 
 1. writes to local storage first
 2. broadcasts the optimistic change to active watchers
@@ -213,7 +213,7 @@ Implementation detail: in `local-first` mode, filters are applied by the storage
 
 ```ts
 type LivequeryCollectionOptions<T extends Doc> = {
-  core: LivequeryClient
+  client: LivequeryClient
   filters: Partial<LivequeryFilters<T>>
   lazy: boolean
   debounce: number
@@ -223,10 +223,10 @@ type LivequeryCollectionOptions<T extends Doc> = {
 
 ### Create and initialize a collection
 
-The current constructor takes `core` as the first argument and options as the second argument.
+The current constructor takes `client` as the first argument and options as the second argument.
 
 ```ts
-const posts = new LivequeryCollection<Post>(core, {
+const posts = new LivequeryCollection<Post>(client, {
   filters: { "publishedAt:sort": "desc" },
   lazy: false,
   debounce: 250,
@@ -460,7 +460,7 @@ The helper module also exports `matchesAllFilters(doc, filters)` for direct pred
 - Optimistic flags such as `_adding`, `_updating`, `_deleting`, and `_prev` are system-managed fields.
 - Transporter query streams are expected to emit incremental `changes`, not full snapshots.
 - `LivequeryCollection` declares a `metadata` subject but does not initialize it in the constructor, so transporter-emitted `metadata` is not safe to rely on yet.
-- `trigger()` is typed at the collection and document layer as `Observable<{ data, error? }>` but currently forwards raw transporter results from `LivequeryCore.trigger()`.
+- `trigger()` is typed at the collection and document layer as `Observable<{ data, error? }>` but currently forwards raw transporter results from `LivequeryClient.trigger()`.
 
 ## Development
 
