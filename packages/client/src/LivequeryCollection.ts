@@ -1,4 +1,4 @@
-import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
+import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, lastValueFrom, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
 import { LivequeryClient, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
@@ -252,11 +252,27 @@ export class LivequeryCollection<T extends Doc> {
 
     trigger<T>(action: string, payload?: Record<string, any>) {
         if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.trigger<T>({
+        const $ = this.client.trigger<{
+            data: T,
+            error: { code: string, message: string }
+        }>({
             action,
             payload,
             ref: this.ref
-        }) as Observable<{ data: T, error?: Error }>
+        })
+        return Object.assign($, {
+            then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
+                try {
+                    const r = await lastValueFrom($)
+                    r.data && onFulfilled(r.data)
+                    r.error && onRejected && onRejected(r.error)
+                } catch (e) {
+                    const code = e instanceof Error ? e.name : (e as any).code || 'UNKNOWN_ERROR'
+                    const message = e instanceof Error ? e.message : (e as any).message || 'An unknown error occurred'
+                    onRejected && onRejected({ code, message })
+                }
+            }
+        })
     }
 
     resetError() {

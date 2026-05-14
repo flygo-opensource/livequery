@@ -468,13 +468,8 @@ export class LivequeryClient {
     }
 
     trigger<Response>(action: LivequeryAction) {
-        const $ = from(Object.values(this.config.transporters)).pipe(
+        return from(Object.values(this.config.transporters)).pipe(
             mergeMap(transporter => transporter.trigger<Response>(action))
         )
-        return Object.assign($, {
-            then: (onFulfilled: (value: Response) => void, onRejected?: (reason: any) => void) => {
-                lastValueFrom($).then(onFulfilled, onRejected)
-            }
-        })
-    } 
+    }
 }
