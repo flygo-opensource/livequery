@@ -263,8 +263,7 @@ export class LivequeryCollection<T extends Doc> {
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
-                    const r = await lastValueFrom($)
-                    console.log({ r })
+                    const r = await lastValueFrom($) 
                     if (r.error) {
                         onRejected?.(r.error);
                     } else {

@@ -300,7 +300,7 @@ loadAround(cursor: string): Promise<void>
 add(payload: Partial<T>): Promise<T>
 update(id: string, payload: Partial<T>): Promise<T | undefined>
 delete(id: string): Promise<void | T | undefined>
-trigger<R>(action: string, payload?: Record<string, any>): Observable<{ data: R; error?: Error }>
+trigger<R>(action: string, payload?: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
 resetError(): void
 watch(check: (prev: T, next: T) => boolean): Observable<[DocState<T>, DocState<T>]>
 ```
@@ -321,7 +321,7 @@ Each entry inside `collection.items` is a `LivequeryDocument`, which extends `Be
 class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T>> {
   update(data: Partial<T>): Promise<T | undefined>
   del(): Promise<void | T | undefined>
-  trigger<R>(action: string, payload: Record<string, any>): Observable<{ data: R; error?: Error }>
+  trigger<R>(action: string, payload: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
 }
 ```
 
@@ -336,7 +336,13 @@ first.subscribe((doc) => {
 
 await first.update({ done: true })
 await first.del()
+
+// Observable style
 first.trigger("archive", { reason: "completed" }).subscribe()
+
+// Promise-like style
+const archived = await first.trigger<{ archived: boolean }>("archive", { reason: "completed" })
+console.log(archived.archived)
 ```
 
 ## `LivequeryStorge`
@@ -460,7 +466,7 @@ The helper module also exports `matchesAllFilters(doc, filters)` for direct pred
 - Optimistic flags such as `_adding`, `_updating`, `_deleting`, and `_prev` are system-managed fields.
 - Transporter query streams are expected to emit incremental `changes`, not full snapshots.
 - `LivequeryCollection` declares a `metadata` subject but does not initialize it in the constructor, so transporter-emitted `metadata` is not safe to rely on yet.
-- `trigger()` is typed at the collection and document layer as `Observable<{ data, error? }>` but currently forwards raw transporter results from `LivequeryClient.trigger()`.
+- `trigger()` supports both styles: subscribe as `Observable<{ data, error? }>` or await as a Promise-like value for ergonomic async usage.
 
 ## Development
 
