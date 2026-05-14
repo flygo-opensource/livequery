@@ -264,8 +264,16 @@ export class LivequeryCollection<T extends Doc> {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
                     const r = await lastValueFrom($)
-                    r.data && onFulfilled(r.data)
-                    r.error && onRejected && onRejected(r.error)
+                    console.log({ r })
+                    if (r.error) {
+                        onRejected?.(r.error);
+                    } else {
+                        if (r.data != undefined) {
+                            onFulfilled?.(r.data);
+                        } else {
+                            onFulfilled?.(r as any as T);
+                        }
+                    }
                 } catch (e) {
                     const code = e instanceof Error ? e.name : (e as any).code || 'UNKNOWN_ERROR'
                     const message = e instanceof Error ? e.message : (e as any).message || 'An unknown error occurred'
