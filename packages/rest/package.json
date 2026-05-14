@@ -3,7 +3,7 @@
     "repository": {
         "url": "https://github.com/livequery/rest"
     },
-    "version": "2.0.107",
+    "version": "2.0.108",
     "type": "module",
     "description": "",
     "main": "./dist/index.js",
@@ -34,7 +34,7 @@
         "dist/**/*"
     ],
     "devDependencies": {
-        "@livequery/client": "^2.0.107",
+        "@livequery/client": "^2.0.108",
         "typescript": "5.6.3"
     },
     "peerDependencies": {
