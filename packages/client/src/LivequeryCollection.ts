@@ -97,13 +97,14 @@ export class LivequeryCollection<T extends Doc> {
                             if (typeof va === 'number' && typeof vb === 'number') {
                                 if (va < vb) return -order
                                 if (va > vb) return order
+                                return 0
                             }
                             if (typeof va === 'string' && typeof vb === 'string') {
-                                if (va < vb) return -order
-                                if (va > vb) return order
+                                return va.localeCompare(vb) * order
                             }
+                            return NaN
                         }
-                        return 0
+                        return a.value.id.localeCompare(b.value.id)
                     }
 
                     const events = event.changes.reduce((p, c) => {
@@ -162,8 +163,7 @@ export class LivequeryCollection<T extends Doc> {
                         ...updated_items,
                         ...new_items.list
                     ])
-
-                    const items = chaos ? unsort_items.sort(sorter) : unsort_items
+                    const items = chaos ? unsort_items.sort(sorter) : unsort_items 
                     chaos && this.#commit(items)
                     event.paging && this.paging.next(event.paging)
                 }),
@@ -173,14 +173,21 @@ export class LivequeryCollection<T extends Doc> {
     }
 
 
-    async #query(filters: Partial<LivequeryFilters<T>>, flush: boolean) {
+    async #query(raw_filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.ref) return
         this.error.next(null)
+        const filters = Object.entries(raw_filters).reduce((p, [k, v]) => {
+            if (v === undefined) return p
+            return {
+                ...p,
+                [k]: v
+            }
+        }, {} as Partial<LivequeryFilters<T>>)
         flush && this.#commit([])
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
-                p.set(field, v === 'asc' ? 1 : -1)
+                p.set(field, (v === 'asc' || v == '1') ? 1 : -1)
             }
             return p
         }, new Map<keyof T, number>())
@@ -250,7 +257,7 @@ export class LivequeryCollection<T extends Doc> {
         return this.client.delete<T>(this.collection_ref, id)
     }
 
-    trigger<T>(action: string, payload?: Record<string, any>, transporter_id?:string) {
+    trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {
         if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const $ = this.client.trigger<T>({
             action,
@@ -261,10 +268,10 @@ export class LivequeryCollection<T extends Doc> {
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
-                    const r = await lastValueFrom($) 
-                    onFulfilled?.(r) 
+                    const r = await lastValueFrom($)
+                    onFulfilled?.(r)
                 } catch (e) {
-                    onRejected && onRejected(e as any )
+                    onRejected && onRejected(e as any)
                 }
             }
         })
