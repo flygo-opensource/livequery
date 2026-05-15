@@ -23,7 +23,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
         return this.collection.delete(id)
     }
 
-    trigger<T>(action: string, payload: Record<string, any>) {
+    trigger<T>(action: string, payload?: Record<string, any>) {
         return this.collection.trigger<T>(action, payload)
     }
 }   

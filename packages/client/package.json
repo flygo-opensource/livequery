@@ -1,6 +1,6 @@
 {
   "name": "@livequery/client",
-  "version": "2.0.111",
+  "version": "2.0.112",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
