@@ -18,7 +18,7 @@ export type DocState<T extends Doc> = T & {
 }
 
 
-export type RealtimeChangeSource = 'realtime' | 'action' | 'query' 
+export type RealtimeChangeSource = 'realtime' | 'action' | 'query'
 
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
     K extends string ? (
@@ -104,6 +104,7 @@ export type LivequeryQueryParams<T extends Doc> = {
 export type LivequeryAction = Omit<LivequeryQueryParams<Doc>, 'query_id' | 'filters'> & {
     action: string
     payload?: Record<string, any>
+    transporter_id?: string
 }
 
 export type LivequeryResult<T> = {

@@ -455,7 +455,7 @@ export class LivequeryClient {
             return
         }
         await this.config.storage.update<T>(collection_ref, id, { _deleting: true })
-        const doc = await this.#broadcast(collection_ref, 'action', [{
+        await this.#broadcast(collection_ref, 'action', [{
             collection_ref,
             id,
             type: 'modified',
@@ -468,8 +468,9 @@ export class LivequeryClient {
     }
 
     trigger<Response>(action: LivequeryAction) {
-        return from(Object.values(this.config.transporters)).pipe(
-            mergeMap(transporter => transporter.trigger<Response>(action))
+        return from(Object.entries(this.config.transporters)).pipe(
+            filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
+            mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
         )
     }
 }

@@ -250,33 +250,21 @@ export class LivequeryCollection<T extends Doc> {
         return this.client.delete<T>(this.collection_ref, id)
     }
 
-    trigger<T>(action: string, payload?: Record<string, any>) {
+    trigger<T>(action: string, payload?: Record<string, any>, transporter_id?:string) {
         if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        const $ = this.client.trigger<{
-            data: T,
-            error: { code: string, message: string }
-        }>({
+        const $ = this.client.trigger<T>({
             action,
             payload,
-            ref: this.ref
+            ref: this.ref,
+            transporter_id
         })
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
                     const r = await lastValueFrom($) 
-                    if (r.error) {
-                        onRejected?.(r.error);
-                    } else {
-                        if (r.data != undefined) {
-                            onFulfilled?.(r.data);
-                        } else {
-                            onFulfilled?.(r as any as T);
-                        }
-                    }
+                    onFulfilled?.(r) 
                 } catch (e) {
-                    const code = e instanceof Error ? e.name : (e as any).code || 'UNKNOWN_ERROR'
-                    const message = e instanceof Error ? e.message : (e as any).message || 'An unknown error occurred'
-                    onRejected && onRejected({ code, message })
+                    onRejected && onRejected(e as any )
                 }
             }
         })
