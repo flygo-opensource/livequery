@@ -199,13 +199,14 @@ Documents created locally receive ids prefixed with `local:` until a transporter
 
 ### Query modes
 
-Collections support three modes through `LivequeryCollectionOptions.mode`:
+Collections support four modes through `LivequeryCollectionOptions.mode`:
 
 - `server-first`: queries are driven by transporters, and collection state is built from streamed change events.
 - `cache-first`: first query can hydrate from local storage, then transporters refresh the result.
 - `local-first`: queries resolve from local storage while remote sync runs in the background and rebroadcasts matching changes.
+- `local-only`: queries resolve exclusively from local storage. No transporters are contacted for reads. Mutations called with `local_only = true` are also kept local and never pushed to any transporter.
 
-Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally.
+Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped entirely for both queries and mutations flagged as local-only.
 
 ## `LivequeryCollection`
 
@@ -217,7 +218,7 @@ type LivequeryCollectionOptions<T extends Doc> = {
   filters: Partial<LivequeryFilters<T>>
   lazy: boolean
   debounce: number
-  mode: "server-first" | "local-first" | "cache-first"
+  mode: "server-first" | "local-first" | "cache-first" | "local-only"
 }
 ```
 
@@ -297,7 +298,7 @@ debounceQuery(filters: Partial<LivequeryFilters<T>>): Promise<void>
 loadMore(): Promise<void>
 loadPrev(): Promise<void>
 loadAround(cursor: string): Promise<void>
-add(payload: Partial<T>): Promise<T>
+add(payload: Partial<T>, local_only?: boolean): Promise<T>
 update(id: string, payload: Partial<T>): Promise<T | undefined>
 delete(id: string): Promise<void | T | undefined>
 trigger<R>(action: string, payload?: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
@@ -312,6 +313,7 @@ Notes about current behavior:
 - `loadMore()` uses `paging.next.cursor` as `:after`.
 - `loadPrev()` uses `paging.prev.cursor` as `:before`.
 - `loadAround()` currently sets both `:after` and `:before` to the provided cursor.
+- `add(payload, true)` stores the document in local storage only and never contacts any transporter. The document receives a `local:` prefixed id and is marked with `__local_only` internally. Use this when working in `local-only` mode or when you intentionally want a document that stays client-side.
 
 ## `LivequeryDocument`
 

@@ -47,7 +47,7 @@ export type CollectionMetadata = {
         from: RealtimeChangeSource
     }>
     collection_ref: string
-    mode: 'server-first' | 'local-first' | 'cache-first'
+    mode: 'server-first' | 'local-first' | 'cache-first' | 'local-only'
     filters: Partial<LivequeryFilters<any>>
 }
 
@@ -307,6 +307,7 @@ export class LivequeryClient {
     }
 
     #push<T extends Doc>(collection_ref: string, id: string, doc: Record<string, any>) {
+        if (doc.__local_only) return doc
         const cleanDoc = Object.entries(doc).reduce((p, [k, v]) => {
             if (k.startsWith('_')) return p
             return { ...p, [k]: v }
@@ -396,10 +397,14 @@ export class LivequeryClient {
         )
     }
 
-    async add<T extends Doc>(collection_ref: string, doc: Record<string, any>) {
+    async add<T extends Doc>(collection_ref: string, doc: Record<string, any>, local_only = false) {
         const local = await this.config.storage.add<T>(
             collection_ref,
-            { ...doc, _adding: true } as DocState<T>
+            {
+                ...doc,
+                _adding: true,
+                ...local_only ? { __local_only: true } : {}
+            } as DocState<T>
         )
         this.#broadcast(collection_ref, 'action', [{
             collection_ref,
@@ -407,6 +412,7 @@ export class LivequeryClient {
             type: 'added',
             data: local
         }])
+        if (local_only) return { local }
         const remotes = await this.#push(collection_ref, local.id, local)
         return {
             local,
@@ -427,7 +433,7 @@ export class LivequeryClient {
                 [key]: (old as any)[key]
             }
         }, old._prev || {})
-        await this.config.storage.update<T>(collection_ref, id, { _prev, _updating: true, ...data, })
+        const merged = await this.config.storage.update<T>(collection_ref, id, { _prev, _updating: true, ...data, })
         await this.#broadcast(collection_ref, 'action', [{
             collection_ref,
             id,
@@ -438,11 +444,12 @@ export class LivequeryClient {
                 ...data,
             }
         }])
+        if ((merged as any).__local_only) return
         const updated = await this.#push(collection_ref, id, { ...data, _prev, _updating: true })
         return updated as { [key: string]: { id: string } & Partial<T> }
     }
 
-    async delete<T extends Doc>(collection_ref: string, id: string) {
+    async delete<T extends Doc>(collection_ref: string, id: string, local_only = false) {
         const soft = Object.keys(this.config.transporters).length > 0
         const is_local_doc = id.startsWith('local:')
         if (!soft || is_local_doc) {
@@ -463,11 +470,13 @@ export class LivequeryClient {
                 _deleting: true
             }
         }])
+        if (local_only) return
         const deleted = await this.#push(collection_ref, id, { _deleting: true })
         return deleted as { [key: string]: { id: string } }
     }
 
-    trigger<Response>(action: LivequeryAction) {
+    trigger<Response>(action: LivequeryAction, local_only = false) {
+        if (local_only) return EMPTY
         return from(Object.entries(this.config.transporters)).pipe(
             filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
             mergeMap(([id, transporter]) => transporter.trigger<Response>(action))

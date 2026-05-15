@@ -6,6 +6,7 @@ export type DocError = { code: string, message: string, transporter_id: string }
 
 export type DocState<T extends Doc> = T & {
     _deleting?: boolean
+    __local_only?: boolean
     _deleting_error?: DocError
     _updating?: boolean
     _updating_error?: DocError

@@ -240,21 +240,21 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add(payload: Partial<T>) {
+    async add(payload: Partial<T>, local_only = this.options.mode === 'local-only') {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return await this.client.add<T>(this.collection_ref, payload)
+        return await this.client.add<T>(this.collection_ref, payload, local_only)
     }
 
 
     update(id: string, payload: Partial<T>) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.update<T>(this.collection_ref, id, payload)
+        return this.client.update<T>(this.collection_ref, id, payload )
     }
 
 
     delete(id: string) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.delete<T>(this.collection_ref, id)
+        return this.client.delete<T>(this.collection_ref, id )
     }
 
     trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {
@@ -264,7 +264,7 @@ export class LivequeryCollection<T extends Doc> {
             payload,
             ref: this.ref,
             transporter_id
-        })
+        } )
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
