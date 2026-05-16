@@ -19,7 +19,7 @@ export type DocState<T extends Doc> = T & {
 }
 
 
-export type RealtimeChangeSource = 'realtime' | 'action' | 'query'
+export type RealtimeChangeSource = 'realtime' | 'action' | 'query'  
 
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
     K extends string ? (

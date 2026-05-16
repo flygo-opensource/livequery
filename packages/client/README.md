@@ -208,6 +208,10 @@ Collections support four modes through `LivequeryCollectionOptions.mode`:
 
 Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped entirely for both queries and mutations flagged as local-only.
 
+### Local-only guide
+
+For a focused walkthrough of local-only behavior, use cases, and caveats, see [docs/local-only.md](docs/local-only.md).
+
 ## `LivequeryCollection`
 
 `LivequeryCollection<T>` manages one collection or one document ref.

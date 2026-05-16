@@ -14,4 +14,5 @@ export type LivequeryStorge = {
     add<T extends Doc>(collection: string, document: T): Promise<T>
     update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<T | null>
     delete<T extends Doc>(collection: string, id: string): Promise<T | null>
+    flush(): Promise<void>
 }

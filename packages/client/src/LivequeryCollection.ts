@@ -83,6 +83,20 @@ export class LivequeryCollection<T extends Doc> {
                     event.metadata && this.metadata.next(event.metadata)
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
+ 
+                    const first = event.changes?.[0]
+                    if(first &&  first.type == 'removed' && first.id == '*'){
+                        this.#commit([])
+                        this.loading.next(null)
+                        this.summary.next({})
+                        this.metadata.next({})
+                        this.paging.next({
+                            total: 0,
+                            current: 0
+                        })
+                        this.error.next(null)
+                        return 
+                    }
 
                     if (!event.changes || event.changes.length == 0) return
                     const chaos = event.changes && event.changes.some(change => {
@@ -163,7 +177,7 @@ export class LivequeryCollection<T extends Doc> {
                         ...updated_items,
                         ...new_items.list
                     ])
-                    const items = chaos ? unsort_items.sort(sorter) : unsort_items 
+                    const items = chaos ? unsort_items.sort(sorter) : unsort_items
                     chaos && this.#commit(items)
                     event.paging && this.paging.next(event.paging)
                 }),
@@ -248,13 +262,13 @@ export class LivequeryCollection<T extends Doc> {
 
     update(id: string, payload: Partial<T>) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.update<T>(this.collection_ref, id, payload )
+        return this.client.update<T>(this.collection_ref, id, payload)
     }
 
 
     delete(id: string) {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.delete<T>(this.collection_ref, id )
+        return this.client.delete<T>(this.collection_ref, id)
     }
 
     trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {
@@ -264,7 +278,7 @@ export class LivequeryCollection<T extends Doc> {
             payload,
             ref: this.ref,
             transporter_id
-        } )
+        })
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {
                 try {
@@ -292,5 +306,10 @@ export class LivequeryCollection<T extends Doc> {
                 ))
             ))
         )
+    }
+
+    flush() {
+        if (!this.collection_ref) return
+        this.client.flush(this.collection_ref) 
     }
 } 

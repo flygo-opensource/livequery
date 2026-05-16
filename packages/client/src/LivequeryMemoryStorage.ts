@@ -96,4 +96,9 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
             return (acc as Record<string, any>)[key]
         }, obj)
     }
+
+    flush(): Promise<void> {
+        this.#collections.clear()
+        return Promise.resolve()
+    }
 }

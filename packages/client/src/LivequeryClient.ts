@@ -277,13 +277,6 @@ export class LivequeryClient {
             if (collection.mode == 'local-first') {
                 const changes = events.filter(e => {
                     if (e.type == 'added') return e.data && matchesAllFilters(e.data, collection.filters)
-                    // if (e.type == 'modified') {
-                    //     if (!e.data) return false
-                    //     // TODO: Delete on data not matched
-                    //     if (!matchesAllFilters(e.data, collection.filters)) {
-                    //         e.type = 'removed'
-                    //     }
-                    // }
                     return true
                 })
                 // Is collection
@@ -396,6 +389,7 @@ export class LivequeryClient {
             { defaultValue: {} as Record<string, T> }
         )
     }
+ 
 
     async add<T extends Doc>(collection_ref: string, doc: Record<string, any>, local_only = false) {
         const local = await this.config.storage.add<T>(
@@ -481,5 +475,10 @@ export class LivequeryClient {
             filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
             mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
         )
+    }
+
+    flush(collection_ref: string) {
+        this.#broadcast(collection_ref, 'realtime', [{ collection_ref, id: '*', type: 'removed' }])
+        return this.config.storage.flush()
     }
 }
