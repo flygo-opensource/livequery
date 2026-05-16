@@ -27,7 +27,7 @@ export class LivequeryCollection<T extends Doc> {
     public collection_ref: string | undefined
 
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
-    public readonly summary: BehaviorSubject<Record<string, any>> 
+    public readonly summary: BehaviorSubject<Record<string, any>>
     public readonly loading: BehaviorSubject<LivequeryLoadingState | null>
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
@@ -42,7 +42,7 @@ export class LivequeryCollection<T extends Doc> {
         this.paging = new BehaviorSubject<LivequeryPaging>({
             total: 0,
             current: 0
-        }) 
+        })
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
         if (options) {
             this.options = options
@@ -81,7 +81,7 @@ export class LivequeryCollection<T extends Doc> {
                 }),
                 tap(event => {
                     event.loading !== undefined && event.loading !== this.loading.value && this.loading.next(event.loading)
-                    event.summary && this.summary.next(event.summary) 
+                    event.summary && this.summary.next(event.summary)
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
 
@@ -89,7 +89,7 @@ export class LivequeryCollection<T extends Doc> {
                     if (first && first.type == 'removed' && first.id == '*') {
                         this.#commit([])
                         this.loading.next(null)
-                        this.summary.next({}) 
+                        this.summary.next({})
                         this.paging.next({
                             total: 0,
                             current: 0
@@ -255,8 +255,10 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+        if (!this.collection_ref) {
+            return null as any
+        }
         mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
-        if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
         const responses = await this.client.add<T>(this.collection_ref, list, mode)
         const r = Array.isArray(payload) ? responses : responses[0]
@@ -265,7 +267,9 @@ export class LivequeryCollection<T extends Doc> {
 
 
     async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
-        if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
+        if (!this.collection_ref) {
+            return null as any
+        }
         mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
         const responses = await this.client.update<T>(this.collection_ref, list, mode)
@@ -275,7 +279,9 @@ export class LivequeryCollection<T extends Doc> {
 
 
     async delete<Input extends (string | string[])>(id: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
-        if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
+        if (!this.collection_ref) {
+            return null as any
+        }
         mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
         const ids: string[] = Array.isArray(id) ? id : [id]
         const responses = await this.client.delete<T>(this.collection_ref, ids, mode)
@@ -284,7 +290,9 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {
-        if (!this.ref) throw new Error('LivequeryCollection is not initialized with a ref')
+        if (!this.ref) {
+            return null as any as T
+        }
         const $ = this.client.trigger<T>({
             action,
             payload,
