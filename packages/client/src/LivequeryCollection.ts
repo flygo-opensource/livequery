@@ -50,6 +50,7 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     #commit(items: LivequeryDocument<T>[]) {
+        if (items.length == 0) return
         this.items.next(items)
         this.#indexes = items.reduce((p, c, index) => {
             p.set(c.value.id, index)
@@ -216,8 +217,36 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
-    async query(filters: Partial<LivequeryFilters<T>>, flush = true) {
-        await this.#query(filters, flush)
+    async query(filters: Partial<LivequeryFilters<T>>) {
+        await this.#query(filters, true)
+    }
+
+    async sort(field: keyof T, order: 1 | -1 | 'asc' | 'desc') {
+        const i = (order === 'asc' || order === 1) ? 1 : -1
+        const filters = {
+            ...Object.entries(this.filters.value || {}).reduce((p, [k, v]) => {
+                if (k.endsWith(':sort')) return p
+                return { ...p, [k]: v }
+            }, {} as Partial<LivequeryFilters<T>>),
+            [`${field as string}:sort`]: order
+        }
+        if (this.options.mode != 'local-only') return await this.query(filters as any)
+        const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
+            const va = a.value[field]
+            const vb = b.value[field]
+            if (typeof va === 'number' && typeof vb === 'number') {
+                if (va < vb) return -i
+                if (va > vb) return i
+                return 0
+            }
+            if (typeof va === 'string' && typeof vb === 'string') {
+                return va.localeCompare(vb) * i
+            }
+            return NaN
+        }
+        const items = [...this.items.value].sort(sorter)
+        this.#commit(items)
+        this.filters.next(filters as any)
     }
 
 
@@ -334,4 +363,3 @@ export class LivequeryCollection<T extends Doc> {
         return await this.client.flush(this.collection_ref)
     }
 }
- 
