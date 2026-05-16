@@ -263,7 +263,7 @@ export class LivequeryClient {
                     type: 'added',
                     data: doc
                 }
-            })) 
+            }))
         }
     }
 
@@ -439,6 +439,7 @@ export class LivequeryClient {
                     doc.id
                 ) as undefined | DocState<T>
                 if (!old) return
+                if (mode === 'local-only') return doc
                 const _prev = Object.keys(doc).reduce((acc, key) => {
                     if (key in (old._prev || {})) return acc
                     return {
@@ -492,6 +493,7 @@ export class LivequeryClient {
                 type: 'removed',
             }))
         )
+        if(mode == 'local-only') return merged
         return await this.#push<T>(collection_ref, merged, false)
     }
 

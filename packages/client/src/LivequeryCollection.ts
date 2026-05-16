@@ -104,7 +104,7 @@ export class LivequeryCollection<T extends Doc> {
                     if (!event.changes || event.changes.length == 0) return
                     const chaos = event.changes && event.changes.some(change => {
                         if (change.type == 'added' || change.type == 'removed') return true
-                        if (change.data && change.data.id != change.id) return true
+                        if (change.data && change.data.id && change.data.id != change.id) return true
                         return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
                     })
                     const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
@@ -181,6 +181,8 @@ export class LivequeryCollection<T extends Doc> {
                         ...new_items.list
                     ])
                     const items = chaos ? unsort_items.sort(sorter) : unsort_items
+
+
                     chaos && this.#commit(items)
                     event.paging && this.paging.next(event.paging)
                 }),
@@ -284,7 +286,7 @@ export class LivequeryCollection<T extends Doc> {
         const item = this.items.value[index]
         if (!item) return
         const current = item.value._selected || false
-        const _selected = mode == 'toggle' ? !current :mode
+        const _selected = mode == 'toggle' ? !current : mode
         const set = this.selected.value
         _selected ? set.add(id) : set.delete(id)
         this.selected.next(new Set(set))
