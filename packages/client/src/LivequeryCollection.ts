@@ -27,8 +27,7 @@ export class LivequeryCollection<T extends Doc> {
     public collection_ref: string | undefined
 
     public readonly items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
-    public readonly summary: BehaviorSubject<Record<string, any>>
-    public readonly metadata: BehaviorSubject<Record<string, any>>
+    public readonly summary: BehaviorSubject<Record<string, any>> 
     public readonly loading: BehaviorSubject<LivequeryLoadingState | null>
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
@@ -43,7 +42,7 @@ export class LivequeryCollection<T extends Doc> {
         this.paging = new BehaviorSubject<LivequeryPaging>({
             total: 0,
             current: 0
-        })
+        }) 
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
         if (options) {
             this.options = options
@@ -82,8 +81,7 @@ export class LivequeryCollection<T extends Doc> {
                 }),
                 tap(event => {
                     event.loading !== undefined && event.loading !== this.loading.value && this.loading.next(event.loading)
-                    event.summary && this.summary.next(event.summary)
-                    event.metadata && this.metadata.next(event.metadata)
+                    event.summary && this.summary.next(event.summary) 
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
 
@@ -91,8 +89,7 @@ export class LivequeryCollection<T extends Doc> {
                     if (first && first.type == 'removed' && first.id == '*') {
                         this.#commit([])
                         this.loading.next(null)
-                        this.summary.next({})
-                        this.metadata.next({})
+                        this.summary.next({}) 
                         this.paging.next({
                             total: 0,
                             current: 0

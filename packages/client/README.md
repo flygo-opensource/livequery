@@ -214,7 +214,7 @@ Implementation detail: in `local-first` mode, filters are applied by the storage
 
 For a focused walkthrough of local-only behavior, use cases, and caveats, see [docs/local-only.md](docs/local-only.md).
 
-This behavior description is aligned with the current `2.0.120` release line.
+This behavior description is aligned with the current `2.0.121` release line.
 
 ## `LivequeryCollection`
 
