@@ -1,4 +1,4 @@
-import type { Doc, LivequeryPaging } from "./types.js"
+import type { Doc, DocState, LivequeryPaging } from "./types.js"
 
 
 
@@ -11,7 +11,7 @@ export type LivequeryStorge = {
         paging: LivequeryPaging
     }>
     get<T extends Doc>(ref: string, id: string): Promise<T | null>
-    add<T extends Doc>(collection: string, document: T): Promise<T>
+    add<T extends Doc>(collection: string, document: Partial<DocState<T>>): Promise<T>
     update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<T | null>
     delete<T extends Doc>(collection: string, id: string): Promise<T | null>
     flush(): Promise<void>

@@ -1,5 +1,5 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, lastValueFrom, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
-import { LivequeryClient, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
+import { LivequeryClient, type ActionMode, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
 
@@ -13,12 +13,20 @@ export type LivequeryCollectionOptions<T extends Doc> = {
     mode: CollectionMetadata['mode']
 }
 
+
+export type OneOrMany<T> = T | T[]
+
 export class LivequeryCollection<T extends Doc> {
 
     public readonly id = (Math.random() * 1e18).toString(36)
     #keys = new Map<keyof T, number>()
     #indexes: Map<string, number>
     #filters = new Subject<Partial<LivequeryFilters<T>>>()
+
+    #resolveActionMode(mode?: ActionMode): ActionMode {
+        if (mode) return mode
+        return this.options.mode === 'local-only' ? 'local-only' : 'local-first'
+    }
 
     public ref: string | undefined
     public collection_ref: string | undefined
@@ -83,9 +91,9 @@ export class LivequeryCollection<T extends Doc> {
                     event.metadata && this.metadata.next(event.metadata)
                     event.paging && this.paging.next(event.paging)
                     event.error && this.error.next(event.error)
- 
+
                     const first = event.changes?.[0]
-                    if(first &&  first.type == 'removed' && first.id == '*'){
+                    if (first && first.type == 'removed' && first.id == '*') {
                         this.#commit([])
                         this.loading.next(null)
                         this.summary.next({})
@@ -95,7 +103,7 @@ export class LivequeryCollection<T extends Doc> {
                             current: 0
                         })
                         this.error.next(null)
-                        return 
+                        return
                     }
 
                     if (!event.changes || event.changes.length == 0) return
@@ -254,21 +262,31 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add(payload: Partial<T>, local_only = this.options.mode === 'local-only') {
+    async add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return await this.client.add<T>(this.collection_ref, payload, local_only)
+        const list = Array.isArray(payload) ? payload : [payload]
+        const responses = await this.client.add<T>(this.collection_ref, list, this.#resolveActionMode(mode))
+        const r = Array.isArray(payload) ? responses : responses[0]
+        return r as any
     }
 
 
-    update(id: string, payload: Partial<T>) {
+    async update<Input extends Partial<T> | Partial<T>[]>(id: string, payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.update<T>(this.collection_ref, id, payload)
+        const list = Array.isArray(payload) ? payload : [payload]
+        const arr = list.map(p => ({ ...p, id }))
+        const responses = await this.client.update<T>(this.collection_ref, arr, this.#resolveActionMode(mode))
+        const r = Array.isArray(payload) ? responses : responses[0]
+        return r as any
     }
 
 
-    delete(id: string) {
+    async delete<Input extends (string | string[])>(id: Input, mode?: ActionMode): Promise<Input extends string[] ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        return this.client.delete<T>(this.collection_ref, id)
+        const ids: string[] = Array.isArray(id) ? id : [id]
+        const responses = await this.client.delete<T>(this.collection_ref, ids, this.#resolveActionMode(mode))
+        const r = Array.isArray(id) ? responses : responses[0]
+        return r as any
     }
 
     trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {
@@ -308,8 +326,8 @@ export class LivequeryCollection<T extends Doc> {
         )
     }
 
-    flush() {
+    async flush() {
         if (!this.collection_ref) return
-        this.client.flush(this.collection_ref) 
+        return await this.client.flush(this.collection_ref)
     }
 } 

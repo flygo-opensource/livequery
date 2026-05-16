@@ -171,6 +171,9 @@ await todos.query({ ":limit": 20, "createdAt:sort": "desc" })
 await todos.add({ title: "Buy milk", done: false, createdAt: Date.now() })
 await todos.update("todo-1", { done: true })
 await todos.delete("todo-1")
+
+// Override mutation behavior when needed
+await todos.add({ title: "Draft", done: false, createdAt: Date.now() }, "local-only")
 ```
 
 ## `LivequeryClient`
@@ -204,9 +207,9 @@ Collections support four modes through `LivequeryCollectionOptions.mode`:
 - `server-first`: queries are driven by transporters, and collection state is built from streamed change events.
 - `cache-first`: first query can hydrate from local storage, then transporters refresh the result.
 - `local-first`: queries resolve from local storage while remote sync runs in the background and rebroadcasts matching changes.
-- `local-only`: queries resolve exclusively from local storage. No transporters are contacted for reads. Mutations called with `local_only = true` are also kept local and never pushed to any transporter.
+- `local-only`: queries resolve exclusively from local storage. No transporters are contacted for reads. Mutations run in `local-only` mode are also kept local and never pushed to any transporter.
 
-Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped entirely for both queries and mutations flagged as local-only.
+Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped entirely for both queries and mutations executed with `mode: "local-only"`.
 
 ### Local-only guide
 
@@ -297,14 +300,16 @@ function TodoList({ collection }: { collection: LivequeryCollection<Todo> }) {
 ### Main methods
 
 ```ts
+type ActionMode = "server-first" | "local-first" | "local-only"
+
 query(filters: Partial<LivequeryFilters<T>>): Promise<void>
 debounceQuery(filters: Partial<LivequeryFilters<T>>): Promise<void>
 loadMore(): Promise<void>
 loadPrev(): Promise<void>
 loadAround(cursor: string): Promise<void>
-add(payload: Partial<T>, local_only?: boolean): Promise<T>
-update(id: string, payload: Partial<T>): Promise<T | undefined>
-delete(id: string): Promise<void | T | undefined>
+add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode?: ActionMode): Promise<Input extends Partial<T>[] ? T[] : T>
+update<Input extends Partial<T> | Partial<T>[]>(id: string, payload: Input, mode?: ActionMode): Promise<Input extends Partial<T>[] ? T[] : T>
+delete<Input extends string | string[]>(id: Input, mode?: ActionMode): Promise<Input extends string[] ? DocState<T>[] : DocState<T>>
 trigger<R>(action: string, payload?: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
 resetError(): void
 watch(check: (prev: T, next: T) => boolean): Observable<[DocState<T>, DocState<T>]>
@@ -317,7 +322,9 @@ Notes about current behavior:
 - `loadMore()` uses `paging.next.cursor` as `:after`.
 - `loadPrev()` uses `paging.prev.cursor` as `:before`.
 - `loadAround()` currently sets both `:after` and `:before` to the provided cursor.
-- `add(payload, true)` stores the document in local storage only and never contacts any transporter. The document receives a `local:` prefixed id and is marked with `__local_only` internally. Use this when working in `local-only` mode or when you intentionally want a document that stays client-side.
+- `add`, `update`, and `delete` accept a mode override. When omitted, collections default to `"local-only"` for local-only collections and `"local-first"` otherwise.
+- `add(payload, "local-only")` stores the document in local storage only and never contacts any transporter. The document receives a `local:` prefixed id and is marked with `_local_only` internally.
+- Collection mutations preserve the input shape in TypeScript: pass one item and you get one result; pass an array and you get an array.
 
 ## `LivequeryDocument`
 
@@ -326,7 +333,7 @@ Each entry inside `collection.items` is a `LivequeryDocument`, which extends `Be
 ```ts
 class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T>> {
   update(data: Partial<T>): Promise<T | undefined>
-  del(): Promise<void | T | undefined>
+  del(): Promise<DocState<T> | undefined>
   trigger<R>(action: string, payload: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
 }
 ```

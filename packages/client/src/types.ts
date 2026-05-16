@@ -5,21 +5,20 @@ export type Doc<T = {}> = T & {
 export type DocError = { code: string, message: string, transporter_id: string }
 
 export type DocState<T extends Doc> = T & {
-    _deleting?: boolean
-    __local_only?: boolean
-    _deleting_error?: DocError
-    _updating?: boolean
-    _updating_error?: DocError
-    _adding?: boolean
-    _adding_error?: DocError
-    _remotes?: Record<string, string | number>
-    _prev?: Partial<T>
-
-
+    _deleting?: boolean | undefined
+    _local_only?: boolean | undefined
+    _deleting_error?: DocError | undefined
+    _updating?: boolean | undefined
+    _updating_error?: DocError | undefined
+    _adding?: boolean | undefined
+    _adding_error?: DocError | undefined
+    _remotes?: Record<string, string | number> | undefined
+    _prev?: Partial<T> | undefined
+    _selected?: boolean | undefined
 }
 
 
-export type RealtimeChangeSource = 'realtime' | 'action' | 'query'  
+export type RealtimeChangeSource = 'realtime' | 'action' | 'query'
 
 type FlatObjectKeys<T, MatchType, K extends keyof T = keyof T> = (
     K extends string ? (
