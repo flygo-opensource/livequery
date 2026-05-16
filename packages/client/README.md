@@ -207,9 +207,9 @@ Collections support four modes through `LivequeryCollectionOptions.mode`:
 - `server-first`: queries are driven by transporters, and collection state is built from streamed change events.
 - `cache-first`: first query can hydrate from local storage, then transporters refresh the result.
 - `local-first`: queries resolve from local storage while remote sync runs in the background and rebroadcasts matching changes.
-- `local-only`: queries resolve exclusively from local storage. No transporters are contacted for reads. Mutations run in `local-only` mode are also kept local and never pushed to any transporter.
+- `local-only`: queries resolve exclusively from local storage. No transporters are contacted for reads. Mutations run in `local-only` mode are kept local and never pushed to any transporter.
 
-Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped entirely for both queries and mutations executed with `mode: "local-only"`.
+Implementation detail: in `local-first` mode, filters are applied by the storage adapter, while the remote query path is triggered with empty filters and matching is re-checked when added events are broadcast locally. In `local-only` mode the transporter path is skipped for queries, and mutations stay local only when you explicitly execute them with `mode: "local-only"`.
 
 ### Local-only guide
 
@@ -322,9 +322,10 @@ Notes about current behavior:
 - `loadMore()` uses `paging.next.cursor` as `:after`.
 - `loadPrev()` uses `paging.prev.cursor` as `:before`.
 - `loadAround()` currently sets both `:after` and `:before` to the provided cursor.
-- `add`, `update`, and `delete` accept a mode override. When omitted, collections default to `"local-only"` for local-only collections and `"local-first"` otherwise.
+- `add`, `update`, and `delete` accept a mode override. In the current implementation, omitted mode defaults to `"server-first"`.
 - `add(payload, "local-only")` stores the document in local storage only and never contacts any transporter. The document receives a `local:` prefixed id and is marked with `_local_only` internally.
 - Collection mutations preserve the input shape in TypeScript: pass one item and you get one result; pass an array and you get an array.
+- `mode: "local-only"` on the collection controls query behavior. To keep a mutation local-only, pass `"local-only"` explicitly to `add`, `update`, `delete`, `LivequeryDocument.update`, or `LivequeryDocument.del`.
 
 ## `LivequeryDocument`
 
@@ -332,8 +333,8 @@ Each entry inside `collection.items` is a `LivequeryDocument`, which extends `Be
 
 ```ts
 class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T>> {
-  update(data: Partial<T>): Promise<T | undefined>
-  del(): Promise<DocState<T> | undefined>
+  update(data: Partial<T>, mode?: ActionMode): Promise<T | undefined>
+  del(mode?: ActionMode): Promise<DocState<T> | undefined>
   trigger<R>(action: string, payload: Record<string, any>): Observable<{ data: R; error?: Error }> & PromiseLike<R>
 }
 ```
@@ -349,6 +350,9 @@ first.subscribe((doc) => {
 
 await first.update({ done: true })
 await first.del()
+
+// Explicit local-only mutation
+await first.update({ done: false }, "local-only")
 
 // Observable style
 first.trigger("archive", { reason: "completed" }).subscribe()
@@ -372,9 +376,10 @@ type LivequeryStorge = {
     paging: LivequeryPaging
   }>
   get<T extends Doc>(ref: string, id: string): Promise<T | null>
-  add<T extends Doc>(collection: string, document: T): Promise<T>
+  add<T extends Doc>(collection: string, document: Partial<DocState<T>>): Promise<T>
   update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<T | null>
   delete<T extends Doc>(collection: string, id: string): Promise<T | null>
+  flush(): Promise<void>
 }
 ```
 

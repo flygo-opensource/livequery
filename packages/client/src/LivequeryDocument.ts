@@ -14,12 +14,12 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
         super(document)
     }
 
-    update(data: Partial<T>, mode: ActionMode) {
+    update(data: Partial<T>, mode: ActionMode = 'server-first') {
         const id = this.value.id 
         return this.collection.update(id, data, mode)
     }
 
-    del(mode: ActionMode) {
+    del(mode: ActionMode = 'server-first') {
         const id = this.value.id
         return this.collection.delete(id, mode)
     }

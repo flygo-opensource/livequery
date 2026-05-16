@@ -10,7 +10,7 @@ When a collection is initialized with `mode: "local-only"`:
 
 - `query()` resolves from local storage.
 - Remote transporters are not used for read paths.
-- `add()`, `update()`, and `delete()` default to local-only behavior when you do not override the action mode.
+- `add()`, `update()`, and `delete()` can be kept local by passing `"local-only"` as the action mode.
 - Local documents are created with ids like `local:<uuid>`.
 - `update()` on a local-only document stays local.
 - `delete()` on a local-only document deletes locally.
@@ -44,8 +44,8 @@ notes.initialize("notes")
 // query from local storage only
 await notes.query({ ":limit": 20 })
 
-// local add (default mode resolves to "local-only" for this collection)
-await notes.add({ title: "Draft note", done: false })
+// explicit local-only add
+await notes.add({ title: "Draft note", done: false }, "local-only")
 
 // You can also be explicit
 await notes.add({ title: "Pinned draft", done: false }, "local-only")
@@ -59,9 +59,9 @@ const drafts = await notes.add([
 const first = notes.items.value[0]
 if (first) {
   // local update
-  await first.update({ done: true })
+  await first.update({ done: true }, "local-only")
   // local delete
-  await first.del()
+  await first.del("local-only")
 }
 ```
 
@@ -69,6 +69,7 @@ if (first) {
 
 - `local-only` is collection-scoped via `LivequeryCollectionOptions.mode`.
 - Collection mutation methods also accept an optional explicit `mode` override: `"server-first" | "local-first" | "local-only"`.
+- In the current implementation, mutation methods default to `"server-first"` when no explicit mode is passed.
 - You can still use transporter-backed collections elsewhere in the same `LivequeryClient`.
 - Reactive streams (`items`, `loading`, `error`, `summary`, `paging`) still work the same way.
 - `query()` still requires `initialize(ref)` first.
