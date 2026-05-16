@@ -216,9 +216,10 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
-    async query(filters: Partial<LivequeryFilters<T>>) {
-        await this.#query(filters, true)
+    async query(filters: Partial<LivequeryFilters<T>>, flush = true) {
+        await this.#query(filters, flush)
     }
+
 
     async debounceQuery(filters: Partial<LivequeryFilters<T>>) {
         this.#filters.next(filters)
@@ -333,16 +334,4 @@ export class LivequeryCollection<T extends Doc> {
         return await this.client.flush(this.collection_ref)
     }
 }
-
-
-
-
-const a = new LivequeryCollection<{ id: string, a: number, b: string }>({} as any)
-
-
-
-
-a.update({
-    id: '123',
-    _adding: true
-}, 'server-first')
+ 

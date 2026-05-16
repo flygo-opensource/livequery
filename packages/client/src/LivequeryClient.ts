@@ -232,8 +232,6 @@ export class LivequeryClient {
             }
         }
 
-
-
         setTimeout(() => this.#queries$.next({
             ...req,
             filters: collection.mode == 'local-first' ? {} : req.filters,
@@ -254,6 +252,18 @@ export class LivequeryClient {
             if (is_first_query) {
                 return await this.config.storage.query<T>(req.ref, req.filters)
             }
+        }
+
+        if (collection.mode == 'local-only') {
+            const data = await this.config.storage.query<T>(req.ref, req.filters)
+            this.#broadcast(collection.collection_ref, 'query', data.documents.map(doc => {
+                return {
+                    collection_ref: collection.collection_ref,
+                    id: doc.id,
+                    type: 'added',
+                    data: doc
+                }
+            })) 
         }
     }
 
