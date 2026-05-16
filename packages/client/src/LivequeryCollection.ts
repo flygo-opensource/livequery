@@ -251,13 +251,40 @@ export class LivequeryCollection<T extends Doc> {
         this.filters.next(filters as any)
     }
 
-    select(id: string, selected: boolean | 'toggle') {
+    select(mode: 'all' | 'none' | 'toggle' | true | false, id?: string) {
+
+        if (mode == 'all') {
+            const set = new Set(this.items.value.map(i => i.value.id))
+            this.selected.next(set)
+            this.items.value.forEach(i => this.update({ id: i.value.id, _selected: true } as any, 'local-only'))
+            return
+        }
+
+        if (mode == 'none') {
+            this.selected.next(new Set())
+            this.items.value.forEach(i => this.update({ id: i.value.id, _selected: false } as any, 'local-only'))
+            return
+        }
+
+        if (mode == 'toggle' && !id) {
+            const revert_selected = new Set<string>()
+            this.items.value.forEach(i => {
+                const _selected = !this.selected.value.has(i.value.id)
+                _selected && revert_selected.add(i.value.id)
+                this.update({ id: i.value.id, _selected } as any, 'local-only')
+            })
+            this.selected.next(new Set([...revert_selected]))
+            return
+        }
+
+        if (!id) return
+
         const index = this.#indexes.get(id)
         if (index == undefined) return
         const item = this.items.value[index]
         if (!item) return
         const current = item.value._selected || false
-        const _selected= selected == 'toggle' ? !current : selected
+        const _selected = mode == 'toggle' ? !current :mode
         const set = this.selected.value
         _selected ? set.add(id) : set.delete(id)
         this.selected.next(new Set(set))

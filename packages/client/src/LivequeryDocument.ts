@@ -28,7 +28,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
         return this.collection.trigger<T>(action, payload)
     }
 
-    select(selected: boolean | 'toggle') {
-        this.collection.select(this.value.id, selected)
+    select(selected: 'toggle' | true | false) {
+        this.collection.select(selected, this.value.id)
     }
 }    
