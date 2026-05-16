@@ -51,8 +51,7 @@ export class LivequeryCollection<T extends Doc> {
         }
     }
 
-    #commit(items: LivequeryDocument<T>[]) {
-        if (items.length == 0) return
+    #commit(items: LivequeryDocument<T>[]) { 
         this.items.next(items)
         this.#indexes = items.reduce((p, c, index) => {
             p.set(c.value.id, index)
@@ -180,9 +179,7 @@ export class LivequeryCollection<T extends Doc> {
                         ...updated_items,
                         ...new_items.list
                     ])
-                    const items = chaos ? unsort_items.sort(sorter) : unsort_items
-
-
+                    const items = chaos ? [...unsort_items].sort(sorter) : unsort_items
                     chaos && this.#commit(items)
                     event.paging && this.paging.next(event.paging)
                 }),
