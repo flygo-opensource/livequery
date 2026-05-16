@@ -1,6 +1,6 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, lastValueFrom, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
 import { LivequeryClient, type ActionMode, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
-import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging } from "./types.js"
+import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging, ParitalDocState } from "./types.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
 
 
@@ -257,27 +257,29 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? U[] : Input> {
+    async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        const list = Array.isArray(payload) ? payload : [payload]
-        const responses = await this.client.add<T>(this.collection_ref, list, mode) 
+        const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
+        const responses = await this.client.add<T>(this.collection_ref, list, mode)
         const r = Array.isArray(payload) ? responses : responses[0]
         return r as any
     }
 
 
-    async update<Input extends Partial<T> | Partial<T>[]>(id: string, payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? U[] : Input> {
+    async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
-        const list = Array.isArray(payload) ? payload : [payload]
-        const arr = list.map(p => ({ ...p, id }))
-        const responses = await this.client.update<T>(this.collection_ref, arr, mode)
+        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
+        const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
+        const responses = await this.client.update<T>(this.collection_ref, list, mode)
         const r = Array.isArray(payload) ? responses : responses[0]
         return r as any
     }
 
 
-    async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = 'server-first'): Promise<Input extends string[] ? DocState<T>[] : DocState<T>> {
+    async delete<Input extends (string | string[])>(id: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
+        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
         const ids: string[] = Array.isArray(id) ? id : [id]
         const responses = await this.client.delete<T>(this.collection_ref, ids, mode)
         const r = Array.isArray(id) ? responses : responses[0]
@@ -325,4 +327,17 @@ export class LivequeryCollection<T extends Doc> {
         if (!this.collection_ref) return
         return await this.client.flush(this.collection_ref)
     }
-} 
+}
+
+
+
+
+const a = new LivequeryCollection<{ id: string, a: number, b: string }>({} as any)
+
+
+
+
+a.update({
+    id: '123',
+    _adding: true
+}, 'server-first')

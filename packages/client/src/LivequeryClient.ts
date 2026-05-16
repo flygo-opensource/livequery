@@ -1,7 +1,7 @@
 import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource } from "./types.js"
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesAllFilters } from "./helpers/filterDocs.js"
@@ -305,7 +305,7 @@ export class LivequeryClient {
         return lastValueFrom(from(docs).pipe(
             mergeMap(doc => from(Object.entries(this.config.transporters)).pipe(
                 mergeMap(async ([tid, transporter]) => {
-                    const id = doc.id 
+                    const id = doc.id
                     if (String(id).startsWith('local:')) {
                         // lock by collection_ref 
                         const o = new Subject<void>()
@@ -388,9 +388,9 @@ export class LivequeryClient {
     }
 
 
-    async add<T extends Doc>(collection_ref: string, documents: Record<string, any>[], mode: ActionMode) { 
+    async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode) {
         if (mode == 'server-first') {
-            const list = documents.map(doc => ({ id: `local:${Math.random().toString(36).slice(2)}`, ...doc }))
+            const list = documents.map(doc => ({ ...doc, id: `local:${Math.random().toString(36).slice(2)}` }))
             return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true)
         }
         const docs = await lastValueFrom(from(documents).pipe(
@@ -417,7 +417,7 @@ export class LivequeryClient {
         return await this.#push<T>(collection_ref, docs, false)
     }
 
-    async update<T extends Doc>(collection_ref: string, documents: Array<Partial<T> & { id: string }>, mode: ActionMode) {
+    async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode) {
         if (mode == 'server-first') {
             const list = documents.map(doc => ({ ...doc, _prev: doc }))
             return await this.#push<T>(collection_ref, list, true)

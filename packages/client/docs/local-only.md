@@ -82,3 +82,5 @@ if (first) {
 Choose `local-only` when remote sync must be skipped entirely for that collection.
 
 Choose `local-first` when you want immediate local reads but still want remote refresh and streamed remote changes.
+
+Notes in this document reflect the `2.0.120` release line.

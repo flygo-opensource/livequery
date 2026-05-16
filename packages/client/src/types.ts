@@ -17,6 +17,8 @@ export type DocState<T extends Doc> = T & {
     _selected?: boolean | undefined
 }
 
+export type ParitalDocState<T extends Doc> = { id: string } & Partial<DocState<T>>
+
 
 export type RealtimeChangeSource = 'realtime' | 'action' | 'query'
 
