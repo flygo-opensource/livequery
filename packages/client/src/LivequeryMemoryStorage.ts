@@ -1,4 +1,4 @@
-import type { Doc, DocState, LivequeryPaging } from "./types.js"
+import type { Doc, DocState, LivequeryPaging, ParitalDocState } from "./types.js"
 import type { LivequeryStorge } from "./LivequeryStorge.js"
 import { filterDocs } from "./helpers/filterDocs.js"
 
@@ -32,7 +32,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         return Promise.resolve(doc)
     }
 
-    async add<T extends Doc>(collection: string, document: DocState<T>): Promise<T> {
+    async add<T extends Doc>(collection: string, document: ParitalDocState<T>){
         const docs = this.#collections.get(collection) || new Map<string, Doc>()
         const doc = {
             ...document,
