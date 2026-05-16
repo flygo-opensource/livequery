@@ -97,7 +97,7 @@ export class RestTransporter implements LivequeryTransporter {
                     error: {
                         code: e instanceof Error ? e.name : 'UnknownError',
                         message: e instanceof Error ? e.message : 'An unknown error occurred'
-                        
+
                     }
                 }
             }
@@ -198,7 +198,11 @@ export class RestTransporter implements LivequeryTransporter {
 
     async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
         type DT = { id: string, _id: string } & T
-        const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body: data, query: {} })
+        const body = Object.entries(data).reduce((acc, [k, v]) => {
+            if (k.startsWith('_')) return acc
+            return { ...acc, [k]: v }
+        }, {} as Record<string, any>)
+        const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body, query: {} })
         for (const [k, v] of [['', r], ...Object.entries(r)]) {
             const target = v as any as DT
             const id = target.id || target._id
