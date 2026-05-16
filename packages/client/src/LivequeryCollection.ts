@@ -23,11 +23,6 @@ export class LivequeryCollection<T extends Doc> {
     #indexes: Map<string, number>
     #filters = new Subject<Partial<LivequeryFilters<T>>>()
 
-    #resolveActionMode(mode?: ActionMode): ActionMode {
-        if (mode) return mode
-        return this.options.mode === 'local-only' ? 'local-only' : 'local-first'
-    }
-
     public ref: string | undefined
     public collection_ref: string | undefined
 
@@ -262,29 +257,29 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
+    async add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const list = Array.isArray(payload) ? payload : [payload]
-        const responses = await this.client.add<T>(this.collection_ref, list, this.#resolveActionMode(mode))
+        const responses = await this.client.add<T>(this.collection_ref, list, mode)
         const r = Array.isArray(payload) ? responses : responses[0]
         return r as any
     }
 
 
-    async update<Input extends Partial<T> | Partial<T>[]>(id: string, payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
+    async update<Input extends Partial<T> | Partial<T>[]>(id: string, payload: Input, mode: ActionMode): Promise<Input extends Array<infer U> ? U[] : Input> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const list = Array.isArray(payload) ? payload : [payload]
         const arr = list.map(p => ({ ...p, id }))
-        const responses = await this.client.update<T>(this.collection_ref, arr, this.#resolveActionMode(mode))
+        const responses = await this.client.update<T>(this.collection_ref, arr, mode)
         const r = Array.isArray(payload) ? responses : responses[0]
         return r as any
     }
 
 
-    async delete<Input extends (string | string[])>(id: Input, mode?: ActionMode): Promise<Input extends string[] ? DocState<T>[] : DocState<T>> {
+    async delete<Input extends (string | string[])>(id: Input, mode: ActionMode): Promise<Input extends string[] ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const ids: string[] = Array.isArray(id) ? id : [id]
-        const responses = await this.client.delete<T>(this.collection_ref, ids, this.#resolveActionMode(mode))
+        const responses = await this.client.delete<T>(this.collection_ref, ids, mode)
         const r = Array.isArray(id) ? responses : responses[0]
         return r as any
     }

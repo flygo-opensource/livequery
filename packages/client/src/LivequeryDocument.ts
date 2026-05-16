@@ -1,6 +1,7 @@
 import { BehaviorSubject } from "rxjs";
 import type { LivequeryCollection } from "./LivequeryCollection.js";
 import type { Doc, DocState } from "./types.js";
+import type { ActionMode } from "./index.js";
 
 
 
@@ -13,14 +14,14 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
         super(document)
     }
 
-    update(data: Partial<T>) {
+    update(data: Partial<T>, mode: ActionMode) {
         const id = this.value.id 
-        return this.collection.update(id, data)
+        return this.collection.update(id, data, mode)
     }
 
-    del() {
+    del(mode: ActionMode) {
         const id = this.value.id
-        return this.collection.delete(id)
+        return this.collection.delete(id, mode)
     }
 
     trigger<T>(action: string, payload?: Record<string, any>) {
