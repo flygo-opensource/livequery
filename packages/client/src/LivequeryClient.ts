@@ -305,13 +305,13 @@ export class LivequeryClient {
         return lastValueFrom(from(docs).pipe(
             mergeMap(doc => from(Object.entries(this.config.transporters)).pipe(
                 mergeMap(async ([tid, transporter]) => {
-                    const id = doc.id
+                    const id = doc.id 
                     if (String(id).startsWith('local:')) {
                         // lock by collection_ref 
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
                         const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T))
-                        if (server_first) throw e
+                        if (e && server_first) throw e
                         // unlock 
                         const fnd = {
                             ...data,
@@ -334,7 +334,7 @@ export class LivequeryClient {
                     // _deleting flag → soft-delete on remote then hard-delete locally 
                     if (doc._deleting) {
                         const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id))
-                        if (server_first) throw e
+                        if (e && server_first) throw e
                         if (e) {
                             const fnd = {
                                 _deleting: undefined,
@@ -365,7 +365,7 @@ export class LivequeryClient {
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
                         const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields))
-                        if (server_first) throw e
+                        if (e && server_first) throw e
                         const fnd = {
                             _prev: undefined,
                             _updating: undefined,
@@ -388,8 +388,11 @@ export class LivequeryClient {
     }
 
 
-    async add<T extends Doc>(collection_ref: string, documents: Record<string, any>[], mode: ActionMode) {
-        if (mode == 'server-first') return await this.#push<T>(collection_ref, documents as Array<Record<string, any> & { id: string }>, true)
+    async add<T extends Doc>(collection_ref: string, documents: Record<string, any>[], mode: ActionMode) { 
+        if (mode == 'server-first') {
+            const list = documents.map(doc => ({ id: `local:${Math.random().toString(36).slice(2)}`, ...doc }))
+            return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true)
+        }
         const docs = await lastValueFrom(from(documents).pipe(
             mergeMap(doc => {
                 return this.config.storage.add<T>(collection_ref, {
@@ -415,7 +418,10 @@ export class LivequeryClient {
     }
 
     async update<T extends Doc>(collection_ref: string, documents: Array<Partial<T> & { id: string }>, mode: ActionMode) {
-        if (mode == 'server-first') return await this.#push<T>(collection_ref, documents, true)
+        if (mode == 'server-first') {
+            const list = documents.map(doc => ({ ...doc, _prev: doc }))
+            return await this.#push<T>(collection_ref, list, true)
+        }
         const merged = await lastValueFrom(from(documents).pipe(
             mergeMap(async doc => {
                 const old = await this.config.storage.get<T>(
@@ -450,8 +456,10 @@ export class LivequeryClient {
     }
 
     async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode) {
-
-        if (mode == 'server-first') return await this.#push<T>(collection_ref, ids.map(id => ({ id, _deleting: true })), true)
+        if (mode == 'server-first') {
+            const list = ids.map(id => ({ id, _deleting: true }))
+            return await this.#push<T>(collection_ref, list, true)
+        }
         const soft = Object.keys(this.config.transporters).length > 0
         const merged = await lastValueFrom(from(ids).pipe(
             mergeMap(async id => {

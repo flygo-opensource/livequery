@@ -260,7 +260,7 @@ export class LivequeryCollection<T extends Doc> {
     async add<Input extends Partial<T> | Partial<T>[]>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? U[] : Input> {
         if (!this.collection_ref) throw new Error('LivequeryCollection is not initialized with a ref')
         const list = Array.isArray(payload) ? payload : [payload]
-        const responses = await this.client.add<T>(this.collection_ref, list, mode)
+        const responses = await this.client.add<T>(this.collection_ref, list, mode) 
         const r = Array.isArray(payload) ? responses : responses[0]
         return r as any
     }

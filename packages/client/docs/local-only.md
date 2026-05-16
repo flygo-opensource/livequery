@@ -70,6 +70,7 @@ if (first) {
 - `local-only` is collection-scoped via `LivequeryCollectionOptions.mode`.
 - Collection mutation methods also accept an optional explicit `mode` override: `"server-first" | "local-first" | "local-only"`.
 - In the current implementation, mutation methods default to `"server-first"` when no explicit mode is passed.
+- Because of that default, a local-only collection still needs explicit `"local-only"` on each mutation call when you want to force local-only writes.
 - You can still use transporter-backed collections elsewhere in the same `LivequeryClient`.
 - Reactive streams (`items`, `loading`, `error`, `summary`, `paging`) still work the same way.
 - `query()` still requires `initialize(ref)` first.

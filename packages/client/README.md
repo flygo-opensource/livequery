@@ -191,12 +191,11 @@ const client = new LivequeryClient({
 
 ### Mutation flow
 
-For `add`, `update`, and `delete`, the client:
+For `add`, `update`, and `delete`, behavior depends on action mode:
 
-1. writes to local storage first
-2. broadcasts the optimistic change to active watchers
-3. pushes the mutation to each transporter
-4. clears optimistic flags or stores mutation errors after the remote call finishes
+1. `server-first`: pushes directly to transporters and returns transporter results.
+2. `local-first`: writes optimistic state to local storage, broadcasts changes, then pushes to transporters and reconciles flags/errors.
+3. `local-only`: writes locally and broadcasts only; no transporter calls are made.
 
 Documents created locally receive ids prefixed with `local:` until a transporter returns a persisted id.
 
@@ -323,6 +322,7 @@ Notes about current behavior:
 - `loadPrev()` uses `paging.prev.cursor` as `:before`.
 - `loadAround()` currently sets both `:after` and `:before` to the provided cursor.
 - `add`, `update`, and `delete` accept a mode override. In the current implementation, omitted mode defaults to `"server-first"`.
+- In `"server-first"`, mutations are remote-first and do not rely on optimistic local writes.
 - `add(payload, "local-only")` stores the document in local storage only and never contacts any transporter. The document receives a `local:` prefixed id and is marked with `_local_only` internally.
 - Collection mutations preserve the input shape in TypeScript: pass one item and you get one result; pass an array and you get an array.
 - `mode: "local-only"` on the collection controls query behavior. To keep a mutation local-only, pass `"local-only"` explicitly to `add`, `update`, `delete`, `LivequeryDocument.update`, or `LivequeryDocument.del`.
