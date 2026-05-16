@@ -31,6 +31,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly loading: BehaviorSubject<LivequeryLoadingState | null>
     public readonly filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
     public readonly paging: BehaviorSubject<LivequeryPaging>
+    public readonly selected: BehaviorSubject<Set<string>>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
 
     constructor(private client: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
@@ -43,6 +44,7 @@ export class LivequeryCollection<T extends Doc> {
             total: 0,
             current: 0
         })
+        this.selected = new BehaviorSubject<Set<string>>(new Set())
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
         if (options) {
             this.options = options
@@ -249,6 +251,18 @@ export class LivequeryCollection<T extends Doc> {
         this.filters.next(filters as any)
     }
 
+    select(id: string, selected: boolean | 'toggle') {
+        const index = this.#indexes.get(id)
+        if (index == undefined) return
+        const item = this.items.value[index]
+        if (!item) return
+        const current = item.value._selected || false
+        const _selected= selected == 'toggle' ? !current : selected
+        const set = this.selected.value
+        _selected ? set.add(id) : set.delete(id)
+        this.selected.next(new Set(set))
+        this.update({ id, _selected } as any, 'local-only')
+    }
 
     async debounceQuery(filters: Partial<LivequeryFilters<T>>) {
         this.#filters.next(filters)

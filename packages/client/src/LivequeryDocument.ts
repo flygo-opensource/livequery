@@ -14,7 +14,7 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
         super(document)
     }
 
-    update(data: Partial<T>, mode?: ActionMode) {
+    update(data: Partial<DocState<T>>, mode?: ActionMode) {
         const id = this.value.id
         return this.collection.update({ ...data, id }, mode)
     }
@@ -27,4 +27,8 @@ export class LivequeryDocument<T extends Doc> extends BehaviorSubject<DocState<T
     trigger<T>(action: string, payload?: Record<string, any>) {
         return this.collection.trigger<T>(action, payload)
     }
-}   
+
+    select(selected: boolean | 'toggle') {
+        this.collection.select(this.value.id, selected)
+    }
+}    

@@ -4,7 +4,7 @@ export type Doc<T = {}> = T & {
 
 export type DocError = { code: string, message: string, transporter_id: string }
 
-export type DocState<T extends Doc> = T & {
+export type DocMetadata = {
     _deleting?: boolean | undefined
     _local_only?: boolean | undefined
     _deleting_error?: DocError | undefined
@@ -13,11 +13,13 @@ export type DocState<T extends Doc> = T & {
     _adding?: boolean | undefined
     _adding_error?: DocError | undefined
     _remotes?: Record<string, string | number> | undefined
-    _prev?: Partial<T> | undefined
+    _prev?: Record<string, any> | undefined
     _selected?: boolean | undefined
 }
 
-export type ParitalDocState<T extends Doc> = { id: string } & Partial<DocState<T>>
+export type DocState<T extends Doc> = T & DocMetadata
+
+export type ParitalDocState<T extends Doc> = { id: string } & Partial<T> & Partial<DocMetadata>
 
 
 export type RealtimeChangeSource = 'realtime' | 'action' | 'query'
