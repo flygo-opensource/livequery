@@ -32,6 +32,7 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly selected: BehaviorSubject<Set<string>>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
+    #index = 0
 
     constructor(private client: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         this.#indexes = new Map()
@@ -146,7 +147,11 @@ export class LivequeryCollection<T extends Doc> {
                             .reduce(
                                 (p, c) => {
                                     if (!p.indexes.has(c.id)) {
-                                        const doc = new LivequeryDocument(this, { id: c.id, ...c.data } as any as T)
+                                        const doc = new LivequeryDocument(this, {
+                                            id: c.id,
+                                            ...c.data,
+                                            _index: this.#index++
+                                        } as any as DocState<T>)
                                         p.list.push(doc)
                                         p.indexes.add(c.id)
                                     }
@@ -218,13 +223,24 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters, true)
     }
 
-    async sort(field: keyof T, order: 1 | -1 | 'asc' | 'desc') {
+    async sort(field: keyof T | 'reset', order: 1 | -1 | 'asc' | 'desc') {
+        const filters_without_sort = Object.entries(this.filters.value || {}).reduce((p, [k, v]) => {
+            if (k.endsWith(':sort')) return p
+            return { ...p, [k]: v }
+        }, {} as Partial<LivequeryFilters<T>>)
+
+        if (field == 'reset') {
+            const items = [...this.items.value].sort((a, b) => Number(a.value._index) - Number(b.value._index))
+            this.#commit(items)
+            this.filters.next(filters_without_sort as any)
+            return
+        }
+
+
+
         const i = (order === 'asc' || order === 1) ? 1 : -1
         const filters = {
-            ...Object.entries(this.filters.value || {}).reduce((p, [k, v]) => {
-                if (k.endsWith(':sort')) return p
-                return { ...p, [k]: v }
-            }, {} as Partial<LivequeryFilters<T>>),
+            ...filters_without_sort,
             [`${field as string}:sort`]: order
         }
         if (this.options.mode != 'local-only') return await this.query(filters as any)

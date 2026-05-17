@@ -15,6 +15,7 @@ export type DocMetadata = {
     _remotes?: Record<string, string | number> | undefined
     _prev?: Record<string, any> | undefined
     _selected?: boolean | undefined
+    _index?: number | undefined
 }
 
 export type DocState<T extends Doc> = T & DocMetadata
