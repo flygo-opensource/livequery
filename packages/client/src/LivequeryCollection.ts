@@ -2,11 +2,10 @@ import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, lastValueFrom, 
 import { LivequeryClient, type ActionMode, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
 import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging, ParitalDocState } from "./types.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
-
+import { uuidv7 } from 'uuidv7'
 
 
 export type LivequeryCollectionOptions<T extends Doc> = {
-    client: LivequeryClient
     filters: Partial<LivequeryFilters<T>>
     lazy: boolean
     debounce: number
@@ -18,7 +17,7 @@ export type OneOrMany<T> = T | T[]
 
 export class LivequeryCollection<T extends Doc> {
 
-    public readonly id = (Math.random() * 1e18).toString(36)
+    public readonly id = uuidv7()
     #keys = new Map<keyof T, number>()
     #indexes: Map<string, number>
     #filters = new Subject<Partial<LivequeryFilters<T>>>()
@@ -46,12 +45,9 @@ export class LivequeryCollection<T extends Doc> {
         })
         this.selected = new BehaviorSubject<Set<string>>(new Set())
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
-        if (options) {
-            this.options = options
-        }
     }
 
-    #commit(items: LivequeryDocument<T>[]) { 
+    #commit(items: LivequeryDocument<T>[]) {
         this.items.next(items)
         this.#indexes = items.reduce((p, c, index) => {
             p.set(c.value.id, index)

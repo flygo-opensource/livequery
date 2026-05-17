@@ -1,11 +1,12 @@
-import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
+import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
 import type { LivequeryStorge } from "./LivequeryStorge.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesAllFilters } from "./helpers/filterDocs.js"
-
+import { useDispose } from "./helpers/useDispose.js"
+import { uuidv7 } from 'uuidv7'
 
 export type LivequeryClientOptions = {
     transporters: Record<string, LivequeryTransporter>
@@ -63,6 +64,7 @@ export class LivequeryClient {
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<Query>()
     #adding = new Map<string, Subject<void>>()
+    #running = new Subscription()
 
     constructor(private readonly config: LivequeryClientConfig) {
         this.#start()
@@ -111,14 +113,14 @@ export class LivequeryClient {
                 )
             )),
             finalize(clear),
-            shareReplay()
+            shareReplay({ bufferSize: 1, refCount: true })
         )
         deduplicate_key && this.#cache.set(deduplicate_key, $)
         return Object.assign($, { clear })
     }
 
     #start() {
-        lastValueFrom(merge(
+        this.#running = merge(
 
             // Server queries
             this.#queries$.pipe(
@@ -188,7 +190,7 @@ export class LivequeryClient {
                 ))
 
             )
-        ))
+        ).subscribe()
     }
 
     watch(ref: string, collection_id: string, mode: CollectionMetadata['mode']) {
@@ -320,7 +322,12 @@ export class LivequeryClient {
                         // lock by collection_ref 
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
-                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T))
+                        using $ = useDispose(() => {
+                            o.next()
+                            o.complete()
+                            this.#adding.delete(collection_ref)
+                        })
+                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T), tid)
                         if (e && server_first) throw e
                         // unlock 
                         const fnd = {
@@ -335,15 +342,12 @@ export class LivequeryClient {
                             id,
                             data: fnd
                         }])
-                        o.next()
-                        o.complete()
-                        this.#adding.delete(collection_ref)
                         return data as DocState<T>
                     }
 
                     // _deleting flag → soft-delete on remote then hard-delete locally 
                     if (doc._deleting) {
-                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id))
+                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id), tid)
                         if (e && server_first) throw e
                         if (e) {
                             const fnd = {
@@ -374,7 +378,7 @@ export class LivequeryClient {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields))
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid)
                         if (e && server_first) throw e
                         const fnd = {
                             _prev: undefined,
@@ -400,7 +404,7 @@ export class LivequeryClient {
 
     async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode) {
         if (mode == 'server-first') {
-            const list = documents.map(doc => ({ ...doc, id: `local:${Math.random().toString(36).slice(2)}` }))
+            const list = documents.map(doc => ({ ...doc, id: `local:${uuidv7()}` }))
             return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true)
         }
         const docs = await lastValueFrom(from(documents).pipe(
@@ -439,7 +443,6 @@ export class LivequeryClient {
                     doc.id
                 ) as undefined | DocState<T>
                 if (!old) return
-                if (mode === 'local-only') return doc
                 const _prev = Object.keys(doc).reduce((acc, key) => {
                     if (key in (old._prev || {})) return acc
                     return {
@@ -453,7 +456,7 @@ export class LivequeryClient {
             filter(Boolean),
             toArray()
         ))
-        await this.#broadcast(
+        this.#broadcast(
             collection_ref,
             'action',
             merged.map(data => ({
@@ -463,6 +466,7 @@ export class LivequeryClient {
                 data
             } as DataChangeEvent))
         )
+        if (mode === 'local-only') return merged
         return await this.#push<T>(collection_ref, merged, false)
     }
 
@@ -484,16 +488,34 @@ export class LivequeryClient {
             filter(Boolean),
             toArray()
         ))
-        await this.#broadcast(
+        const deleting_list = merged.filter(doc => doc._deleting)
+        const deleted_list = merged.filter(doc => !doc._deleting)
+
+        this.#broadcast(
             collection_ref,
             'action',
-            merged.map(({ id }) => ({
+            deleting_list.map(({ id }) => ({
+                collection_ref,
+                id,
+                type: 'modified',
+                data: {
+                    _deleting: true
+                }
+            }))
+        )
+
+        this.#broadcast(
+            collection_ref,
+            'action',
+            deleted_list.map(({ id }) => ({
                 collection_ref,
                 id,
                 type: 'removed',
             }))
         )
-        if(mode == 'local-only') return merged
+
+
+        if (mode == 'local-only') return merged
         return await this.#push<T>(collection_ref, merged, false)
     }
 
@@ -507,5 +529,9 @@ export class LivequeryClient {
     flush(collection_ref: string) {
         this.#broadcast(collection_ref, 'realtime', [{ collection_ref, id: '*', type: 'removed' }])
         return this.config.storage.flush()
+    }
+
+    destroy() {
+        this.#running.unsubscribe()
     }
 }

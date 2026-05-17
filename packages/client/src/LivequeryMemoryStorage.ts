@@ -1,6 +1,7 @@
-import type { Doc, DocState, LivequeryPaging, ParitalDocState } from "./types.js"
+import type { Doc, LivequeryPaging, ParitalDocState } from "./types.js"
 import type { LivequeryStorge } from "./LivequeryStorge.js"
 import { filterDocs } from "./helpers/filterDocs.js"
+import { uuidv7 } from "uuidv7"
 
 
 
@@ -19,7 +20,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         return {
             documents: sorted,
             paging: {
-                total: items.length,
+                total: sources.length,
                 current: sorted.length
             }
         }
@@ -36,7 +37,7 @@ export class LivequeryMemoryStorage implements LivequeryStorge {
         const docs = this.#collections.get(collection) || new Map<string, Doc>()
         const doc = {
             ...document,
-            id: document.id || `local:${crypto.randomUUID()}`
+            id: document.id || `local:${uuidv7()}`
         } as T
         docs.set(doc.id, doc)
         this.#collections.set(collection, docs)

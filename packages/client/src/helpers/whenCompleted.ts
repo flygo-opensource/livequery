@@ -5,6 +5,6 @@ export function whenCompleted(stream: Subject<any>): Observable<void> {
         materialize(),
         filter(n => n.kind === 'C' || n.kind === 'E'),
         map(() => undefined),
-        shareReplay(1)
+        shareReplay({ bufferSize: 1, refCount: true })
     )
 } 
