@@ -475,11 +475,11 @@ export class LivequeryClient {
             const list = ids.map(id => ({ id, _deleting: true }))
             return await this.#push<T>(collection_ref, list, true)
         }
-        const soft = Object.keys(this.config.transporters).length > 0 || mode === 'local-only'
+        const soft = Object.keys(this.config.transporters).length > 0
         const merged = await lastValueFrom(from(ids).pipe(
             mergeMap(async id => {
                 const is_local_doc = id.startsWith('local:')
-                if (!soft || is_local_doc) {
+                if (!soft || is_local_doc || mode == 'local-only') {
                     const doc = await this.config.storage.delete<T>(collection_ref, id)
                     return doc
                 }
