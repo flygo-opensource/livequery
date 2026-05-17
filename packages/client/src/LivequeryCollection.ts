@@ -86,6 +86,7 @@ export class LivequeryCollection<T extends Doc> {
 
                     const first = event.changes?.[0]
                     if (first && first.type == 'removed' && first.id == '*') {
+                        this.#index = 0
                         this.#commit([])
                         this.loading.next(null)
                         this.summary.next({})
@@ -150,7 +151,7 @@ export class LivequeryCollection<T extends Doc> {
                                         const doc = new LivequeryDocument(this, {
                                             id: c.id,
                                             ...c.data,
-                                            _index: this.#index++
+                                            _index: ++this.#index
                                         } as any as DocState<T>)
                                         p.list.push(doc)
                                         p.indexes.add(c.id)
