@@ -337,7 +337,7 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+    async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) {
             return null as any
         }
@@ -349,7 +349,7 @@ export class LivequeryCollection<T extends Doc> {
     }
 
 
-    async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+    async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) {
             return null as any
         }
@@ -361,7 +361,7 @@ export class LivequeryCollection<T extends Doc> {
     }
 
 
-    async delete<Input extends (string | string[])>(id: Input, mode?: ActionMode): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+    async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) {
             return null as any
         }
