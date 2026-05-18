@@ -1,52 +1,52 @@
 {
-    "name": "@livequery/rest",
-    "repository": {
-        "url": "https://github.com/livequery/rest"
+  "name": "@livequery/rest",
+  "repository": {
+    "url": "https://github.com/livequery/rest"
+  },
+  "version": "2.0.134",
+  "type": "module",
+  "description": "",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
-    "version": "2.0.133",
-    "type": "module",
-    "description": "",
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./dist/index.d.ts",
-            "import": "./dist/index.js",
-            "default": "./dist/index.js"
-        },
-        "./RestTransporter": {
-            "types": "./dist/RestTransporter.d.ts",
-            "import": "./dist/RestTransporter.js",
-            "default": "./dist/RestTransporter.js"
-        },
-        "./Socket": {
-            "types": "./dist/Socket.d.ts",
-            "import": "./dist/Socket.js",
-            "default": "./dist/Socket.js"
-        },
-        "./helpers/parseJson": {
-            "types": "./dist/helpers/parseJson.d.ts",
-            "import": "./dist/helpers/parseJson.js",
-            "default": "./dist/helpers/parseJson.js"
-        }
+    "./RestTransporter": {
+      "types": "./dist/RestTransporter.d.ts",
+      "import": "./dist/RestTransporter.js",
+      "default": "./dist/RestTransporter.js"
     },
-    "files": [
-        "dist/**/*"
-    ],
-    "devDependencies": {
-        "@livequery/client": "^2.0.133",
-        "typescript": "5.6.3"
+    "./Socket": {
+      "types": "./dist/Socket.d.ts",
+      "import": "./dist/Socket.js",
+      "default": "./dist/Socket.js"
     },
-    "peerDependencies": {
-        "rxjs": "^7.8.1",
-        "uuid": "^13.0.0"
-    },
-    "scripts": {
-        "clean": "rm -rf dist",
-        "build": "bun run clean && bunx tsc -p tsconfig.build.json",
-        "build:watch": "bunx tsc -p tsconfig.build.json --watch",
-        "prepublishOnly": "bun run build"
-    },
-    "author": "",
-    "license": "ISC"
+    "./helpers/parseJson": {
+      "types": "./dist/helpers/parseJson.d.ts",
+      "import": "./dist/helpers/parseJson.js",
+      "default": "./dist/helpers/parseJson.js"
+    }
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "devDependencies": {
+    "@livequery/client": "^2.0.134",
+    "typescript": "5.6.3"
+  },
+  "peerDependencies": {
+    "rxjs": "^7.8.1",
+    "uuid": "^13.0.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "bun run clean && bunx tsc -p tsconfig.build.json",
+    "build:watch": "bunx tsc -p tsconfig.build.json --watch",
+    "prepublishOnly": "bun run build"
+  },
+  "author": "",
+  "license": "ISC"
 }
