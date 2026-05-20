@@ -78,9 +78,10 @@ First handler in a typical request pipeline.
 
 - Input: `ctx.request`.
 - Output: `ctx.livequery`.
-- Removes the Livequery path prefix when present.
-- Removes query strings and suffixes after `~`.
-- Detects document requests when the route pattern ends with a param or the path segment count is even.
+- Removes the route prefix before the data ref, such as `livequery`.
+- Removes query strings before parsing path segments.
+- Removes suffixes after `~` in the pathname while preserving `~` inside query values.
+- Detects document requests when the route pattern ends with a param segment.
 - Uppercases the request method.
 
 Important test cases:
@@ -89,6 +90,8 @@ Important test cases:
 - Document path.
 - Nested collection and document paths.
 - Query string and `~` suffix handling.
+- Query strings that contain `~`.
+- Missing document ids for document-shaped route patterns.
 - Paths without the Livequery prefix.
 - Empty path.
 
@@ -243,9 +246,12 @@ bunx tsc -p tests/tsconfig.json --noEmit
 
 - `tests/entrypoint.test.ts`: public exports.
 - Request parser tests: `LivequeryRequestParser`.
-- `tests/api-gateway.test.ts`: gateway routing, discovery metadata, errors, and round-robin.
+- `tests/api-gateway.test.ts`: gateway routing, discovery metadata, forwarding, errors, and round-robin.
+- `tests/api-service-linker.test.ts`: service metadata publishing and rebroadcast behavior.
 - `tests/udp-discovery.test.ts`: UDP packet validation, signatures, TTL, status, and close behavior.
-- `tests/websocket-gateway.test.ts`: WebSocket lifecycle.
+- `tests/websocket-gateway.test.ts`: WebSocket lifecycle, subscriptions, observable links, and gateway bridge behavior.
+- `tests/hono-api-gateway.e2e.test.ts`: in-process Hono service/gateway integration.
+- `tests/hono-api-gateway-process.e2e.test.ts`: multi-process Hono services, gateway discovery, restart, and round-robin.
 - `tests/hidePrivateFields.test.ts`: response sanitization.
 - `tests/http-helpers.test.ts`: Node/Web HTTP helper conversion.
 

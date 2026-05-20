@@ -1,25 +1,28 @@
 import type { LivequeryContext, LivequeryHandler, RawRequest } from './LivequeryContext.js'
 import type { WebsocketGateway } from './WebsocketGateway.js'
-import { LIVEQUERY_MAGIC_KEY } from './const.js'
- 
+
+export type HttpRequestContext = {
+    pathname: string
+    routePath: string
+    query: Record<string, any>
+    params: Record<string, any>
+    body?: any
+    method: string
+}
 
 export class LivequeryRequestParser implements LivequeryHandler {
 
-    constructor(public ws?: WebsocketGateway) { }
-
     #parse(request: RawRequest) {
-        const paths = this.#livequerySegments(request.path)
-        const refs = this.#livequerySegments(request.ref).map(segment => segment.replaceAll(':', ''))
-        if (paths.length === 0) return
+        const refs = this.#routePath(request.ref).split('/').filter(Boolean)
+        if (refs.length === 0) return
+        const paths = this.#routePath(request.path).split('/').filter(Boolean)
 
-        const lastRef = this.#livequerySegments(request.ref).at(-1)
-        const isDocument = lastRef?.startsWith(':') || paths.length % 2 === 0
-        const document_id = isDocument ? paths.at(-1) : undefined
-        const collectionEnd = isDocument ? paths.length - 1 : paths.length
-        const schemaEnd = isDocument ? refs.length - 1 : refs.length
-        const ref = paths.join('/')
-        const collection_ref = paths.slice(0, collectionEnd).join('/')
-        const schema_collection_ref = refs.slice(0, schemaEnd).join('/')
+        const start = refs.findIndex((p, i) => !refs[i + 1] || refs[i + 1].startsWith(':'))
+        const document_id = refs[refs.length - 1]?.startsWith(':') ? paths[refs.length - 1] : undefined
+        const ref = paths.slice(start).join('/')
+        const collection_ref = paths.slice(start, document_id ? paths.length - 1 : undefined).join('/')
+        const schema_collection_ref = refs.slice(start, document_id ? refs.length - 1 : undefined).map(c => c.startsWith(':') ? c.slice(1) : c).join('/')
+
 
         return {
             ref,
@@ -30,22 +33,18 @@ export class LivequeryRequestParser implements LivequeryHandler {
             body: request.body,
             method: request.method.toUpperCase(),
             path: request.path,
-            query: request.query
+            query: request.query,
         }
     }
 
-    #livequerySegments(path: string): string[] {
-        const magicKey = LIVEQUERY_MAGIC_KEY.replaceAll('/', '')
-        const segments = path
-            .split('?')[0]
-            .split('~')[0]
-            .split('/')
-            .filter(Boolean)
-        const start = segments.indexOf(magicKey)
-        return (start === -1 ? segments : segments.slice(start + 1))
+    #routePath(path: string) {
+        const queryIndex = path.indexOf('?')
+        const pathname = queryIndex === -1 ? path : path.slice(0, queryIndex)
+        return pathname.split('~')[0]
     }
 
     handle(ctx: LivequeryContext) {
         ctx.livequery = this.#parse(ctx.request)
+        return ctx.livequery
     }
-}
+} 

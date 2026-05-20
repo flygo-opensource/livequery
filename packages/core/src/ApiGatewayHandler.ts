@@ -54,7 +54,7 @@ export type ServiceApiStatus = {
 export type ApiGatewayOptions = {
     ws?: WebsocketGateway
     discovery?: UdpDiscovery<ServiceApiMetadata>
-    nodeId?: string
+    node_id?: string
 }
 
 function createNode(): RoutingNode {
@@ -86,7 +86,7 @@ export class ApiGatewayHandler {
     }>()
 
     constructor(private options: ApiGatewayOptions) {
-        this.#nodeId = options.nodeId ?? randomUUID()
+        this.#nodeId = options.node_id ?? randomUUID()
         this.#lws = options.ws
         this.#discovery = options.discovery ?? new UdpDiscovery<ServiceApiMetadata>({ key: LIVEQUERY_MAGIC_KEY })
 

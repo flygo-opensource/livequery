@@ -13,7 +13,7 @@ export type ApiServiceLinkerOptions = {
     paths: Array<{ method: string; path: string }>
     ws?: WebsocketGateway
     discovery?: UdpDiscovery<ServiceApiMetadata>
-    nodeId?: string
+    node_id?: string
 }
 
 export class ApiServiceLinker {
@@ -26,7 +26,7 @@ export class ApiServiceLinker {
 
     constructor(options: ApiServiceLinkerOptions) {
         this.#paths = options.paths
-        this.#nodeId = options.nodeId ?? randomUUID()
+        this.#nodeId = options.node_id ?? randomUUID()
         this.#lws = options.ws
         this.#discovery = options.discovery ?? new UdpDiscovery<ServiceApiMetadata>({ key: LIVEQUERY_MAGIC_KEY })
     }

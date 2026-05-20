@@ -45,5 +45,5 @@ export type LivequeryContext<T = {}> = {
 }
 
 export type LivequeryHandler<O = {}> = {
-    handle(ctx: LivequeryContext<O>): Promise<void> | void
+    handle(ctx: LivequeryContext<O>): any
 }

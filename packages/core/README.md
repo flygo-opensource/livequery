@@ -152,7 +152,7 @@ The common handler contract.
 
 ```ts
 type LivequeryHandler<O = {}> = {
-  handle(ctx: LivequeryContext<O>): Promise<void> | void
+  handle(ctx: LivequeryContext<O>): any
 }
 ```
 
@@ -169,10 +169,8 @@ Use it inside HTTP framework adapters before invoking datasource or business log
 ### Constructor
 
 ```ts
-new LivequeryRequestParser(ws?)
+new LivequeryRequestParser()
 ```
-
-The optional `ws` parameter accepts a `WebsocketGateway`, but parsing itself does not require it.
 
 ### `handle(ctx)`
 
@@ -187,9 +185,11 @@ Parses a raw request into:
 
 It also removes:
 
-- The Livequery path prefix when present.
-- Query strings.
-- Realtime suffixes after `~`.
+- The route prefix before the data ref, such as `livequery`.
+- Query strings before parsing path segments.
+- Realtime suffixes after `~` in the pathname.
+
+Query values are preserved in `query`. A `~` inside the query string is not treated as a realtime suffix.
 
 ### Example
 
@@ -294,13 +294,13 @@ Use this in a gateway process. Public HTTP requests enter the gateway and are fo
 
 ```ts
 new ApiGatewayHandler({
-  nodeId?: string
+  node_id?: string
   discovery?: UdpDiscovery<ServiceApiMetadata>
   ws?: WebsocketGateway
 })
 ```
 
-- `nodeId`: stable id for this gateway. A random id is used when omitted.
+- `node_id`: stable id for this gateway. A random id is used when omitted.
 - `discovery`: custom discovery instance, useful in tests or custom network setups.
 - `ws`: realtime gateway used for cross-gateway WebSocket forwarding.
 
@@ -375,7 +375,7 @@ Use this inside each service process that should be discoverable by an `ApiGatew
 ```ts
 new ApiServiceLinker({
   paths: [{ method: 'GET', path: 'livequery/posts' }],
-  nodeId?: 'service-1',
+  node_id?: 'service-1',
   discovery?: customDiscovery,
   ws?: websocketGateway,
 })
@@ -722,9 +722,11 @@ bunx tsc -p tests/tsconfig.json --noEmit
 The test suite covers:
 
 - Public entrypoint exports.
-- Request parsing.
-- API gateway routing, metadata updates, error responses, and round-robin.
+- Request parsing, including nested params, realtime suffixes, and query strings containing `~`.
+- API gateway routing, metadata updates, header/body forwarding, error responses, and round-robin.
+- Service metadata publishing with `ApiServiceLinker`.
 - UDP discovery signatures, TTL, status, and close behavior.
-- WebSocket gateway lifecycle.
+- WebSocket gateway lifecycle, subscriptions, observable links, and gateway-to-gateway forwarding.
+- Hono integration and multi-process gateway/service discovery flows.
 - Response field sanitization.
 - Node/Web HTTP helper conversion.

@@ -79,6 +79,148 @@ describe('LivequeryRequestParser', () => {
         expect(ctx.livequery?.query).toEqual({ x: '1' })
     })
 
+    it('parses nested livequery document paths with param segments and hotkey suffixes', () => {
+        const ctx = createContext({
+            ref: 'livequery/spaces/:space_id/status/:type/orders/:id/~abc',
+            path: 'livequery/spaces/space_xxx/status/running/orders/y8273678fgs8734/~abc',
+            params: {
+                space_id: 'space_xxx',
+                type: 'running',
+                id: 'y8273678fgs8734',
+            },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/space_xxx/status/running/orders/y8273678fgs8734')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/space_xxx/status/running/orders')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/status/type/orders')
+        expect(ctx.livequery?.document_id).toBe('y8273678fgs8734')
+        expect(ctx.livequery?.keys).toEqual({
+            space_id: 'space_xxx',
+            type: 'running',
+            id: 'y8273678fgs8734',
+        })
+    })
+
+    it('parses hotkey suffixes attached directly to the document id', () => {
+        const ctx = createContext({
+            ref: 'livequery/spaces/:space_id/status/:type/orders/:id~abc',
+            path: 'livequery/spaces/space_xxx/status/running/orders/y8273678fgs8734~abc',
+            params: {
+                space_id: 'space_xxx',
+                type: 'running',
+                id: 'y8273678fgs8734',
+            },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/space_xxx/status/running/orders/y8273678fgs8734')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/space_xxx/status/running/orders')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/status/type/orders')
+        expect(ctx.livequery?.document_id).toBe('y8273678fgs8734')
+    })
+
+    it('normalizes repeated and trailing slashes while parsing', () => {
+        const ctx = createContext({
+            ref: '//livequery//posts//:id//~listen',
+            path: '//livequery//posts//abc//~listen',
+            params: { id: 'abc' },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('posts/abc')
+        expect(ctx.livequery?.collection_ref).toBe('posts')
+        expect(ctx.livequery?.schema_collection_ref).toBe('posts')
+        expect(ctx.livequery?.document_id).toBe('abc')
+    })
+
+    it('preserves params body and query on the parsed livequery request', () => {
+        const body = { status: 'running' }
+        const query = { expand: 'items' }
+        const params = { id: 'order-1' }
+        const ctx = createContext({
+            ref: '/livequery/orders/:id',
+            path: '/livequery/orders/order-1',
+            params,
+            query,
+            body,
+            method: 'PATCH'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.keys).toBe(params)
+        expect(ctx.livequery?.body).toBe(body)
+        expect(ctx.livequery?.query).toBe(query)
+    })
+
+    it('does not treat a tilde inside the query string as a hotkey suffix', () => {
+        const ctx = createContext({
+            ref: '/livequery/posts',
+            path: '/livequery/posts?search=a~b',
+            query: { search: 'a~b' },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('posts')
+        expect(ctx.livequery?.collection_ref).toBe('posts')
+        expect(ctx.livequery?.schema_collection_ref).toBe('posts')
+        expect(ctx.livequery?.query).toEqual({ search: 'a~b' })
+    })
+
+    it('handles a route pattern that expects a document id when the path is missing it', () => {
+        const ctx = createContext({
+            ref: '/livequery/orders/:id',
+            path: '/livequery/orders',
+            params: {},
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('orders')
+        expect(ctx.livequery?.collection_ref).toBe('orders')
+        expect(ctx.livequery?.document_id).toBeUndefined()
+    })
+
+    it('parses nested collection paths with parameter segments and no document id', () => {
+        const ctx = createContext({
+            ref: '/livequery/orgs/:org_id/users/:user_id/posts',
+            path: '/livequery/orgs/org-1/users/user-1/posts',
+            params: { org_id: 'org-1', user_id: 'user-1' },
+            method: 'get'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('orgs/org-1/users/user-1/posts')
+        expect(ctx.livequery?.collection_ref).toBe('orgs/org-1/users/user-1/posts')
+        expect(ctx.livequery?.schema_collection_ref).toBe('orgs/org_id/users/user_id/posts')
+        expect(ctx.livequery?.document_id).toBeUndefined()
+        expect(ctx.livequery?.method).toBe('GET')
+    })
+
+    it('normalizes mixed-case methods', () => {
+        const ctx = createContext({
+            path: '/livequery/posts/abc',
+            ref: '/livequery/posts/:id',
+            params: { id: 'abc' },
+            method: 'pAtCh'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.method).toBe('PATCH')
+    })
+
     it('parses paths without the livequery prefix', () => {
         const ctx = createContext({
             path: '/users/u1/posts/p1',
