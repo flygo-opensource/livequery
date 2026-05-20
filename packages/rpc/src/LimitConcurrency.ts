@@ -4,9 +4,9 @@ import { catchError, EMPTY, finalize, from, lastValueFrom, mergeMap, Observable,
 
 export const LimitConcurrency = <T extends ((...args: any) => Promise<any>)>(limit: number = 1) => (target: any, propertyKey: string, descriptor: TypedPropertyDescriptor<T>) => {
     const originalMethod = descriptor.value as T
-    const sj = new Subject<{ args: any, o: Subscriber<any> }>()
+    const sj = new Subject<{ target: any, args: any, o: Subscriber<any> }>()
     sj.pipe(
-        mergeMap(async ({ args, o }) => {
+        mergeMap(async ({ target, args, o }) => {
             try {
                 const result = await originalMethod.apply(target, args)
                 const observable = result instanceof Promise ? from(result) : (result instanceof Observable ? result : of(result))
@@ -24,9 +24,9 @@ export const LimitConcurrency = <T extends ((...args: any) => Promise<any>)>(lim
         }, limit)
     ).subscribe()
 
-    const ovf = (...args: any[]) => {
+    descriptor.value = function (this: any, ...args: any[]) {
         const o = new Observable(o => {
-            sj.next({ args, o })
+            sj.next({ target: this, args, o })
         })
         return Object.assign(o, {
             async then(resolve: (value: any) => void, reject: (reason?: any) => void) {
@@ -38,8 +38,8 @@ export const LimitConcurrency = <T extends ((...args: any) => Promise<any>)>(lim
                 }
             }
         })
-    }
+    } as unknown as T
 
-    return ovf as any
+    return descriptor
 }
  

@@ -11,7 +11,7 @@ export type IStorage = {
 export class StorageBehaviorSubject<T> extends BehaviorSubject<T> {
     constructor(private storage: IStorage, private key: string, defaultValue: T) {
         const value = storage.getItem<T>(key)
-        super(value instanceof Promise ? defaultValue : value || defaultValue)
+        super(value instanceof Promise ? defaultValue : value ?? defaultValue)
         if (value instanceof Promise) {
             value.then(v => this.next(v ?? defaultValue))
         }

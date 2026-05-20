@@ -14,6 +14,7 @@ export class WorkerManager {
     async #call<T>(target: any, paths: string[], args: any[]): Promise<T | null> {
         const [first, ...rest] = paths
         if (!first || first == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
+        if (target == null) throw new Error(`Invalid method path: ${paths.join('.')}`)
         if (rest.length == 0) {
             const prop = target[first]
             if (typeof prop == 'function') {

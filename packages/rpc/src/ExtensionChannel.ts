@@ -39,7 +39,7 @@ export class ExtensionChannel extends RpcChannel {
     #initForegound() {
         if (!chrome) return
         const runtime = chrome.runtime
-        runtime?.onMessage.addListener((message, sender, sendResponse) => {
+        runtime?.onMessage.addListener((message) => {
             if (!isRpcMessage(message)) return
             const respond = (response: RpcMessage['response']) => {
                 runtime?.sendMessage({
@@ -53,7 +53,7 @@ export class ExtensionChannel extends RpcChannel {
 
     #initBackground() {
         if (!chrome) return
-        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        chrome.runtime.onMessage.addListener((message, sender) => {
             if (!isRpcMessage(message)) return
             const tabId = sender.tab?.id
             const respond = (response: RpcMessage['response']) => {

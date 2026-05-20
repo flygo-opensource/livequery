@@ -1,4 +1,4 @@
-import { BehaviorSubject, EMPTY, finalize, firstValueFrom, lastValueFrom, merge, Observable, share, Subject, tap } from "rxjs";
+import { BehaviorSubject, finalize, firstValueFrom, Observable, share, Subject, tap } from "rxjs";
 import type { RpcChannel } from "./RpcChannel.js";
 import type { WorkerService } from "./WorkerService.js";
 
@@ -16,20 +16,18 @@ export class ServiceLinker {
 
 
     constructor(private channel: RpcChannel) {
-        lastValueFrom(merge(
-            this.channel.pipe(
-                tap(e => {
-                    if (!e.response) return
-                    const request = this.#requests.get(e.id)
-                    if (!request) return
-                    const { completed, data, error } = e.response
-                    if (completed || error) request.completed = true
-                    data && request.o.next(data)
-                    completed && request.o.complete();
-                    error && request.o.error(new Error(error))
-                })
-            ),
-        ))
+        this.channel.pipe(
+            tap(e => {
+                if (!e.response) return
+                const request = this.#requests.get(e.id)
+                if (!request) return
+                const { completed, data, error } = e.response
+                if (completed || error) request.completed = true
+                if ("data" in e.response) request.o.next(data)
+                error && request.o.error(new Error(error))
+                completed && !error && request.o.complete()
+            })
+        ).subscribe()
 
     }
 

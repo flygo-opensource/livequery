@@ -13,6 +13,7 @@
     "clean": "rm -rf dist",
     "build": "bun run clean && bunx tsc -p tsconfig.build.json",
     "build:watch": "bunx tsc -p tsconfig.build.json --watch",
+    "test": "bun test tests/",
     "prepublishOnly": "bun run build"
   },
   "exports": {

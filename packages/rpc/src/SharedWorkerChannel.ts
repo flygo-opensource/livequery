@@ -59,7 +59,7 @@ export class SharedWorkerChannel extends RpcChannel {
                 this.next({ ...e.data, respond })
             }),
             finalize(() => worker.port.close()),
-            catchError(e => {
+            catchError(() => {
                 return EMPTY
             })
         ).subscribe()

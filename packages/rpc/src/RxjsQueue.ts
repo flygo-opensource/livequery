@@ -11,7 +11,7 @@ export class RxjsQueue {
         s: (value: any) => void
         r: (error: any) => void
     }>()
-    constructor(limit?: number) {
+    constructor(limit: number = 1) {
         this.#limit$.pipe(
             switchMap(limit => (
                 this.#task.pipe(
@@ -26,7 +26,7 @@ export class RxjsQueue {
                 )
             ))
         ).subscribe()
-        limit && limit >= 1 && this.#limit$.next(limit)
+        this.#limit$.next(Math.max(1, limit))
     }
 
     updateLimit(limit: number) {

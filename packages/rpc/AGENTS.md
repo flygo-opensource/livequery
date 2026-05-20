@@ -1,88 +1,75 @@
 # AGENTS.md
 
+This file is for AI agents working in or generating code with `@livequery/rpc`. For human-facing usage docs, read `README.md`.
+
 ## Purpose
 
-This repository contains `@livequery/rpc`, a small TypeScript library for RPC-style communication between the main thread and a `SharedWorker` or extension runtime using RxJS.
+`@livequery/rpc` is a small TypeScript, ESM-only library for RPC-style communication between a main thread and a `SharedWorker` or Chrome extension runtime using RxJS.
 
-The package focuses on three concerns:
+The library has three core responsibilities:
 
-- transport of `RpcMessage` objects
-- client-side typed service proxies
-- worker-side service dispatch and stream lifecycle management
+- transport `RpcMessage` objects
+- build client-side typed service proxies
+- dispatch worker-side service calls and manage stream lifecycle
 
-## Stack And Conventions
+## Repository Facts
 
-- Language: TypeScript, ESM-only
+- Language: TypeScript
+- Module format: ESM-only
 - Package manager preference: Bun
 - Build output: `dist/`
-- Validation command: `bun run build`
-- There is no test suite in this repository today
+- Validation: run `bun run test` and `bun run build`
+- Source imports must keep `.js` extensions
 
-## Repository Layout
+## File Map
 
-- `src/RpcChannel.ts`: core message contract and abstract transport
-- `src/ExtensionChannel.ts`: concrete transport for Chrome extension runtime messaging
-- `src/SharedWorkerChannel.ts`: concrete transport for foreground and worker contexts
-- `src/ServiceLinker.ts`: client proxy builder, request tracking, cancellation, and observable bridging
-- `src/WorkerManager.ts`: worker-side request router and response streaming
-- `src/WorkerService.ts`: type mapping from worker service contract to client contract
-- `src/LimitConcurrency.ts`: decorator that limits concurrent method execution with RxJS
-- `src/RxjsQueue.ts`: simple concurrency-limited async queue
-- `src/StorageBehaviorSubject.ts`: `BehaviorSubject` with storage-backed initialization and persistence
+- `src/RpcChannel.ts`: core message contract and abstract channel
+- `src/ServiceLinker.ts`: client proxy builder, request tracking, promise-like observable bridging, cancellation
+- `src/WorkerManager.ts`: worker-side service registry, path resolution, dispatch, streaming, cancellation
+- `src/SharedWorkerChannel.ts`: `SharedWorker` transport for foreground and worker contexts
+- `src/ExtensionChannel.ts`: Chrome extension `chrome.runtime` transport
+- `src/WorkerService.ts`: worker-to-client type mapping
+- `src/LimitConcurrency.ts`: RxJS-based concurrency decorator
+- `src/RxjsQueue.ts`: small concurrency-limited async queue
+- `src/StorageBehaviorSubject.ts`: storage-backed `BehaviorSubject`
 - `src/index.ts`: barrel exports only
+- `tests/regression.test.ts`: regression tests for public behavior and fixed edge cases
 
 ## Mental Model
 
-The main flow is:
-
 1. `ServiceLinker` creates a proxy for a named service.
-2. Proxy access builds a path like `['profile', 'getName']`.
-3. Calling that path sends an `RpcMessage` through `RpcChannel`.
-4. `WorkerManager` resolves the service and method path, invokes the target, and streams results back.
-5. `ServiceLinker` turns the response stream into an `Observable` that is also `PromiseLike`.
+2. Proxy property access builds a method path such as `["profile", "getName"]`.
+3. Function calls or remote property subscriptions send an `RpcMessage`.
+4. `WorkerManager` resolves the service and path, invokes the target, and responds.
+5. `ServiceLinker` turns responses into an `Observable` that is also `PromiseLike`.
 
-This means a remote method can often be consumed either with `await` or with `subscribe()`.
+Use `await` for one-shot calls and `subscribe()` for streams.
 
-## How To Use The Library
+## Generating Usage Code
 
-When an agent is asked to add or consume this package in an app, generate code around this shape.
+When adding this package to an app, generate code around this shape.
 
-### 1. Define a worker service as a plain class
-
-Use normal class members.
-
-- plain methods for one-shot RPC calls
-- `Observable`-returning methods for streams
-- `BehaviorSubject` properties for shared state
-- nested objects are allowed and can be reached by path
-
-Example:
+Worker service:
 
 ```ts
 import { BehaviorSubject, interval, map } from "rxjs"
 
 export class CounterService {
-	value = new BehaviorSubject(0)
+  value = new BehaviorSubject(0)
 
-	increment(by = 1) {
-		const nextValue = this.value.getValue() + by
-		this.value.next(nextValue)
-		return nextValue
-	}
+  increment(by = 1) {
+    const nextValue = this.value.getValue() + by
+    this.value.next(nextValue)
+    return nextValue
+  }
 
-	ticker() {
-		return interval(1000).pipe(map((index) => `tick-${index}`))
-	}
-
-	profile = {
-		getName: () => "Ada",
-	}
+  ticker() {
+    return interval(1000).pipe(map(index => `tick-${index}`))
+  }
 }
 ```
 
-### 2. Expose the service inside the `SharedWorker`
-
-Inside worker code, create the transport with no constructor argument.
+Shared worker:
 
 ```ts
 import { SharedWorkerChannel, WorkerManager } from "@livequery/rpc"
@@ -94,9 +81,7 @@ const manager = new WorkerManager(channel)
 manager.exposeService("counter", new CounterService())
 ```
 
-### 3. Connect from the main thread
-
-On the client, instantiate the browser `SharedWorker`, wrap it with `SharedWorkerChannel`, then build a typed proxy with `ServiceLinker`.
+Main thread:
 
 ```ts
 import { ServiceLinker, SharedWorkerChannel, type WorkerService } from "@livequery/rpc"
@@ -109,207 +94,68 @@ const linker = new ServiceLinker(channel)
 const counter = linker.linkService<WorkerService<CounterService>>("counter")
 ```
 
-### 3b. Connect through a Chrome extension runtime
-
-For a Chrome extension Manifest V3 background service worker, popup, options page, or content script, use `ExtensionChannel`.
+Chrome extension:
 
 ```ts
 import { ExtensionChannel, ServiceLinker, WorkerManager, type WorkerService } from "@livequery/rpc"
-import type { CounterService } from "./CounterService"
 
 const channel = new ExtensionChannel()
 const linker = new ServiceLinker(channel)
 const manager = new WorkerManager(channel)
-
-const counter = linker.linkService<WorkerService<CounterService>>("counter")
 ```
 
-`ExtensionChannel` currently uses `chrome.runtime.onMessage` and `chrome.runtime.sendMessage` directly.
-
-### 4. Consume one-shot methods with `await`
-
-When the worker method returns a plain value or a promise, prefer `await`.
-
-```ts
-const nextValue = await counter.increment(2)
-```
-
-The runtime object returned by a method call is actually both:
-
-- an `Observable`
-- a `PromiseLike` value
-
-So `await counter.increment(2)` works because `ServiceLinker` attaches a custom `then()`.
-
-### 5. Consume streams with `subscribe()`
-
-When the worker method returns an observable-like value, subscribe on the client.
-
-```ts
-const subscription = counter.ticker().subscribe((value) => {
-	console.log(value)
-})
-
-subscription.unsubscribe()
-```
-
-Unsubscribing before completion triggers a cancel message back to the worker.
-
-### 6. Read `BehaviorSubject`-style properties like remote state
-
-For remote state, access the property and call `subscribe()`, `pipe()`, or `getValue()` on it.
-
-```ts
-const stateSub = counter.value.subscribe((value) => {
-	console.log("value", value)
-})
-
-const current = counter.value.getValue()
-```
-
-Important details:
-
-- `ServiceLinker` special-cases only `subscribe`, `pipe`, and `getValue`
-- the first subscription creates and caches the local shared observable for that remote property path
-- worker-side state should expose a `getValue()` method if you want current-value semantics; `BehaviorSubject` is the intended shape
-
-### 7. Access nested methods by property path
-
-Nested objects are supported by the proxy.
-
-```ts
-const name = await counter.profile.getName()
-```
-
-The proxy builds the path lazily from property access and only sends the RPC request when you call the function or subscribe to the observable-like property.
+Only use `ExtensionChannel` in contexts where `chrome.runtime` is expected to exist.
 
 ## Usage Rules For Agents
 
-When generating code that uses this library, follow these rules.
-
-- Use `WorkerService<T>` when typing a linked service on the client.
-- Use `ExtensionChannel()` only inside Chrome extension contexts where `chrome.runtime` is available.
-- Use `SharedWorkerChannel()` with no argument in worker code and `SharedWorkerChannel(worker)` in browser code.
+- Type linked services as `WorkerService<T>`.
+- Use `SharedWorkerChannel()` with no argument in worker code.
+- Use `SharedWorkerChannel(worker)` in browser foreground code.
 - Return RxJS observables from worker methods when the client should stream values.
 - Expose `BehaviorSubject` properties directly when the client should observe shared state.
-- Keep service APIs free of member names beginning with `#`; those paths are rejected.
 - Preserve method `this` binding by exposing service instances, not detached method references.
+- Do not invent a `ServiceLinker` readiness API; none exists unless you add one.
+- Do not use service member names beginning with `#`; those paths are rejected.
 
-## What Not To Assume
+## Protocol Contract
 
-Agents should not infer features that are not in the current source.
-
-- The repository includes `ExtensionChannel` as a Chrome extension runtime transport in addition to `SharedWorkerChannel`.
-- There is no test suite to lean on for behavior discovery.
-- `WorkerManager` detects streams by checking for a `pipe()` method, not by RxJS class identity.
-- `ServiceLinker` currently does not expose a built-in readiness API in source; do not generate code that depends on one unless you add it.
-
-## Utility Usage
-
-These helpers are independent from the RPC transport and should only be used when the calling code needs their specific behavior.
-
-### `LimitConcurrency`
-
-Use this decorator on async or observable-producing methods when concurrent execution must be capped.
+`RpcMessage` has three relevant branches:
 
 ```ts
-class ApiService {
-	@LimitConcurrency(2)
-	fetchItem(id: string) {
-		return Promise.resolve({ id })
-	}
+type RpcMessage = {
+  id: number
+  request?: {
+    service: string
+    method: string[]
+    args: any[]
+  }
+  cancel?: { id: number }
+  response?: Partial<{
+    data: any
+    error: string
+    completed: boolean
+  }>
 }
 ```
 
-### `RxjsQueue`
+Any protocol change must keep these files aligned:
 
-Use this as a small concurrency-limited task queue outside the RPC layer.
+- `src/RpcChannel.ts`
+- `src/ServiceLinker.ts`
+- `src/WorkerManager.ts`
+- `src/SharedWorkerChannel.ts`
+- `src/ExtensionChannel.ts`
 
-```ts
-const queue = new RxjsQueue(2)
-const result = await queue.run(() => fetchSomething())
-```
+## Behavior That Must Be Preserved
 
-### `StorageBehaviorSubject`
-
-Use this when state should initialize from storage and persist on every `next()`.
-
-```ts
-const theme$ = new StorageBehaviorSubject(storage, "theme", "light")
-theme$.next("dark")
-```
-
-## Behavior That Matters When Editing
-
-### Message shape
-
-`RpcMessage` has three mutually relevant branches:
-
-- `request`: `{ service, method, args }`
-- `cancel`: `{ id }`
-- `response`: `{ data?, error?, completed? }`
-
-Any protocol change must keep `ServiceLinker`, `WorkerManager`, and `SharedWorkerChannel` in sync.
-
-### Client proxy semantics
-
-`ServiceLinker.linkService()` returns a dynamic proxy.
-
-- Property access extends the remote path.
-- Function call sends a request.
-- `pipe`, `subscribe`, and `getValue` are treated specially to support remote observable-like properties.
-- The returned call result is an `Observable` with a custom `then()` implementation.
-
-When changing client call behavior, inspect `ServiceLinker` first. Most user-facing semantics are decided there.
-
-### Cancellation
-
-If a client unsubscribes before a request completes, `ServiceLinker` sends:
-
-```ts
-{ id: 0, cancel: { id: requestId } }
-```
-
-`WorkerManager` maps request ids to RxJS `Subscription`s and unsubscribes the worker-side stream.
-
-If you touch request cleanup, validate both ends together.
-
-### Observable handling
-
-Worker-side return values are treated like this:
-
-- observable-like values are streamed until completion
-- non-observable values are awaited and sent once with `completed: true`
-- thrown errors are serialized as `error: string`
-
-Observable detection in `WorkerManager` currently relies on a `pipe()` check, not `instanceof Observable`.
-
-### Path validation
-
-Both `ServiceLinker` and `WorkerManager` reject empty paths or paths beginning with `#`.
-
-If you adjust method-path behavior, keep validation symmetrical on both sides.
-
-### SharedWorker transport split
-
-`SharedWorkerChannel` behaves differently by runtime:
-
-- in worker context (`typeof window == 'undefined'`), it listens for `connect` events and reads from each port
-- in foreground context, it listens on `worker.port`
-
-Transport edits should preserve both modes.
-
-### Extension runtime transport
-
-`ExtensionChannel` is a Chrome extension transport that auto-detects context at construction time.
-
-- **context detection**: if `typeof window == 'undefined'`, it is in a background service worker context; otherwise it is in a foreground context (popup, options page, content script)
-- **background mode**: listens on `chrome.runtime.onMessage`; responds via `chrome.tabs.sendMessage(tabId, …)` when the message arrived from a tab, or `chrome.runtime.sendMessage(…)` when it did not
-- **foreground mode**: listens on `chrome.runtime.onMessage` for responses from the background; sends requests with `chrome.runtime.sendMessage`
-- the `send()` method always uses `chrome.runtime.sendMessage` to forward the message to the background
-- it assumes `chrome.runtime` exists at module evaluation time; if `chrome` is unavailable (e.g. during SSR or in a plain browser page), all operations silently no-op
-- transport edits should stay aligned with the `RpcMessage` contract expected by `ServiceLinker` and `WorkerManager`
-- path: `src/ExtensionChannel.ts`
+- Falsy values are valid RPC data: `0`, `false`, `""`, and `null` must reach the client.
+- RPC errors must error the client observable before completion.
+- Client unsubscribe before completion sends `{ id: 0, cancel: { id: requestId } }`.
+- `WorkerManager` maps request ids to RxJS subscriptions and unsubscribes on cancel.
+- Observable-like worker results are detected with a `pipe()` method, not `instanceof Observable`.
+- Non-observable worker results are awaited and sent once with `completed: true`.
+- Thrown worker errors are serialized as `error: string`.
+- Empty paths and paths beginning with `#` are invalid on both client and worker sides.
 
 ## Type Expectations
 
@@ -320,26 +166,49 @@ Transport edits should preserve both modes.
 - methods become async call signatures returning `Promise<R>` unless the awaited result is an observable
 - nested objects remain nested objects
 
-If a type change affects public API ergonomics, update both `WorkerService.ts` and the runtime behavior in `ServiceLinker.ts` or `WorkerManager.ts` as needed.
+If public type ergonomics change, inspect both runtime behavior and `src/WorkerService.ts`.
 
-## Editing Guidelines For Agents
+## Transport Notes
 
-- Prefer minimal edits. This package is small and behavior is tightly coupled.
-- For transport or protocol changes, read the corresponding client and worker file pair before editing.
-- For API surface changes, also inspect `src/index.ts` and `package.json` exports.
-- Avoid introducing browser-only assumptions into worker code.
-- Preserve ESM import style with `.js` extensions in source imports.
-- Use existing RxJS patterns instead of adding alternate async abstractions.
+`SharedWorkerChannel` has two modes:
+
+- worker context: `typeof window == "undefined"`, listens for `connect` events and reads each port
+- foreground context: listens on `worker.port`
+
+`ExtensionChannel` has two modes:
+
+- background context: listens on `chrome.runtime.onMessage`, responds via `chrome.tabs.sendMessage` when the sender has a tab id, otherwise via `chrome.runtime.sendMessage`
+- foreground context: listens on `chrome.runtime.onMessage` and sends with `chrome.runtime.sendMessage`
+
+Avoid browser-only assumptions in worker code.
+
+## Utility Notes
+
+`LimitConcurrency` must preserve the runtime instance `this` of decorated methods.
+
+`RxjsQueue` defaults to concurrency `1`.
+
+`StorageBehaviorSubject` must preserve synchronous and async falsy stored values; use nullish checks rather than `||` fallback.
+
+## Editing Guidelines
+
+- Prefer minimal edits. The client, worker, and transport layers are tightly coupled.
+- For message flow changes, inspect `ServiceLinker` and `WorkerManager` together.
+- For transport changes, inspect the relevant channel and `RpcMessage` contract.
+- For public API changes, inspect `src/index.ts`, `package.json` exports, and `README.md`.
+- Use existing RxJS patterns instead of introducing another async abstraction.
+- Keep generated tests focused on public behavior and regressions.
 
 ## Validation Checklist
 
 After code changes, run:
 
 ```bash
+bun run test
 bun run build
 ```
 
-If you change message flow or typing behavior, also manually inspect these files together:
+For message flow or typing changes, manually inspect:
 
 - `src/ServiceLinker.ts`
 - `src/WorkerManager.ts`
@@ -347,6 +216,6 @@ If you change message flow or typing behavior, also manually inspect these files
 
 ## Known Gaps
 
-- No automated tests are present.
-- The repository is optimized for `SharedWorker`; `ExtensionChannel` is available for Chrome extension runtime messaging.
-- Streaming and promise-like behavior share the same primitive, so seemingly small changes in `ServiceLinker` can alter public API behavior significantly.
+- Test coverage is intentionally small and regression-focused.
+- The package is optimized for `SharedWorker`; `ExtensionChannel` is available for Chrome extension runtime messaging.
+- Streaming and promise-like behavior share the same primitive, so small `ServiceLinker` changes can alter public behavior.
