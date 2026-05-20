@@ -39,4 +39,31 @@ describe('hidePrivateFields', () => {
         const result = hidePrivateFields({ id: '1', title: 'Hello', done: false })
         expect(result).toEqual({ id: '1', title: 'Hello', done: false })
     })
+
+    it('strips private fields inside collection responses', () => {
+        const result = hidePrivateFields({
+            items: [
+                { _id: '1', name: 'Alice', _secret: true },
+                { id: '2', name: 'Bob', _prev: { name: 'B' } },
+            ],
+            paging: { current: 1, total: 1 },
+            cursor: { current: 'c1', next: 'c2', prev: 'c0' },
+        })
+
+        expect(result.items).toEqual([
+            { id: '1', name: 'Alice' },
+            { id: '2', name: 'Bob' },
+        ])
+        expect(result.paging).toEqual({ current: 1, total: 1 })
+    })
+
+    it('strips private fields inside document responses', () => {
+        const result = hidePrivateFields({
+            item: { _id: 'doc-1', title: 'Hello', _meta: true },
+        })
+
+        expect(result).toEqual({
+            item: { id: 'doc-1', title: 'Hello' },
+        })
+    })
 })

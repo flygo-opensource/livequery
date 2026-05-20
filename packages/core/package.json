@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/core.git"
     },
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "Framework-agnostic core utilities for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -33,14 +33,9 @@
         "@types/ws": "^8",
         "typescript": "^5.1.6"
     },
-    "peerDependencies": {
-        "ws": ">=8"
-    },
-    "peerDependenciesMeta": {
-        "ws": { "optional": true }
-    },
     "dependencies": {
         "rxjs": "x",
-        "msgpackr": "^1.11.9"
+        "msgpackr": "^1.11.9",
+        "ws": "^8.18.0"
     }
 }

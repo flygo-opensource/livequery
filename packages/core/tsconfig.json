@@ -1,12 +1,14 @@
 {
   "compilerOptions": {
+    "types": ["bun"],
     "module": "NodeNext",
     "declaration": true,
     "removeComments": true,
     "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
     "target": "ESNext",
     "sourceMap": true,
-    "baseUrl": ".",
     "moduleResolution": "NodeNext",
     "outDir": "./build",
     "incremental": false,
@@ -20,11 +22,15 @@
       "ESNext.String",
       "ESNext"
     ],
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "importHelpers": true
   },
   "exclude": [
     "node_modules",
-    "build",
-    "tests"
+    "tests",
+    "out",
+    "src/schema.ts",
+    "bin",
+    "./build/**/*"
   ]
 }

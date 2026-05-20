@@ -1,140 +1,131 @@
 import { describe, it, expect } from 'bun:test'
-import { parseLivequeryHttpRequest, extractRealtimeSubscription } from '../src/parseLivequeryRequest.js'
+import { LivequeryRequestParser, type LivequeryContext } from '../src/index.js'
 
-describe('parseLivequeryHttpRequest', () => {
+describe('LivequeryRequestParser', () => {
     it('parses a collection request', () => {
-        const result = parseLivequeryHttpRequest({
-            pathname: '/livequery/posts',
-            routePath: '/livequery/posts',
+        const ctx = createContext({
+            path: '/livequery/posts',
+            ref: '/livequery/posts',
             query: { ':limit': '20' },
-            params: {},
             method: 'GET'
         })
-        expect(result.ref).toBe('posts')
-        expect(result.is_collection).toBe(true)
-        expect(result.doc_id).toBeUndefined()
-        expect(result.collection_ref).toBe('posts')
-        expect(result.method).toBe('get')
-        expect(result.options).toEqual({ ':limit': '20' })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('posts')
+        expect(ctx.livequery?.document_id).toBeUndefined()
+        expect(ctx.livequery?.collection_ref).toBe('posts')
+        expect(ctx.livequery?.method).toBe('GET')
+        expect(ctx.livequery?.query).toEqual({ ':limit': '20' })
     })
 
     it('parses a document request', () => {
-        const result = parseLivequeryHttpRequest({
-            pathname: '/livequery/posts/abc',
-            routePath: '/livequery/posts/:id',
-            query: {},
+        const ctx = createContext({
+            path: '/livequery/posts/abc',
+            ref: '/livequery/posts/:id',
             params: { id: 'abc' },
             method: 'GET'
         })
-        expect(result.ref).toBe('posts/abc')
-        expect(result.is_collection).toBe(false)
-        expect(result.doc_id).toBe('abc')
-        expect(result.keys).toEqual({ id: 'abc' })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('posts/abc')
+        expect(ctx.livequery?.document_id).toBe('abc')
+        expect(ctx.livequery?.keys).toEqual({ id: 'abc' })
     })
 
     it('computes schema_collection_ref from route pattern', () => {
-        const result = parseLivequeryHttpRequest({
-            pathname: '/livequery/users/u1/posts',
-            routePath: '/livequery/users/:uid/posts',
-            query: {},
+        const ctx = createContext({
+            path: '/livequery/users/u1/posts',
+            ref: '/livequery/users/:uid/posts',
             params: { uid: 'u1' },
             method: 'GET'
         })
-        // schema_collection_ref uses the route pattern with colon-params stripped (e.g. :uid → uid)
-        expect(result.schema_collection_ref).toBe('users/uid/posts')
-        expect(result.ref).toBe('users/u1/posts')
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.schema_collection_ref).toBe('users/uid/posts')
+        expect(ctx.livequery?.ref).toBe('users/u1/posts')
     })
 
-    it('lowercases the method', () => {
-        const result = parseLivequeryHttpRequest({
-            pathname: '/livequery/posts',
-            routePath: '/livequery/posts',
-            query: {},
-            params: {},
-            method: 'POST',
+    it('uppercases the method', () => {
+        const ctx = createContext({
+            path: '/livequery/posts',
+            ref: '/livequery/posts',
+            method: 'post',
             body: { title: 'Hello' }
         })
-        expect(result.method).toBe('post')
-        expect(result.body).toEqual({ title: 'Hello' })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.method).toBe('POST')
+        expect(ctx.livequery?.body).toEqual({ title: 'Hello' })
     })
-})
 
-describe('extractRealtimeSubscription', () => {
-    const nodeId = 'node-1'
-
-    it('returns subscription when headers are valid and no cursor', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'x-lcid': 'client-1', 'x-lgid': 'gw-1' },
-            {},
-            nodeId
-        )
-        expect(sub).toEqual({
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: 'gw-1',
-            listener_node_id: nodeId
+    it('ignores query strings and realtime hotkey suffixes in the path', () => {
+        const ctx = createContext({
+            path: '/livequery/posts/abc~listen?x=1',
+            ref: '/livequery/posts/:id',
+            params: { id: 'abc' },
+            query: { x: '1' },
+            method: 'GET'
         })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('posts/abc')
+        expect(ctx.livequery?.document_id).toBe('abc')
+        expect(ctx.livequery?.path).toBe('/livequery/posts/abc~listen?x=1')
+        expect(ctx.livequery?.query).toEqual({ x: '1' })
     })
 
-    it('uses gatewayId fallback when x-lgid missing', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'x-lcid': 'client-1' },
-            {},
-            nodeId,
-            'fallback-gw'
-        )
-        expect(sub?.gateway_id).toBe('fallback-gw')
+    it('parses paths without the livequery prefix', () => {
+        const ctx = createContext({
+            path: '/users/u1/posts/p1',
+            ref: '/users/:uid/posts/:pid',
+            params: { uid: 'u1', pid: 'p1' },
+            method: 'patch'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('users/u1/posts/p1')
+        expect(ctx.livequery?.collection_ref).toBe('users/u1/posts')
+        expect(ctx.livequery?.schema_collection_ref).toBe('users/uid/posts')
+        expect(ctx.livequery?.document_id).toBe('p1')
+        expect(ctx.livequery?.method).toBe('PATCH')
     })
 
-    it('uses socket_id header as fallback for client_id', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'socket_id': 'client-2', 'x-lgid': 'gw-1' },
-            {},
-            nodeId
-        )
-        expect(sub?.client_id).toBe('client-2')
-    })
+    it('leaves livequery undefined for an empty path', () => {
+        const ctx = createContext({
+            path: '',
+            ref: '',
+            method: 'GET'
+        })
 
-    it('returns null when client_id is missing', () => {
-        const sub = extractRealtimeSubscription('posts', { 'x-lgid': 'gw-1' }, {}, nodeId)
-        expect(sub).toBeNull()
-    })
+        new LivequeryRequestParser().handle(ctx)
 
-    it('returns null when gateway_id is missing', () => {
-        const sub = extractRealtimeSubscription('posts', { 'x-lcid': 'client-1' }, {}, nodeId)
-        expect(sub).toBeNull()
-    })
-
-    it('returns null when :after cursor is present', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'x-lcid': 'client-1', 'x-lgid': 'gw-1' },
-            { ':after': 'cursor-xyz' },
-            nodeId
-        )
-        expect(sub).toBeNull()
-    })
-
-    it('returns null when :before cursor is present', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'x-lcid': 'client-1', 'x-lgid': 'gw-1' },
-            { ':before': 'cursor-xyz' },
-            nodeId
-        )
-        expect(sub).toBeNull()
-    })
-
-    it('returns null when :around cursor is present', () => {
-        const sub = extractRealtimeSubscription(
-            'posts',
-            { 'x-lcid': 'client-1', 'x-lgid': 'gw-1' },
-            { ':around': 'cursor-xyz' },
-            nodeId
-        )
-        expect(sub).toBeNull()
+        expect(ctx.livequery).toBeUndefined()
     })
 })
+
+function createContext(options: {
+    path: string
+    ref: string
+    query?: Record<string, any>
+    params?: Record<string, any>
+    body?: any
+    method: string
+}): LivequeryContext {
+    return {
+        request: {
+            path: options.path,
+            ref: options.ref,
+            method: options.method,
+            body: options.body,
+            params: options.params ?? {},
+            query: options.query ?? {},
+            headers: new Map(),
+        }
+    }
+}
