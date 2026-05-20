@@ -78,15 +78,16 @@ export class LivequeryClient {
         const $ = from(Object.values(this.config.transporters)).pipe(
             mergeMap(transporter => (
                 transporter.query(e).pipe(
-                    tap(result => {
+                    mergeMap(async result => {
                         for (const change of result.changes || []) {
-                            change.type == 'added' && change.data && this.config.storage.add(change.collection_ref, {
+                            change.type == 'added' && change.data && await this.config.storage.add(change.collection_ref, {
                                 id: change.data.id,
                                 ...change.data
                             })
-                            change.type == 'modified' && change.data && this.config.storage.update(change.collection_ref, change.id, change.data)
-                            change.type == 'removed' && this.config.storage.delete(change.collection_ref, change.id)
+                            change.type == 'modified' && change.data && await this.config.storage.update(change.collection_ref, change.id, change.data)
+                            change.type == 'removed' && await this.config.storage.delete(change.collection_ref, change.id)
                         }
+                        return result
                     }),
                     map((result, index) => ({ result, index })),
                     mergeMap(({ result, index }) => {
@@ -97,17 +98,19 @@ export class LivequeryClient {
                         const lock$ = this.#adding.get(e.collection.collection_ref)
 
                         if (!lock$) {
-                            this.#broadcast(e.collection.collection_ref, 'realtime', changes)
-                            return EMPTY
+                            return from(this.#broadcast(e.collection.collection_ref, 'realtime', changes)).pipe(
+                                switchMap(() => EMPTY)
+                            )
                         }
 
                         const ok_changes = changes.filter(c => c.type != 'added')
                         const delay_changes = changes.filter(c => c.type == 'added')
 
-                        this.#broadcast(e.collection.collection_ref, 'realtime', ok_changes)
-                        return lock$.pipe(
-                            tap(() => this.#broadcast(e.collection.collection_ref, 'realtime', delay_changes)),
-                            switchMap(() => EMPTY)
+                        return from(this.#broadcast(e.collection.collection_ref, 'realtime', ok_changes)).pipe(
+                            switchMap(() => lock$.pipe(
+                                mergeMap(() => from(this.#broadcast(e.collection.collection_ref, 'realtime', delay_changes))),
+                                switchMap(() => EMPTY)
+                            ))
                         )
                     })
                 )
@@ -171,9 +174,10 @@ export class LivequeryClient {
                                             filters: { ':after': next.cursor }
                                         })
                                     }),
-                                    tap(result => {
-
-                                        this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])
+                                    mergeMap(result => {
+                                        return from(this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])).pipe(
+                                            map(() => result)
+                                        )
                                     })
 
                                 )
@@ -258,7 +262,7 @@ export class LivequeryClient {
 
         if (collection.mode == 'local-only') {
             const data = await this.config.storage.query<T>(req.ref, req.filters)
-            this.#broadcast(collection.collection_ref, 'query', data.documents.map(doc => {
+            await this.#broadcast(collection.collection_ref, 'query', data.documents.map(doc => {
                 return {
                     collection_ref: collection.collection_ref,
                     id: doc.id,
@@ -270,8 +274,40 @@ export class LivequeryClient {
     }
 
 
-    #broadcast(collection_ref: string, from: RealtimeChangeSource, events: Array<DataChangeEvent>) {
+    async #filterLocalEvents(collection: CollectionMetadata, events: Array<DataChangeEvent>, docs: Map<string, Promise<Doc | null>>) {
+        const changes: DataChangeEvent[] = []
+        for (const event of events) {
+            if (event.type == 'removed') {
+                changes.push(event)
+                continue
+            }
+
+            if (event.type == 'added') {
+                event.data && matchesAllFilters(event.data, collection.filters) && changes.push(event)
+                continue
+            }
+
+            const cache_key = `${event.collection_ref}/${event.id}`
+            const cached = docs.get(cache_key) || this.config.storage.get(collection.collection_ref, event.id)
+            docs.set(cache_key, cached)
+            const doc = await cached
+            if (doc && matchesAllFilters(doc, collection.filters)) {
+                changes.push(event)
+                continue
+            }
+
+            changes.push({
+                collection_ref: event.collection_ref,
+                id: event.id,
+                type: 'removed'
+            })
+        }
+        return changes
+    }
+
+    async #broadcast(collection_ref: string, from: RealtimeChangeSource, events: Array<DataChangeEvent>) {
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
+        const docs = new Map<string, Promise<Doc | null>>()
         for (const collection_id of collections) {
             const collection = this.#collections.get(collection_id)
             if (!collection) continue
@@ -287,12 +323,9 @@ export class LivequeryClient {
                 continue
             }
 
-            // If local first collection 
-            if (collection.mode == 'local-first') {
-                const changes = events.filter(e => {
-                    if (e.type == 'added') return e.data && matchesAllFilters(e.data, collection.filters)
-                    return true
-                })
+            // If local collection 
+            if (collection.mode == 'local-first' || collection.mode == 'local-only') {
+                const changes = await this.#filterLocalEvents(collection, events, docs)
                 // Is collection
                 collection.data$.next({
                     changes,
@@ -336,7 +369,7 @@ export class LivequeryClient {
                             ...e ? { _adding_error: e } : {}
                         }
                         await this.config.storage.update<T>(collection_ref, id, fnd)
-                        this.#broadcast(collection_ref, 'action', [{
+                        await this.#broadcast(collection_ref, 'action', [{
                             collection_ref,
                             type: 'modified',
                             id,
@@ -355,7 +388,7 @@ export class LivequeryClient {
                                 _deleting_error: e
                             }
                             await this.config.storage.update<T>(collection_ref, id, fnd)
-                            this.#broadcast(collection_ref, 'action', [{
+                            await this.#broadcast(collection_ref, 'action', [{
                                 collection_ref,
                                 type: 'modified',
                                 id,
@@ -363,7 +396,7 @@ export class LivequeryClient {
                             }])
                         } else {
                             await this.config.storage.delete<T>(collection_ref, id)
-                            this.#broadcast(collection_ref, 'action', [{
+                            await this.#broadcast(collection_ref, 'action', [{
                                 collection_ref,
                                 type: 'removed',
                                 id
@@ -386,7 +419,7 @@ export class LivequeryClient {
                             _updating_error: e
                         }
                         await this.config.storage.update<T>(collection_ref, id, fnd)
-                        this.#broadcast(collection_ref, 'action', [{
+                        await this.#broadcast(collection_ref, 'action', [{
                             collection_ref,
                             type: 'modified',
                             id,
@@ -417,7 +450,7 @@ export class LivequeryClient {
             }),
             toArray()
         ))
-        this.#broadcast(
+        await this.#broadcast(
             collection_ref,
             'action',
             docs.map(data => ({
@@ -456,7 +489,7 @@ export class LivequeryClient {
             filter(Boolean),
             toArray()
         ))
-        this.#broadcast(
+        await this.#broadcast(
             collection_ref,
             'action',
             merged.map(data => ({
@@ -491,7 +524,7 @@ export class LivequeryClient {
         const deleting_list = merged.filter(doc => doc._deleting)
         const deleted_list = merged.filter(doc => !doc._deleting)
 
-        this.#broadcast(
+        await this.#broadcast(
             collection_ref,
             'action',
             deleting_list.map(({ id }) => ({
@@ -504,7 +537,7 @@ export class LivequeryClient {
             }))
         )
 
-        this.#broadcast(
+        await this.#broadcast(
             collection_ref,
             'action',
             deleted_list.map(({ id }) => ({
@@ -526,8 +559,8 @@ export class LivequeryClient {
         )
     }
 
-    flush(collection_ref: string) {
-        this.#broadcast(collection_ref, 'realtime', [{ collection_ref, id: '*', type: 'removed' }])
+    async flush(collection_ref: string) {
+        await this.#broadcast(collection_ref, 'realtime', [{ collection_ref, id: '*', type: 'removed' }])
         return this.config.storage.flush()
     }
 
