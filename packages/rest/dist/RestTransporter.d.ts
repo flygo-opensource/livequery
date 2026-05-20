@@ -44,9 +44,10 @@ export declare class RestTransporter implements LivequeryTransporter {
     private config;
     private socket;
     constructor(config: RestTransporterConfig);
-    query<T extends Doc>({ ref, filters }: {
+    query<T extends Doc>({ ref, filters, headers }: {
         ref: string;
-        filters: LivequeryFilters<T>;
+        filters?: Partial<LivequeryFilters<T>>;
+        headers?: Record<string, string>;
     }): import("rxjs").Observable<Partial<LivequeryQueryResult>>;
     add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>): Promise<T>;
     update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>): Promise<T>;

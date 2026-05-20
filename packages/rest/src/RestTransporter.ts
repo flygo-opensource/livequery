@@ -1,5 +1,5 @@
 import { of, firstValueFrom, EMPTY, from } from 'rxjs';
-import { catchError, filter, first, map, mergeMap, take } from 'rxjs/operators';
+import { catchError, delay, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/client'
@@ -50,23 +50,52 @@ export class RestTransporter implements LivequeryTransporter {
         }
     }
 
+    #buildUrl(req: { ref: string, action?: string, query?: Record<string, any> }) {
+        const base = this.config.api.replace(/\/+$/, '')
+        const ref = req.ref.replace(/^\/+/, '')
+        const action = req.action ? `/~${encodeURIComponent(req.action)}` : ''
+        const params = new URLSearchParams()
+
+        for (const [key, value] of Object.entries(req.query || {})) {
+            if (value === undefined || value === null) continue
+            if (Array.isArray(value)) {
+                for (const item of value) params.append(key, String(item))
+                continue
+            }
+            params.set(key, String(value))
+        }
+
+        const query = params.toString()
+        return `${base}/${ref}${action}${query ? `?${query}` : ''}`
+    }
+
     async #call<T>(req: Omit<RestTransporterRequest, 'url'> & { ref: string, action?: string }) {
-        const url = `${await this.config.api}/${req.ref}${req.action ? `/~${req.action}` : ''}${Object.keys(req.query || {}).length > 0 ? `?${new URLSearchParams(req.query).toString()}` : ''}`
+        const url = this.#buildUrl(req)
+        const gateway_id = this.socket
+            ? await Promise.race([
+                firstValueFrom(this.socket.$gateway),
+                new Promise<undefined>(r => setTimeout(() => r(undefined), 3000))
+            ])
+            : undefined
         const base_headers = {
             ...req.body ? {
                 'Content-Type': 'application/json'
             } : {},
-            ... this.socket ? {
+            ...this.socket ? {
                 socket_id: this.socket.client_id,
                 'x-lcid': this.socket.client_id,
-                'x-lgid': await firstValueFrom(this.socket.$gateway)
+                ...(gateway_id ? { 'x-lgid': gateway_id } : {})
             } : {}
+        }
+        const request_headers = {
+            ...base_headers,
+            ...req.headers
         }
         const original_request: RestTransporterRequest & { ref: string } = {
             url,
             method: req.method,
             body: req.body,
-            headers: base_headers,
+            headers: request_headers,
             query: req.query,
             ref: req.ref
         }
@@ -84,14 +113,32 @@ export class RestTransporter implements LivequeryTransporter {
             ...modified as any as {},
             headers: {
                 ...req.body && typeof req.body != 'string' ? { 'Content-Type': 'application/json' } : {},
-                ...base_headers,
+                ...request_headers,
                 ...headers
             },
         }
-        const response: LivequeryResult<T> = fake_response ? fake_response : await (async () => {
+        const response: LivequeryResult<T> = await (async () => {
             try {
                 const result = await fetch(request.url, request);
-                return parseJson(await result.text()) || {}
+                const body = await result.text()
+                const parsed = parseJson(body)
+                if (!result.ok) {
+                    return {
+                        error: {
+                            code: `HTTP_${result.status}`,
+                            message: parsed?.error?.message || result.statusText || 'Request failed'
+                        }
+                    }
+                }
+                if (!parsed) {
+                    return {
+                        error: {
+                            code: 'InvalidResponse',
+                            message: 'The server did not return valid JSON.'
+                        }
+                    }
+                }
+                return parsed
             } catch (e) {
                 return {
                     error: {
@@ -107,8 +154,13 @@ export class RestTransporter implements LivequeryTransporter {
         return response.data
     }
 
-    query<T extends Doc>({ ref, filters }: { ref: string, filters: LivequeryFilters<T> }) {
-        const ready$ = from(this.socket ? (this.socket.pipe(filter(s => !!s.connected), map(() => Date.now()))) : of(1)).pipe(first())
+    query<T extends Doc>({ ref, filters, headers }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: Record<string, string> }) {
+        const ready$ = this.socket
+            ? merge(
+                this.socket.pipe(filter(s => !!s.connected), map(() => Date.now())),
+                of(Date.now()).pipe(delay(3000))
+            ).pipe(first())
+            : of(1)
         const watch$ = (!this.socket || !filters || filters[':after'] || filters[':before'] || filters[':around']) ? EMPTY : this.socket.listen(ref)
         const refs = ref.split('/')
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
@@ -122,7 +174,8 @@ export class RestTransporter implements LivequeryTransporter {
                     from(this.#call<LivequeryCollectionResponse<T>>({
                         ref,
                         method: 'GET',
-                        query: filters
+                        query: filters,
+                        headers
                     })).pipe(
                         map(collection => {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)

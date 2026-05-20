@@ -11,7 +11,6 @@ export declare class Socket extends BehaviorSubject<LivequerySocketMetadata> {
     private endpoint;
     readonly client_id: string;
     readonly $gateway: ReplaySubject<string>;
-    readonly $connected: BehaviorSubject<boolean>;
     constructor(endpoint: string);
     stop(): void;
     private $sync;

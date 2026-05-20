@@ -5,17 +5,22 @@
     "": {
       "name": "@livequery/rest",
       "dependencies": {
-        "rxjs": "^7.8.1",
-        "uuid": "^13.0.0",
+        "@msgpack/msgpack": "^3.0.0",
       },
       "devDependencies": {
-        "@livequery/client": "^2.0.105",
+        "@livequery/client": "^2.0.135",
         "typescript": "5.6.3",
+      },
+      "peerDependencies": {
+        "rxjs": "^7.8.1",
+        "uuid": "^13.0.0",
       },
     },
   },
   "packages": {
-    "@livequery/client": ["@livequery/client@2.0.105", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-99E3aq9BskEn7yX3Xl/Y/xU2IL74gjPIKhFPhzbSDpJI6Yp8WBBPDBBV4CbJDAFLyOwEQJhatK4i+ZPZ0WdeSA=="],
+    "@livequery/client": ["@livequery/client@2.0.135", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-AY/vbu7xFYYKVlTJoUUcYdhXVZOoJ58FNSvXijFJI+O1jg+yRIHvqMEHOEzu4qftQQ9giYMlmNv6FgmG/im01Q=="],
+
+    "@msgpack/msgpack": ["@msgpack/msgpack@3.1.3", "", {}, "sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA=="],
 
     "rxjs": ["rxjs@7.8.2", "", { "dependencies": { "tslib": "^2.1.0" } }, "sha512-dhKf903U/PQZY6boNNtAGdWbG85WAbjT/1xYoZIC7FAY0yWapOBQVsVrDl58W86//e1VpMNBtRV4MaXfdMySFA=="],
 

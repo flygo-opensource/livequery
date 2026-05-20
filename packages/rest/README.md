@@ -1,25 +1,23 @@
 # @livequery/rest
 
-`@livequery/rest` is a REST + WebSocket transporter for `@livequery/client`.
+`@livequery/rest` is the REST and optional WebSocket transport adapter for `@livequery/client`.
 
-This repository is the transport library package, not an application. Changes here should preserve reusable transport behavior unless a task explicitly targets a breaking change.
+Use this package when your application state is managed by `@livequery/client`, but the remote backend is exposed through HTTP endpoints and, optionally, a realtime WebSocket gateway.
 
-It adapts the `LivequeryTransporter` interface to:
+This package is transport-only. It does not implement local cache, optimistic state, collection modes, or reactive document state. Those responsibilities stay in `@livequery/client`.
 
-- HTTP requests for `query`, `add`, `update`, `delete`, and `trigger`
-- optional WebSocket subscriptions for realtime collection updates
-- request/response hooks for auth, caching, logging, or mocking
+## What It Does
 
-This package does not implement local cache or collection state management. That stays in `@livequery/client`. This package is only the transport layer between a livequery client and your backend.
+`RestTransporter` implements the `LivequeryTransporter` contract:
 
-## AI Agent Guidance
+- `query()` performs HTTP `GET` requests and emits `LivequeryQueryResult` changes.
+- `add()` performs HTTP `POST` requests.
+- `update()` performs HTTP `PATCH` requests.
+- `delete()` performs HTTP `DELETE` requests.
+- `trigger()` performs action calls through `POST /<ref>/~<action>`.
+- When `ws` is configured, `query()` can merge server-pushed realtime changes from `Socket`.
 
-Repository-specific agent guidance lives in `AGENTS.md` and `copilot-instructions.md`.
-
-- `AGENTS.md` is the implementation-focused guide for coding agents modifying this package.
-- `copilot-instructions.md` provides repo-level instructions for Copilot when generating or reviewing code in this workspace.
-- Both documents assume this repo is a transport library package, so agent changes should avoid app-specific scaffolding and should preserve public API compatibility by default.
-- Agents generating consumer code should build around a shared `RestTransporter` inside a shared `LivequeryClient` instance.
+`Socket` manages the WebSocket connection, client id, gateway handshake, subscriptions, reconnect loop, and JSON/MessagePack message parsing.
 
 ## Installation
 
@@ -31,21 +29,9 @@ npm install @livequery/rest
 bun add @livequery/rest
 ```
 
-## What It Implements
+## Basic Usage
 
-`RestTransporter` implements the `LivequeryTransporter` contract from `@livequery/client`:
-
-- `query()` returns an `Observable<Partial<LivequeryQueryResult>>`
-- `add()` sends `POST`
-- `update()` sends `PATCH`
-- `delete()` sends `DELETE`
-- `trigger()` sends `POST /<ref>/~<action>`
-
-When a WebSocket endpoint is configured, `query()` can also attach a realtime subscription and merge server-pushed `DataChangeEvent`s into the observable stream.
-
-## Quick Start
-
-### REST only
+### REST Only
 
 ```ts
 import { RestTransporter } from '@livequery/rest'
@@ -55,7 +41,7 @@ const transporter = new RestTransporter({
 })
 ```
 
-### REST + realtime
+### REST + Realtime
 
 ```ts
 import { RestTransporter } from '@livequery/rest'
@@ -67,6 +53,8 @@ const transporter = new RestTransporter({
 ```
 
 ### With `@livequery/client`
+
+Create one transporter per backend boundary and reuse it in a shared `LivequeryClient`.
 
 ```ts
 import { LivequeryClient } from '@livequery/client'
@@ -85,7 +73,7 @@ const client = new LivequeryClient({
 })
 ```
 
-## Constructor
+## Configuration
 
 ```ts
 type RestTransporterConfig = {
@@ -104,18 +92,16 @@ type RestTransporterConfig = {
 }
 ```
 
-### Options
-
-| Option | Type | Description |
+| Option | Required | Meaning |
 | --- | --- | --- |
-| `api` | `string` | Base HTTP URL used for all REST calls. |
-| `ws` | `string` | Optional WebSocket endpoint for realtime sync. |
-| `onRequest` | `function` | Optional interceptor before `fetch()`. Can override request fields or return a fake response. |
-| `onResponse` | `function` | Optional hook called after the response is resolved. |
+| `api` | Yes | Base HTTP URL used for all REST calls, for example `https://api.example.com`. Trailing slashes are normalized. |
+| `ws` | No | WebSocket endpoint for realtime sync. When omitted, the package works as a REST-only transporter. |
+| `onRequest` | No | Hook called before `fetch()`. Use it to add headers, override request fields, or return a fake `response` to skip the network. |
+| `onResponse` | No | Hook called after a network or fake response is available. Use it for logging, metrics, error inspection, or tracing. |
 
 ## Request Model
 
-Outgoing requests use this shape internally:
+Outgoing requests use this internal shape:
 
 ```ts
 type RestTransporterRequest = {
@@ -127,40 +113,115 @@ type RestTransporterRequest = {
 }
 ```
 
-The transporter builds URLs like this:
+URL construction:
 
 ```text
-<api>/<ref>
-<api>/<ref>?<query>
-<api>/<ref>/~<action>
+GET    <api>/<ref>?<query>
+POST   <api>/<ref>
+PATCH  <api>/<collectionRef>/<id>
+DELETE <api>/<collectionRef>/<id>
+POST   <api>/<ref>/~<action>
 ```
 
-Examples:
+Query values are serialized with `URLSearchParams`.
 
-```text
-GET    /users
-GET    /users/123
-POST   /users
-PATCH  /users/123
-DELETE /users/123
-POST   /users/~ban
+- `null` and `undefined` query values are skipped.
+- Array query values are encoded as repeated params, for example `tag:in=a&tag:in=b`.
+- Action names are URI encoded.
+
+## Methods
+
+### `query({ ref, filters, headers })`
+
+Runs a collection or document read through HTTP `GET`.
+
+```ts
+const result$ = transporter.query({
+  ref: 'users',
+  filters: {
+    ':limit': 20,
+    'role:in': ['admin', 'editor'],
+    'createdAt:sort': 'desc'
+  },
+  headers: {
+    Authorization: `Bearer ${token}`
+  }
+})
+
+result$.subscribe(result => {
+  if (result.error) return console.error(result.error)
+  console.log(result.changes)
+})
+```
+
+Parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `ref` | Collection ref such as `users`, or document ref such as `users/u1`. |
+| `filters` | Optional `LivequeryFilters<T>` object. Paging filters include `:limit`, `:after`, `:before`, `:around`, and `:page`. |
+| `headers` | Optional per-query headers. These are merged into the outgoing request. |
+
+When `ws` is configured, `query()` waits briefly for the socket to connect so it can attach socket metadata headers. If the socket is not ready, the REST query still runs.
+
+Realtime watching is skipped for cursor/around paging filters:
+
+- `:after`
+- `:before`
+- `:around`
+
+### `add(ref, data)`
+
+Creates a document through HTTP `POST`.
+
+```ts
+const user = await transporter.add('users', {
+  name: 'Ada',
+  role: 'admin'
+})
+```
+
+Private fields whose names start with `_` are not sent.
+
+### `update(collectionRef, id, data)`
+
+Updates a document through HTTP `PATCH`.
+
+```ts
+const user = await transporter.update('users', 'u1', {
+  name: 'Ada Lovelace'
+})
+```
+
+### `delete(collectionRef, id)`
+
+Deletes a document through HTTP `DELETE`.
+
+```ts
+await transporter.delete('users', 'u1')
+```
+
+### `trigger({ ref, action, payload })`
+
+Calls a custom backend action through `POST /<ref>/~<action>`.
+
+```ts
+await transporter.trigger({
+  ref: 'users/u1',
+  action: 'ban',
+  payload: {
+    reason: 'policy_violation'
+  }
+})
 ```
 
 ## Hooks
 
-### `onRequest`
-
-Use `onRequest` to:
-
-- inject auth headers
-- override request body or URL
-- short-circuit requests from cache
-- mock server responses in tests
+### Add Auth Headers
 
 ```ts
 const transporter = new RestTransporter({
   api: 'https://api.example.com',
-  ws: 'wss://api.example.com/ws',
   onRequest: async ({ headers }) => {
     const token = await getAccessToken()
 
@@ -174,7 +235,9 @@ const transporter = new RestTransporter({
 })
 ```
 
-To skip the network completely, return a `response`:
+### Serve A Cached Response
+
+Returning `response` from `onRequest` skips `fetch()` entirely. `onResponse` still runs.
 
 ```ts
 const transporter = new RestTransporter({
@@ -192,28 +255,24 @@ const transporter = new RestTransporter({
 })
 ```
 
-### `onResponse`
-
-Use `onResponse` for logging, metrics, or centralized error inspection:
+### Log Responses
 
 ```ts
 const transporter = new RestTransporter({
   api: 'https://api.example.com',
   onResponse: async (request, response) => {
-    if (response.error) {
-      console.error('Livequery REST error', {
-        url: request.url,
-        method: request.method,
-        error: response.error
-      })
-    }
+    console.info('livequery request', {
+      method: request.method,
+      url: request.url,
+      failed: Boolean(response.error)
+    })
   }
 })
 ```
 
-## REST Response Contract
+## Backend Contract
 
-The transporter expects your backend to return a `LivequeryResult<T>` envelope:
+The backend must return a `LivequeryResult<T>` envelope:
 
 ```ts
 type LivequeryResult<T> = {
@@ -225,33 +284,11 @@ type LivequeryResult<T> = {
 }
 ```
 
-### Collection query response
+Do not return raw arrays or raw documents. Wrap responses in `{ data }`.
 
-For collection reads, `data` should look like:
+### Collection Reads
 
-```ts
-type LivequeryCollectionResponse<T> = {
-  summary?: Record<string, any>
-  items: T[]
-  subscription_token?: string
-  count?: {
-    prev: number
-    next: number
-    total: number
-    current: number
-  }
-  has?: {
-    prev: boolean
-    next: boolean
-  }
-  cursor?: {
-    first: string
-    last: string
-  }
-}
-```
-
-Example:
+For collection refs, return `data.items`:
 
 ```json
 {
@@ -282,24 +319,11 @@ Example:
 }
 ```
 
-### Single document response
+`query()` converts each item to an `added` change for `@livequery/client`.
 
-For document reads, `data` should contain `item`:
+### Document Reads
 
-```json
-{
-  "data": {
-    "item": {
-      "id": "u1",
-      "name": "Ada"
-    }
-  }
-}
-```
-
-### Create response
-
-`add()` accepts either of these backend shapes:
+For document refs, return `data.item`:
 
 ```json
 {
@@ -311,6 +335,10 @@ For document reads, `data` should contain `item`:
   }
 }
 ```
+
+### Create Responses
+
+`add()` accepts either a direct document:
 
 ```json
 {
@@ -321,78 +349,75 @@ For document reads, `data` should contain `item`:
 }
 ```
 
-## Query Output Shape
+or a named wrapper such as `item`:
 
-`query()` converts server data into the shape expected by `@livequery/client`:
-
-```ts
-type LivequeryQueryResult = {
-  changes: DataChangeEvent[]
-  summary: Record<string, any>
-  paging: {
-    total: number
-    current: number
-    next?: { count: number; cursor: string }
-    prev?: { count: number; cursor: string }
+```json
+{
+  "data": {
+    "item": {
+      "id": "u1",
+      "name": "Ada"
+    }
   }
-  source: 'query' | 'realtime' | 'action'
-  error: { code: string; message: string }
 }
 ```
 
-Collection responses are converted to `added` events for each returned item. Document responses are converted to a single `added` event for the returned document.
+## Realtime WebSocket
 
-## Realtime
-
-If `ws` is provided, the transporter creates a `Socket` instance and adds these headers to REST calls:
+When `ws` is configured, `RestTransporter` creates a `Socket` and attaches these metadata headers to REST calls:
 
 - `socket_id`
 - `x-lcid`
-- `x-lgid`
+- `x-lgid`, when the gateway id has been received from `hello`
 
-This lets your backend bind the HTTP query to the active realtime session.
+This lets the backend bind an HTTP query to the active realtime socket.
 
-### Realtime flow
+### Realtime Flow
 
-1. A collection query returns `subscription_token`.
-2. The transporter forwards that token to the socket with a `subscribe` event.
-3. The socket listens for server `sync` messages.
-4. Incoming changes are emitted as `DataChangeEvent`s with `source: 'realtime'`.
+1. The socket opens and sends `start`.
+2. The server replies with `hello`.
+3. A collection HTTP query returns `subscription_token`.
+4. The transporter sends `subscribe` through the socket.
+5. The server pushes `sync` messages.
+6. `Socket.listen(ref)` emits `DataChangeEvent`s.
 
-Realtime listening is only attached for standard collection queries. It is skipped when:
+### WebSocket Messages
 
-- no `ws` endpoint is configured
-- the request is a cursor query using `:after`
-- the request is a cursor query using `:before`
-- the request is an around query using `:around`
-
-### WebSocket protocol expected by `Socket`
-
-When the socket opens, it sends:
+When the socket opens, the client sends:
 
 ```json
 { "event": "start", "data": { "id": "<client_id>" } }
 ```
 
-It also sends a heartbeat every 60 seconds:
+Every 60 seconds after open, the client sends:
 
 ```json
 { "event": "ping" }
 ```
 
-To subscribe a collection query, it sends:
+To subscribe:
 
 ```json
 { "event": "subscribe", "data": { "realtime_token": "<token>" } }
 ```
 
-The server should respond with a hello message containing the gateway id:
+The server should reply with:
 
 ```json
 { "event": "hello", "gid": "gateway-1" }
 ```
 
-Realtime sync messages should look like:
+If the server wants the client to send future socket messages as MessagePack binary payloads, set `binary: true`:
+
+```json
+{ "event": "hello", "gid": "gateway-1", "binary": true }
+```
+
+The initial `start` message is always JSON because it is sent before `hello` is received. Messages sent after `hello.binary === true`, such as `ping`, `subscribe`, and `unsubscribe`, are encoded with MessagePack.
+
+Incoming messages may be JSON strings or MessagePack binary payloads. The socket parses JSON strings first and decodes binary payloads with MessagePack.
+
+Realtime sync messages should use this shape:
 
 ```json
 {
@@ -410,7 +435,7 @@ Realtime sync messages should look like:
 }
 ```
 
-Each sync change is routed to `listen(ref)` subscribers and normalized to:
+Each sync change is normalized to:
 
 ```ts
 type DataChangeEvent = {
@@ -421,66 +446,91 @@ type DataChangeEvent = {
 }
 ```
 
-## Public API
+## Direct `Socket` Usage
 
-### `RestTransporter`
-
-```ts
-import { RestTransporter } from '@livequery/rest'
-```
-
-Methods:
-
-- `query({ ref, filters })`
-- `add(ref, data)`
-- `update(collectionRef, id, data)`
-- `delete(collectionRef, id)`
-- `trigger({ ref, action, payload })`
-
-### `Socket`
+Most applications should use `RestTransporter` rather than `Socket` directly. `Socket` is exported for low-level integrations and debugging.
 
 ```ts
 import { Socket } from '@livequery/rest'
-```
 
-Subpath import is also available:
-
-```ts
-import { Socket } from '@livequery/rest/Socket'
-```
-
-The socket class is exported for low-level integrations and debugging.
-
-Example:
-
-```ts
 const socket = new Socket('wss://api.example.com/ws')
 
-socket.listen('users').subscribe(change => {
+const sub = socket.listen('users').subscribe(change => {
   console.log(change)
 })
 
+socket.subscribeWith('rt_abc123')
+
+sub.unsubscribe()
 socket.stop()
 ```
 
 ## Error Handling
 
-If `fetch()` throws or the backend returns an error envelope, the transporter surfaces it as:
+If `fetch()` throws, the backend returns an error envelope, the backend returns invalid JSON, or the HTTP status is non-2xx, the transporter surfaces a structured error.
+
+For `query()`, errors are emitted as observable results:
 
 ```ts
 {
+  source: 'query',
   error: {
-    code: string,
-    message: string
+    code: 'HTTP_500',
+    message: 'Internal Server Error'
   }
 }
 ```
 
-For `query()`, errors are emitted as an observable result with `source: 'query'`.
-
 For `add()`, `update()`, `delete()`, and `trigger()`, errors are thrown as rejected promises.
 
-## Build
+Invalid JSON becomes:
+
+```ts
+{
+  code: 'InvalidResponse',
+  message: 'The server did not return valid JSON.'
+}
+```
+
+## Practical Example
+
+```ts
+import { LivequeryClient } from '@livequery/client'
+import { RestTransporter } from '@livequery/rest'
+
+export const livequery = new LivequeryClient({
+  storage,
+  transporters: {
+    rest: new RestTransporter({
+      api: import.meta.env.VITE_API_URL,
+      ws: import.meta.env.VITE_WS_URL,
+      onRequest: async ({ headers }) => ({
+        headers: {
+          ...headers,
+          Authorization: `Bearer ${await auth.getToken()}`
+        }
+      }),
+      onResponse: (_request, response) => {
+        if (response.error?.code === 'Unauthorized') {
+          auth.logout()
+        }
+      }
+    })
+  }
+})
+```
+
+Application code should create collections from the shared `LivequeryClient`. Do not create a new transporter per component render.
+
+## Development
+
+Run tests:
+
+```bash
+bun run test
+```
+
+Build:
 
 ```bash
 bun run build
@@ -489,15 +539,19 @@ bun run build
 Build steps:
 
 - clean `dist/`
-- emit Node.js ESM files with TypeScript (`module: NodeNext`)
+- emit Node.js ESM files with TypeScript
 - generate `.js`, `.d.ts`, `.js.map`, and `.d.ts.map`
 
-The published package is strict ESM (`"type": "module"`) and exposes these entrypoints:
+The package exposes these entrypoints:
 
 - `@livequery/rest`
 - `@livequery/rest/RestTransporter`
 - `@livequery/rest/Socket`
 - `@livequery/rest/helpers/parseJson`
+
+## AI Agent Guidance
+
+Repository-specific agent guidance lives in `AGENTS.md`. That file is for coding agents modifying this repository. This README is for package users.
 
 ## License
 
