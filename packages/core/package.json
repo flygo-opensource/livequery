@@ -5,12 +5,13 @@
     "repository": {
         "url": "git@github.com:livequery/core.git"
     },
-    "version": "2.0.105",
+    "version": "2.0.106",
     "description": "Framework-agnostic core utilities for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
     "files": [
-        "build/**/*"
+        "build/**/*",
+        "LIVEQUERY_SPEC.md"
     ],
     "scripts": {
         "test": "bun test tests/",

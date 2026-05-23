@@ -19,6 +19,20 @@ It provides:
 
 The package does not execute database queries and does not depend on one HTTP framework.
 
+## Livequery Specification
+
+Before implementing request parsing, handlers, datasources, custom actions, response bodies, or realtime emission behavior, read `LIVEQUERY_SPEC.md`.
+
+That file is the canonical framework- and database-independent definition of:
+
+- Livequery refs.
+- Collection and document path grammar.
+- Default HTTP-method actions.
+- Custom actions using `~verb`, which must use `POST`.
+- Standard response envelopes: success responses use `{ data: ... }`, errors use `{ error: { message, code } }`.
+- Fake or non-database Livequery handlers.
+- Realtime create/update/delete emission with `WebsocketGateway.next(...)`.
+
 ## Current Public API
 
 The public entrypoint is `src/index.ts`.

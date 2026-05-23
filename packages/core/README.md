@@ -4,6 +4,8 @@
 
 It provides the shared primitives used by HTTP adapters, data-source adapters, API gateway processes, service processes, and realtime synchronization layers. The package does not run database queries by itself and does not require a specific HTTP framework.
 
+The framework-independent Livequery protocol is defined in [`LIVEQUERY_SPEC.md`](./LIVEQUERY_SPEC.md). Read that file for the canonical definitions of refs, collection/document paths, actions, custom actions, response envelopes, fake/non-database handlers, and realtime update emission.
+
 ## What This Project Does
 
 Livequery treats an HTTP request path as a structured data reference.
