@@ -4,7 +4,7 @@
 
 It provides the shared primitives used by HTTP adapters, data-source adapters, API gateway processes, service processes, and realtime synchronization layers. The package does not run database queries by itself and does not require a specific HTTP framework.
 
-The framework-independent Livequery protocol is defined in [`LIVEQUERY_SPEC.md`](./LIVEQUERY_SPEC.md). Read that file for the canonical definitions of refs, collection/document paths, actions, custom actions, response envelopes, fake/non-database handlers, and realtime update emission.
+The framework-independent Livequery protocol is defined in [`LIVEQUERY_SPEC.md`](./LIVEQUERY_SPEC.md). Read that file for the canonical definitions of refs, collection/document paths, actions, custom actions, response envelopes, response item identity, fake/non-database handlers, and realtime update emission.
 
 ## What This Project Does
 
@@ -83,6 +83,8 @@ type CollectionResponse<T> = {
 ```
 
 Use this when a handler returns a list of items with paging and cursor metadata.
+
+When the collection route contains path parameters, every returned item MUST include each route parameter as a same-name field with the same value. For example, `/livequery/category/:category_id/tag/:tag/tasks` MUST return task items with `category_id` and `tag`.
 
 ### `DocumentResponse<T>`
 
