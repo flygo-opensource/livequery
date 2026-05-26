@@ -26,6 +26,7 @@ Keep both APIs working unless the user explicitly asks for a breaking change.
 - `src/Cursor.ts`: cursor encode/decode helper.
 - `src/SmartCache.ts`: promise cache for native collection handles.
 - `src/DataChangePayload.ts`: type-only realtime/change payload contract.
+- `src/MongodbRealtime.ts`: MongoDB change stream watcher that formats Livequery websocket sync payloads.
 
 ## Core Type Integration
 
@@ -289,6 +290,19 @@ Fields:
 - `refs`: affected refs.
 - `new_doc`: new document state.
 
+### `MongodbRealtime`
+
+MongoDB change stream watcher for static realtime routes.
+
+Responsibilities:
+
+- Watch GET routes with `realtime: true` and a static string `collection`.
+- Skip routes with dynamic collection, database, or connection resolver functions.
+- Enable MongoDB pre/post images by default before opening a change stream.
+- Convert MongoDB change stream events to Livequery websocket sync payloads.
+- Format nested refs from route path params using `refFields`.
+- Support array membership refs with `{ field, array: true }`.
+
 ## Configuration Types
 
 ### `MongoDatasourceConfig`
@@ -316,6 +330,7 @@ type RouteOptions = {
   collection: string | ((req: LivequeryRequest) => Promise<string> | string)
   db?: string | ((req: LivequeryRequest) => Promise<string> | string)
   connection?: string | ((req: LivequeryRequest) => Promise<string> | string)
+  refFields?: Record<string, string | { field: string, array?: boolean }>
   objectIdFields?: string[]
 }
 ```
@@ -325,6 +340,7 @@ Rules:
 - `collection` is required.
 - `collection`, `db`, and `connection` may be strings or resolver functions.
 - Resolver functions receive the normalized adapter request.
+- `refFields` maps nested route params to document fields for realtime ref formatting.
 - `objectIdFields` converts top-level matching fields in `req.keys` and `req.body`.
 - Nested ObjectId conversion is not implemented.
 

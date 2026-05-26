@@ -92,6 +92,17 @@ export class MongoQuery {
         return stack.pop();
     }
 
+    static #parse_array(value: unknown) {
+        if (Array.isArray(value)) return value
+        if (typeof value != 'string') return []
+        try {
+            const parsed = JSON.parse(value)
+            return Array.isArray(parsed) ? parsed : []
+        } catch {
+            return []
+        }
+    }
+
     static #parse_summary<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
 
 
@@ -233,8 +244,8 @@ export class MongoQuery {
                     ne: () => {
                         return { $ne: value }
                     },
-                    in: () => ({ $in: JSON.parse(value as string) }),
-                    nin: () => ({ $nin: JSON.parse(value as string) }),
+                    in: () => ({ $in: this.#parse_array(value) }),
+                    nin: () => ({ $nin: this.#parse_array(value) }),
                     'eq-number': () => ({ $eq: !isNaN(Number(value)) ? Number(value) : 0 }),
                     'neq-number': () => ({ $ne: !isNaN(Number(value)) ? Number(value) : 0 }),
                     'eq-boolean': () => ({ $eq: `${value}`.toLowerCase() == 'true' ? true : false }),

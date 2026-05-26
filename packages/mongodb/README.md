@@ -24,6 +24,7 @@ For local development in this workspace, `@livequery/core` is installed as a dev
 ```ts
 export * from './MongoDatasource.js'
 export * from './DataChangePayload.js'
+export * from './MongodbRealtime.js'
 export * from './types.js'
 ```
 
@@ -305,6 +306,76 @@ Returns:
 
 The collection cache key includes connection, database, and collection name to avoid reusing collection handles across tenants or connections.
 
+### `MongodbRealtime`
+
+MongoDB change stream watcher for realtime Livequery updates. This replaces the need to use the separate `@livequery/mongodb-mapper` package in native MongoDB projects.
+
+```ts
+import { WebsocketGateway } from '@livequery/core'
+import { MongoDatasource, MongodbRealtime } from '@livequery/mongodb'
+
+const routes = [
+  {
+    method: 'GET',
+    path: '/products',
+    collection: 'products',
+    realtime: true,
+  },
+]
+
+const datasource = new MongoDatasource({
+  connections: { default: client },
+  databases: ['main'],
+})
+
+await datasource.init(routes)
+
+const websocketGateway = new WebsocketGateway(server)
+
+new MongodbRealtime()
+  .watch(datasource.config, routes)
+  .subscribe(websocketGateway)
+```
+
+Realtime route requirements:
+
+- `method` must be `GET` or legacy method `0`.
+- `realtime` must be `true`.
+- `collection` must be a static string. Dynamic collection, database, or connection resolver functions are skipped because database watchers must be known up front.
+- When watching a `MongoClient`, `db` or `config.databases` decides which database names to watch. When watching a `Db`, that database is used directly.
+
+By default, `MongodbRealtime` enables MongoDB pre/post images with `collMod` and watches with `fullDocument: 'updateLookup'` and `fullDocumentBeforeChange: 'whenAvailable'`.
+
+Disable the `collMod` call when your deployment manages pre/post images separately:
+
+```ts
+new MongodbRealtime({ enablePreAndPostImages: false })
+```
+
+For nested collection refs, use `refFields` to map route params to document fields:
+
+```ts
+{
+  method: 'GET',
+  path: '/users/:id/posts',
+  collection: 'posts',
+  realtime: true,
+  refFields: {
+    id: 'userId',
+  },
+}
+```
+
+An inserted `{ _id: 'post1', userId: 'user1', title: 'Hello' }` emits:
+
+```ts
+{
+  ref: 'users/user1/posts',
+  type: 'added',
+  data: { id: 'post1', userId: 'user1', title: 'Hello' },
+}
+```
+
 ### `DataChangePayload<T>`
 
 Type-only realtime/change payload contract.
@@ -354,16 +425,18 @@ type RouteOptions = {
   collection: string | ((req: LivequeryRequest) => Promise<string> | string)
   db?: string | ((req: LivequeryRequest) => Promise<string> | string)
   connection?: string | ((req: LivequeryRequest) => Promise<string> | string)
+  refFields?: Record<string, string | { field: string, array?: boolean }>
   objectIdFields?: string[]
 }
 ```
 
 Fields:
 
-- `realtime`: optional marker for realtime routes. The current adapter does not use it for query execution.
+- `realtime`: marks a static collection route for `MongodbRealtime.watch()`. Query execution itself is unchanged.
 - `collection`: required collection name or resolver function.
 - `db`: optional database name or resolver function.
 - `connection`: optional connection name or resolver function.
+- `refFields`: optional mapping from nested route params to document fields for realtime ref formatting.
 - `objectIdFields`: top-level request fields that should be converted from valid string ids to `ObjectId`.
 
 Use function values when tenant, database, or collection depends on request keys.

@@ -46,6 +46,41 @@ describe('MongoQuery.query', () => {
         expect((await MongoQuery.query(baseRequest({ options: { ':limit': 'x' } }), collection as any)).limit).toBe(10)
     })
 
+    test('builds in and nin filters from JSON strings or arrays', async () => {
+        const jsonCollection = createMockCollection('products', collectionReadResponse())
+        const arrayCollection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    'status:in': '["active","pending"]',
+                    'category:nin': '["archived"]',
+                },
+            }),
+            jsonCollection as any
+        )
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    'status:in': ['active', 'pending'],
+                    'category:nin': ['archived'],
+                },
+            }),
+            arrayCollection as any
+        )
+
+        const expectedMatch = {
+            $match: {
+                status: { $in: ['active', 'pending'] },
+                category: { $nin: ['archived'] },
+            },
+        }
+
+        expect(jsonCollection.aggregateCalls[0][1]).toEqual(expectedMatch)
+        expect(arrayCollection.aggregateCalls[0][1]).toEqual(expectedMatch)
+    })
+
     test('builds document aggregation and converts key id to _id', async () => {
         const id = '507f1f77bcf86cd799439011'
         const collection = createMockCollection('products', [{ id, name: 'phone' }])

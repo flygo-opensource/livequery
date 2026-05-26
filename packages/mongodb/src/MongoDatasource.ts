@@ -36,6 +36,7 @@ export type RouteOptions = {
     collection: string | ((req: LivequeryRequest) => Promise<string> | string),
     db?: string | ((req: LivequeryRequest) => Promise<string> | string),
     connection?: string | ((req: LivequeryRequest) => Promise<string> | string),
+    refFields?: Record<string, string | { field: string, array?: boolean }>
     objectIdFields?: string[]
 }
 
