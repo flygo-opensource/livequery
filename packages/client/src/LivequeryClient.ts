@@ -1,5 +1,5 @@
 import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
-import type { LivequeryStorge } from "./LivequeryStorge.js"
+import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
 import { tryCatch } from "./helpers/tryCatch.js"
@@ -10,7 +10,7 @@ import { uuidv7 } from 'uuidv7'
 
 export type LivequeryClientOptions = {
     transporters: Record<string, LivequeryTransporter>
-    storage: LivequeryStorge
+    storage: LivequeryStorage
 }
 
 export type LivequeryLoadingState = null | 'next' | 'prev' | 'all'
@@ -37,7 +37,7 @@ export type ConflictResolverFunction = <T extends Doc>(e: {
 
 
 export type LivequeryClientConfig = {
-    storage: LivequeryStorge
+    storage: LivequeryStorage
     transporters: Record<string, LivequeryTransporter>
 }
 
@@ -557,6 +557,12 @@ export class LivequeryClient {
             filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
             mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
         )
+    }
+
+    async seedToStorage<T extends Doc>(collection_ref: string, docs: T[]) {
+        for (const doc of docs) {
+            await this.config.storage.add<T>(collection_ref, doc as any)
+        }
     }
 
     async flush(collection_ref: string) {

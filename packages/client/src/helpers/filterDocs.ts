@@ -1,7 +1,5 @@
 import type { Doc, LivequeryFilters } from "../types.js"
 
-type Primitive = string | number | boolean | null | undefined
-
 export type LivequeryFilterInput<T extends Doc> = Partial<LivequeryFilters<T>> | Record<string, any>
 
 export function filterDocs<T extends Doc>(
@@ -32,48 +30,52 @@ export function matchesAllFilters(doc: Record<string, any>, filters: Record<stri
 
 function matchByOperator(actual: unknown, op: string, expected: unknown) {
     switch (op) {
+        case 'ne':
+            return actual !== expected
         case 'gt':
-            return asNumber(actual) > asNumber(expected)
+            return (actual as any) > asNumber(expected)
         case 'gte':
-            return asNumber(actual) >= asNumber(expected)
+            return (actual as any) >= asNumber(expected)
         case 'lt':
-            return asNumber(actual) < asNumber(expected)
+            return (actual as any) < asNumber(expected)
         case 'lte':
-            return asNumber(actual) <= asNumber(expected)
+            return (actual as any) <= asNumber(expected)
         case 'eq-number':
-            return asNumber(actual) === asNumber(expected)
+            return actual === asNumber(expected)
+        case 'neq-number':
+            return actual !== asNumber(expected)
         case 'in':
-            return Array.isArray(expected) ? expected.includes(actual as Primitive) : false
+            return parseArray(expected).includes(actual)
         case 'nin':
-            return Array.isArray(expected) ? !expected.includes(actual as Primitive) : true
-        case 'include':
-            return Array.isArray(actual) ? actual.includes(expected) : false
-        case 'boolean':
-            return matchBoolean(actual, expected)
+            return !parseArray(expected).includes(actual)
+        case 'eq-boolean':
+            return actual === (String(expected).toLowerCase() === 'true')
+        case 'neq-boolean':
+            return actual !== (String(expected).toLowerCase() === 'false' ? false : true)
+        case 'eq-null':
+            return actual === null
+        case 'neq-null':
+            return actual !== null
+        case 'eq-oid':
+            return String(actual) === String(expected)
+        case 'neq-oid':
+            return String(actual) !== String(expected)
         case 'like':
-            return String(actual || '').toLowerCase().includes(String(expected || '').toLowerCase())
-        case 'null':
-            return expected === 'null-only'
-                ? (actual === null || typeof actual === 'undefined')
-                : (actual !== null && typeof actual !== 'undefined')
+            return new RegExp(String(expected)).test(String(actual || ''))
         case 'eq':
         default:
             return actual === expected
     }
 }
 
-function matchBoolean(actual: unknown, expected: unknown) {
-    switch (expected) {
-        case 'true':
-            return actual === true
-        case 'false':
-            return actual === false
-        case 'not-true':
-            return actual !== true
-        case 'not-false':
-            return actual !== false
-        default:
-            return false
+function parseArray(value: unknown) {
+    if (Array.isArray(value)) return value
+    if (typeof value !== 'string') return []
+    try {
+        const parsed = JSON.parse(value)
+        return Array.isArray(parsed) ? parsed : []
+    } catch {
+        return []
     }
 }
 

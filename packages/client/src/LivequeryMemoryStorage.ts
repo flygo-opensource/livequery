@@ -1,11 +1,11 @@
 import type { Doc, LivequeryPaging, ParitalDocState } from "./types.js"
-import type { LivequeryStorge } from "./LivequeryStorge.js"
+import type { LivequeryStorage } from "./LivequeryStorage.js"
 import { filterDocs } from "./helpers/filterDocs.js"
 import { uuidv7 } from "uuidv7"
 
 
 
-export class LivequeryMemoryStorage implements LivequeryStorge {
+export class LivequeryMemoryStorage implements LivequeryStorage {
     #collections = new Map<string, Map<string, Doc>>()
 
     async query<T extends Doc>(collection: string, filters?: Record<string, any>): Promise<{

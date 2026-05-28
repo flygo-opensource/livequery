@@ -55,21 +55,26 @@ export type LivequeryPagingFilters = {
 export type LivequeryInlineFilters<T extends Doc> = (
     QueryBuilder<T, number, 'sort', 'asc' | 'desc'> &
     QueryBuilder<T, string, 'sort', 'asc' | 'desc'> &
+    QueryBuilder<T, boolean, 'sort', 'asc' | 'desc'> &
+    QueryBuilder<T, any, 1, any> &
     QueryBuilder<T, number, 'gt', number> &
     QueryBuilder<T, number, 'gte', number> &
     QueryBuilder<T, number, 'lt', number> &
     QueryBuilder<T, number, 'lte', number> &
     QueryBuilder<T, number, 'eq-number', number> &
-    QueryBuilder<T, number, 'in', number[]> &
-    QueryBuilder<T, number, 'nin', number[]> &
-    QueryBuilder<T, number[], 'include', number> &
-    QueryBuilder<T, boolean, 'boolean', 'true' | 'false' | 'not-true' | 'not-false'> &
+    QueryBuilder<T, number, 'neq-number', number> &
+    QueryBuilder<T, number, 'in', string | number[]> &
+    QueryBuilder<T, number, 'nin', string | number[]> &
+    QueryBuilder<T, any, 'ne', any> &
+    QueryBuilder<T, boolean, 'eq-boolean', boolean | 'true' | 'false'> &
+    QueryBuilder<T, boolean, 'neq-boolean', boolean | 'true' | 'false'> &
+    QueryBuilder<T, any, 'eq-null', null | true | 'true'> &
+    QueryBuilder<T, any, 'neq-null', null | true | 'true'> &
+    QueryBuilder<T, string, 'eq-oid', string> &
+    QueryBuilder<T, string, 'neq-oid', string> &
     QueryBuilder<T, string, 'like', string> &
-    QueryBuilder<T, string, 1, string> &
-    QueryBuilder<T, string, 'in', string[]> &
-    QueryBuilder<T, string, 'nin', string[]> &
-    QueryBuilder<T, string[], 'include', string> &
-    QueryBuilder<T, any, 'null', 'null-only' | 'not-null'>
+    QueryBuilder<T, string, 'in', string | string[]> &
+    QueryBuilder<T, string, 'nin', string | string[]>
 )
 
 

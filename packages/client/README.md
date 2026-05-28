@@ -24,6 +24,7 @@ bun add @livequery/client @livequery/react rxjs
 export * from "./LivequeryCollection"
 export * from "./LivequeryClient"
 export * from "./LivequeryMemoryStorage"
+export * from "./LivequeryStorage"
 export * from "./LivequeryStorge"
 export * from "./LivequeryTransporter"
 export * from "./types"
@@ -31,7 +32,7 @@ export * from "./helpers/filterDocs"
 export * from "./LivequeryDocument"
 ```
 
-The public storage interface is intentionally named `LivequeryStorge`. The spelling is part of the current public API.
+The public storage interface is `LivequeryStorage`. The previous misspelled name `LivequeryStorge` remains exported as a backward-compatible alias.
 
 ## Mental Model
 
@@ -42,13 +43,13 @@ LivequeryCollection / LivequeryDocument
         LivequeryClient
         /          \
        v            v
-LivequeryStorge  LivequeryTransporter(s)
+LivequeryStorage LivequeryTransporter(s)
 ```
 
 - `LivequeryClient` is the coordination core. It owns collection registrations, query orchestration, transporter fan-out, local storage writes, broadcast delivery, and optimistic mutation reconciliation.
 - `LivequeryCollection<T>` is the main consumer-facing list or document wrapper. It exposes reactive subjects such as `items`, `loading`, `filters`, `paging`, `summary`, and `error`.
 - `LivequeryDocument<T>` wraps one document in a `BehaviorSubject` and forwards `update`, `del`, `trigger`, and `select` calls to its collection.
-- `LivequeryStorge` is the local persistence contract used by the client.
+- `LivequeryStorage` is the local persistence contract used by the client. `LivequeryStorge` is a backward-compatible alias.
 - `LivequeryMemoryStorage` is the in-memory reference storage adapter.
 - `LivequeryTransporter` is the remote sync/action contract.
 
@@ -143,7 +144,7 @@ const subscription = todos.items.subscribe((items) => {
 
 await todos.query({
   ":limit": 20,
-  "done:boolean": "false",
+  "done:eq-boolean": "false",
   "createdAt:sort": "desc",
 })
 
@@ -247,7 +248,7 @@ new LivequeryClient({
 })
 ```
 
-- `storage`: a `LivequeryStorge` adapter.
+- `storage`: a `LivequeryStorage` adapter.
 - `transporters`: a map of transporter id to `LivequeryTransporter`. Use one transporter for a simple app. Use multiple transporters when the same client should fan out to more than one backend.
 
 ### `watch(ref, collection_id, mode)`
@@ -264,7 +265,7 @@ Lower-level query entry point used by `LivequeryCollection.query()`.
 await client.query<Todo>({
   ref: "todos",
   collection_id: todos.id,
-  filters: { "done:boolean": "false" },
+  filters: { "done:eq-boolean": "false" },
 })
 ```
 
@@ -331,7 +332,7 @@ const todos = new LivequeryCollection<Todo>(client, {
   lazy: false,
   debounce: 250,
   filters: {
-    "done:boolean": "false",
+    "done:eq-boolean": "false",
     "createdAt:sort": "desc",
   },
 })
@@ -397,7 +398,7 @@ Runs a query and replaces current `items` when cached/local documents are return
 ```ts
 await todos.query({
   ":limit": 20,
-  "done:boolean": "false",
+  "done:eq-boolean": "false",
   "createdAt:sort": "desc",
 })
 ```
@@ -610,12 +611,12 @@ first.select(true)
 first.select(false)
 ```
 
-## `LivequeryStorge`
+## `LivequeryStorage`
 
 Storage adapters provide local persistence and local filtering.
 
 ```ts
-type LivequeryStorge = {
+type LivequeryStorage = {
   query<T extends Doc>(
     collection: string,
     filters?: Record<string, any>
@@ -630,6 +631,8 @@ type LivequeryStorge = {
   flush(): Promise<void>
 }
 ```
+
+`LivequeryStorge` is still exported as an alias for existing consumers.
 
 Adapter guidance:
 
@@ -654,7 +657,7 @@ await storage.add<Todo>("todos", {
 })
 
 const page = await storage.query<Todo>("todos", {
-  "done:boolean": "false",
+  "done:eq-boolean": "false",
   "createdAt:sort": "desc",
 })
 ```
@@ -821,11 +824,13 @@ Filters are flat object keys derived from document fields.
 - `field:sort`: `"asc" | "desc"`
 - `field:gt`, `field:gte`, `field:lt`, `field:lte`: numeric comparisons
 - `field:eq-number`: numeric equality after `Number(value)`
+- `field:neq-number`: numeric inequality after `Number(value)`
 - `field:in`, `field:nin`: membership for string or number values
-- `field:include`: array contains value
-- `field:boolean`: `"true" | "false" | "not-true" | "not-false"`
-- `field:like`: case-insensitive substring check
-- `field:null`: `"null-only" | "not-null"`
+- `field:ne`: inequality
+- `field:eq-boolean`, `field:neq-boolean`: boolean equality or inequality
+- `field:eq-null`, `field:neq-null`: null equality or inequality
+- `field:eq-oid`, `field:neq-oid`: ObjectId string equality or inequality for MongoDB-backed datasources
+- `field:like`: regular expression match
 
 Nested field paths are supported:
 
@@ -833,7 +838,7 @@ Nested field paths are supported:
 await posts.query({
   "author.id": "user-1",
   "stats.views:gte": 100,
-  "published:boolean": "true",
+  "published:eq-boolean": "true",
   "title:like": "livequery",
   "createdAt:sort": "desc",
 })
@@ -849,7 +854,7 @@ Filters an array with the same runtime semantics used by `LivequeryMemoryStorage
 import { filterDocs } from "@livequery/client"
 
 const openTodos = filterDocs(todos, {
-  "done:boolean": "false",
+  "done:eq-boolean": "false",
 })
 ```
 
@@ -860,7 +865,7 @@ Predicate helper for checking one document.
 ```ts
 import { matchesAllFilters } from "@livequery/client"
 
-if (matchesAllFilters(todo, { "done:boolean": "false" })) {
+if (matchesAllFilters(todo, { "done:eq-boolean": "false" })) {
   console.log("todo is open")
 }
 ```

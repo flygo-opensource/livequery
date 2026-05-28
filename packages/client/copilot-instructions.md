@@ -8,7 +8,7 @@ When generating code, reviewing changes, or answering questions in this reposito
 - Edit `src/`, never `dist/`. Build output is generated.
 - Keep TypeScript source imports in ESM form with explicit `.js` suffixes.
 - Preserve the public API shape exported from `src/index.ts` unless the task explicitly changes the package surface.
-- Do not rename `LivequeryStorge`. The spelling is intentional and part of the public API.
+- Prefer `LivequeryStorage`. Keep `LivequeryStorge` exported as a backward-compatible alias.
 - Prefer minimal changes to runtime behavior. If you adjust filters, queries, or optimistic mutation state, verify the matching runtime path in `LivequeryClient`, `LivequeryMemoryStorage`, and `helpers/filterDocs`.
 - Do not introduce app-specific assumptions such as routing, UI state, framework glue, or server processes into the package source.
 - Assume browser-first runtime semantics for collection initialization. `LivequeryCollection.initialize()` currently exits early when `window` is unavailable.

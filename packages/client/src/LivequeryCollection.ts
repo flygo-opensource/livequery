@@ -10,6 +10,10 @@ export type LivequeryCollectionOptions<T extends Doc> = {
     lazy: boolean
     debounce: number
     mode: CollectionMetadata['mode']
+    seed: {
+        data: T[]
+        persist: boolean
+    }
 }
 
 
@@ -35,8 +39,12 @@ export class LivequeryCollection<T extends Doc> {
     #index = 0
 
     constructor(private client: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
-        this.#indexes = new Map()
-        this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>([])
+        const seedDocs = (options.seed?.data ?? []).map((doc, i) =>
+            new LivequeryDocument(this, { ...doc, _index: i + 1 } as DocState<T>)
+        )
+        this.#index = seedDocs.length
+        this.#indexes = seedDocs.reduce((map, doc, i) => map.set(doc.value.id, i), new Map<string, number>())
+        this.items = new BehaviorSubject<LivequeryDocument<DocState<T>>[]>(seedDocs)
         this.summary = new BehaviorSubject({})
         this.loading = new BehaviorSubject<LivequeryLoadingState>(null)
         this.filters = new BehaviorSubject<Partial<LivequeryFilters<T>>>(options?.filters || {})
@@ -57,14 +65,33 @@ export class LivequeryCollection<T extends Doc> {
     }
 
 
+    #defaultMode(): ActionMode {
+        return !this.options.mode || this.options.mode === 'cache-first' ? 'server-first' : this.options.mode
+    }
+
     #subscription: Subscription | null = null
     initialize(ref: string) {
         if (!ref) return
         if (typeof window == 'undefined') return
+        if (this.#subscription) {
+            this.#index = 0
+            this.#commit([])
+            this.loading.next(null)
+            this.summary.next({})
+            this.paging.next({ total: 0, current: 0 })
+            this.error.next(null)
+        }
         this.ref = ref
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
-        const timer = this.options.lazy !== true && setTimeout(() => !ref.includes('undefined') && this.query(this.filters.value || {}))
+        const startQuery = () => { !ref.includes('undefined') && this.query(this.filters.value || {}) }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        if (this.options.seed?.persist && this.collection_ref) {
+            const persist = this.client.seedToStorage(this.collection_ref, this.options.seed.data)
+            if (this.options.lazy !== true) persist.then(startQuery)
+        } else if (this.options.lazy !== true) {
+            timer = setTimeout(startQuery)
+        }
         this.#subscription?.unsubscribe()
         this.#subscription = merge(
             this.options.debounce ? merge(
@@ -337,39 +364,25 @@ export class LivequeryCollection<T extends Doc> {
         await this.#query(filters || {}, false)
     }
 
-    async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
-        if (!this.collection_ref) {
-            return null as any
-        }
-        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
+    async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+        if (!this.collection_ref) return null as any
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
         const responses = await this.client.add<T>(this.collection_ref, list, mode)
-        const r = Array.isArray(payload) ? responses : responses[0]
-        return r as any
+        return (Array.isArray(payload) ? responses : responses[0]) as any
     }
 
-
-    async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
-        if (!this.collection_ref) {
-            return null as any
-        }
-        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
+    async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+        if (!this.collection_ref) return null as any
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
         const responses = await this.client.update<T>(this.collection_ref, list, mode)
-        const r = Array.isArray(payload) ? responses : responses[0]
-        return r as any
+        return (Array.isArray(payload) ? responses : responses[0]) as any
     }
 
-
-    async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = 'server-first'): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
-        if (!this.collection_ref) {
-            return null as any
-        }
-        mode = mode || (!this.options.mode || this.options.mode == 'cache-first' ? 'server-first' : this.options.mode)
+    async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
+        if (!this.collection_ref) return null as any
         const ids: string[] = Array.isArray(id) ? id : [id]
         const responses = await this.client.delete<T>(this.collection_ref, ids, mode)
-        const r = Array.isArray(id) ? responses : responses[0]
-        return r as any
+        return (Array.isArray(id) ? responses : responses[0]) as any
     }
 
     trigger<T>(action: string, payload?: Record<string, any>, transporter_id?: string) {

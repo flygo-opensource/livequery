@@ -13,7 +13,7 @@ This repository is a client library package. Optimize for reusable API design, b
 - Edit `src/`, never `dist/`. `dist/` is build output.
 - Keep ESM-style relative imports with `.js` extensions in TypeScript source.
 - Preserve public exports from `src/index.ts` unless the task explicitly changes the package API.
-- Preserve the public name `LivequeryStorge`. The spelling is intentional in the current API.
+- Prefer the corrected public name `LivequeryStorage`. Preserve `LivequeryStorge` as a backward-compatible alias.
 - Package build and publish metadata live in `package.json`.
 - End-user documentation lives in `README.md`.
 - Agent implementation guidance lives in this file.
@@ -24,8 +24,9 @@ This repository is a client library package. Optimize for reusable API design, b
 - `src/LivequeryClient.ts`: core coordinator for watchers, query orchestration, storage writes, transporter fan-out, broadcast filtering, optimistic mutation state, and action triggers.
 - `src/LivequeryCollection.ts`: consumer-facing collection/document wrapper, lifecycle, watcher subscription, local item list, sorting, selection, pagination helpers, and mutation forwarding.
 - `src/LivequeryDocument.ts`: per-document `BehaviorSubject` wrapper with convenience methods.
-- `src/LivequeryMemoryStorage.ts`: in-memory reference implementation of `LivequeryStorge`.
-- `src/LivequeryStorge.ts`: local storage contract.
+- `src/LivequeryMemoryStorage.ts`: in-memory reference implementation of `LivequeryStorage`.
+- `src/LivequeryStorage.ts`: local storage contract.
+- `src/LivequeryStorge.ts`: backward-compatible alias for the old misspelled storage contract name.
 - `src/LivequeryTransporter.ts`: remote sync/action contract and query result shape.
 - `src/types.ts`: public shared types and type-level inline filter system.
 - `src/helpers/filterDocs.ts`: runtime filter matching used by memory storage and broadcast filtering.
@@ -139,11 +140,11 @@ Public methods:
 - `trigger(action, payload?)`: calls parent collection `trigger()`.
 - `select(selected)`: calls parent collection `select()` for this id.
 
-### `LivequeryStorge`
+### `LivequeryStorage`
 
 Meaning:
 
-`LivequeryStorge` is the local persistence contract. Storage adapters are responsible for local reads/writes and should apply local filter semantics in `query()`.
+`LivequeryStorage` is the local persistence contract. Storage adapters are responsible for local reads/writes and should apply local filter semantics in `query()`. `LivequeryStorge` remains exported as a backward-compatible alias.
 
 Methods:
 
@@ -283,12 +284,13 @@ Supported runtime operators:
 - `field`: strict equality
 - `field:sort`: sorting key
 - `field:gt`, `field:gte`, `field:lt`, `field:lte`
-- `field:eq-number`
+- `field:eq-number`, `field:neq-number`
 - `field:in`, `field:nin`
-- `field:include`
-- `field:boolean`
+- `field:ne`
+- `field:eq-boolean`, `field:neq-boolean`
+- `field:eq-null`, `field:neq-null`
+- `field:eq-oid`, `field:neq-oid`
 - `field:like`
-- `field:null`
 - pagination keys beginning with `:` are ignored by runtime matching
 
 Nested dot paths are supported by runtime filtering and memory storage sorting.
@@ -351,7 +353,7 @@ const sub = todos.items.subscribe((items) => {
 
 await todos.query({
   ":limit": 20,
-  "done:boolean": "false",
+  "done:eq-boolean": "false",
 })
 
 await todos.add({
@@ -388,7 +390,7 @@ function TodoList({ collection }: { collection: LivequeryCollection<Todo> }) {
 - Do not read `collection.items.value` once and assume UI will stay reactive.
 - Do not treat this package as server-side-safe by default.
 - Do not remove `.js` suffixes from TypeScript imports.
-- Do not rename `LivequeryStorge`.
+- Do not remove the `LivequeryStorge` alias.
 - Do not strip `_` metadata fields when UI needs mutation state.
 - Do not assume `metadata` is reliable; `LivequeryCollection` currently does not initialize a metadata subject.
 - Do not send full snapshots as repeated transporter events without checking collection dedupe behavior.
@@ -431,7 +433,7 @@ function TodoList({ collection }: { collection: LivequeryCollection<Todo> }) {
 
 ### Changing storage
 
-- Keep `LivequeryStorge` methods async.
+- Keep `LivequeryStorage` methods async.
 - Keep nested dot-path behavior aligned between filtering and sorting.
 - Return full documents from `get()`.
 - Return updated/deleted docs where the interface expects them.

@@ -1,6 +1,6 @@
 {
   "name": "@livequery/client",
-  "version": "2.0.136",
+  "version": "2.0.137",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -30,6 +30,11 @@
       "types": "./dist/LivequeryMemoryStorage.d.ts",
       "import": "./dist/LivequeryMemoryStorage.js",
       "default": "./dist/LivequeryMemoryStorage.js"
+    },
+    "./LivequeryStorage": {
+      "types": "./dist/LivequeryStorage.d.ts",
+      "import": "./dist/LivequeryStorage.js",
+      "default": "./dist/LivequeryStorage.js"
     },
     "./LivequeryStorge": {
       "types": "./dist/LivequeryStorge.d.ts",
@@ -67,6 +72,9 @@
       "LivequeryMemoryStorage": [
         "./dist/LivequeryMemoryStorage.d.ts"
       ],
+      "LivequeryStorage": [
+        "./dist/LivequeryStorage.d.ts"
+      ],
       "LivequeryStorge": [
         "./dist/LivequeryStorge.d.ts"
       ],
@@ -90,6 +98,7 @@
     "build:js": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly false --declaration false --declarationMap false",
     "build:types": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly",
     "build": "bun run clean && bun run build:js && bun run build:types",
+    "test": "bun test",
     "build:watch": "bunx tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "prepublishOnly": "bun run build"
   },
