@@ -71,6 +71,7 @@ export class LivequeryClient {
     }
 
     #cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
+    static readonly #MAX_CACHE_SIZE = 50
     #query(e: Query, deduplicate_key?: string) {
         const clear = () => deduplicate_key && this.#cache.delete(deduplicate_key)
         const cached = deduplicate_key && this.#cache.get(deduplicate_key)
@@ -118,7 +119,13 @@ export class LivequeryClient {
             finalize(clear),
             shareReplay({ bufferSize: 1, refCount: true })
         )
-        deduplicate_key && this.#cache.set(deduplicate_key, $)
+        if (deduplicate_key) {
+            if (this.#cache.size >= LivequeryClient.#MAX_CACHE_SIZE) {
+                const oldest = this.#cache.keys().next().value
+                oldest && this.#cache.delete(oldest)
+            }
+            this.#cache.set(deduplicate_key, $)
+        }
         return Object.assign($, { clear })
     }
 
