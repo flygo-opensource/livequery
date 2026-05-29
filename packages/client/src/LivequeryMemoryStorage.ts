@@ -1,6 +1,6 @@
 import type { Doc, LivequeryPaging, ParitalDocState } from "./types.js"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
-import { filterDocs } from "./helpers/filterDocs.js"
+import { filterDocs, getByPath } from "./helpers/filterDocs.js"
 import { uuidv7 } from "uuidv7"
 
 
@@ -75,27 +75,18 @@ export class LivequeryMemoryStorage implements LivequeryStorage {
         items: T[],
         sorters: Array<[string, 'asc' | 'desc']>
     ): T[] {
-        if (sorters.length === 0) return [...items]
-        return [...items].sort((a, b) => {
+        if (sorters.length === 0) return items
+        return items.sort((a, b) => {
             for (const [sortKey, direction] of sorters) {
                 const fieldPath = sortKey.slice(0, -5)
-                const va = this.#getByPath(a, fieldPath)
-                const vb = this.#getByPath(b, fieldPath)
+                const va = getByPath(a as any, fieldPath)
+                const vb = getByPath(b as any, fieldPath)
                 if (va === vb) continue
                 const order = va! < vb! ? -1 : 1
                 return direction === 'asc' ? order : -order
             }
             return 0
         })
-    }
-
-
-    #getByPath(obj: Record<string, any>, path: string) {
-        if (!path.includes('.')) return obj[path]
-        return path.split('.').reduce<unknown>((acc, key) => {
-            if (!acc || typeof acc !== 'object') return undefined
-            return (acc as Record<string, any>)[key]
-        }, obj)
     }
 
     flush(): Promise<void> {
