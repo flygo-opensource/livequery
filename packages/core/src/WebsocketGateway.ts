@@ -9,7 +9,7 @@ import {
 } from 'rxjs/operators'
 import { UpdatedData, LivequeryBaseEntity } from '@livequery/types'
 import { randomUUID } from 'crypto'
-import { WEBSOCKET_PATH } from './const.js'
+import { LIVEQUERY_API_GATEWAY_DEBUG, WEBSOCKET_PATH } from './const.js'
 import { LivequeryContext, LivequeryHandler } from './LivequeryContext.js'
 
 
@@ -37,7 +37,7 @@ type SocketMeta = {
     send(data: string): void
     close(): void
     on(event: 'message', h: (raw: string | Buffer) => void): void
-    on(event: 'close' | 'error', h: () => void): void
+    on(event: 'close' | 'error', h: (e?: unknown) => void): void
     id: string
     gateway: boolean
     refs: Set<string>
@@ -97,19 +97,24 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
         // Broadcast UpdatedData to all subscribed sockets
         this.#updatesSubscription = this.subscribe(({ ref, data, type }) => {
             if (this.#closed) return
-            const targets = [
-                ...this.#subscriptions.get(ref) ?? new Map<ClientId, SubscriptionMeta>(),
-                ...this.#subscriptions.get(`${ref}/${data.id}`) ?? new Map<ClientId, SubscriptionMeta>(),
-            ].reduce((acc, [client_id, { gateway_id, listener_node_id }]) => {
-                const conn_id = gateway_id === this.id
-                    ? listener_node_id === this.id ? client_id : listener_node_id
-                    : gateway_id
-                const prev = acc.get(conn_id)
-                const socket = prev?.socket ?? this.#connections.get(conn_id)
-                if (!socket) return acc
-                acc.set(conn_id, { socket, cids: [...prev?.cids ?? [], client_id] })
-                return acc
-            }, new Map<string, { socket: SocketMeta; cids: string[] }>())
+            const targets = new Map<string, { socket: SocketMeta; cids: string[] }>()
+
+            for (const map of [this.#subscriptions.get(ref), this.#subscriptions.get(`${ref}/${data.id}`)]) {
+                if (!map) continue
+                for (const [client_id, { gateway_id, listener_node_id }] of map) {
+                    const conn_id = gateway_id === this.id
+                        ? listener_node_id === this.id ? client_id : listener_node_id
+                        : gateway_id
+                    const prev = targets.get(conn_id)
+                    const socket = prev?.socket ?? this.#connections.get(conn_id)
+                    if (!socket) continue
+                    if (prev) {
+                        prev.cids.push(client_id)
+                    } else {
+                        targets.set(conn_id, { socket, cids: [client_id] })
+                    }
+                }
+            }
 
             for (const [, { socket, cids }] of targets) {
                 const event: SyncEvent = { event: 'sync', cids, data: { changes: [{ ref, data, type }] } }
@@ -223,7 +228,10 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
             } catch { /* malformed message, ignore */ }
         })
         socket.on('close', () => this.#onDisconnect(socket))
-        socket.on('error', () => this.#onDisconnect(socket))
+        socket.on('error', (e) => {
+            LIVEQUERY_API_GATEWAY_DEBUG && console.error('[livequery] Socket error:', e)
+            this.#onDisconnect(socket)
+        })
     }
 
     #onStart(socket: SocketMeta, { id, auth }: { id: string; auth: string }) {
@@ -325,8 +333,12 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
 
         const client_id = body.client_id ?? socket.id
         const refs = [...body.ref ? [body.ref] : [], ...body.refs ?? []]
+        this.detach(client_id, refs)
+    }
 
-        for (const ref of refs) {
+    detach(client_id: string, refs: string | string[]) {
+        if (this.#closed) return
+        for (const ref of [refs].flat()) {
             const map = this.#subscriptions.get(ref)
             if (!map) continue
             const routing = map.get(client_id)
