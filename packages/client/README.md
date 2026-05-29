@@ -756,27 +756,38 @@ const apiTransporter: LivequeryTransporter = {
 
 ## Query Modes
 
+> For detailed data flow diagrams, mutation behavior per mode, and common mistakes, see [docs/modes.md](./docs/modes.md).
+
+| Mode | Query reads from | Transporter called? | Mutation default |
+|------|------|------|------|
+| `server-first` | Transporter | Yes, always | `server-first` |
+| `cache-first` | Storage first, then transporter | Yes, in background | `server-first` |
+| `local-first` | Storage immediately | Yes, full sync in background | `local-first` |
+| `local-only` | Storage only | No | `local-only` |
+
 ### `server-first`
 
-Transporters drive the query result. Collection state is built from streamed change events.
+Transporters drive the query result. Collection state is built from streamed change events. Items are delivered asynchronously through the watch stream, not from the `query()` return value.
 
 Use it when remote data is the source of truth and local cache is secondary.
 
 ### `cache-first`
 
-The first query can hydrate from storage, then transporters refresh in the background.
+The first query hydrates from local storage instantly, then transporters refresh in the background. For pagination queries (`:before` / `:after`), cache is skipped and the transporter is called directly. Mutations default to `server-first`.
 
 Use it when fast initial UI matters but remote sync should still run.
 
 ### `local-first`
 
-Storage serves the query immediately. Transporters refresh in the background. Remote query changes are written into storage and then broadcast back into matching local collections.
+Storage serves the query immediately. The transporter syncs the full collection in the background by paginating all pages and writing results to storage. Remote changes are rebroadcast to local collections filtered by their current filters.
 
-For `local-first`, the remote query path receives empty filters. Local filtering is enforced by storage query results and by broadcast filtering.
+The server receives **empty filters** — local filtering happens during broadcast, not on the server.
+
+Avoid this mode for large unbounded datasets; it attempts to sync every document locally.
 
 ### `local-only`
 
-Queries resolve only from storage and skip transporters. Mutations stay local only when you explicitly call them with `mode: "local-only"`.
+Queries resolve only from storage. Transporters are never called. No loading state is emitted. Mutations stay local when explicitly called with `mode: "local-only"`.
 
 Use it for drafts, temporary UI state, offline-only collections, or local workspaces.
 
