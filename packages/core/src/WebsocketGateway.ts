@@ -434,7 +434,14 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
                 })
             )),
             retry({
-                delay: (e, n) => (n >= 5 || e === ENDPOINT_RESTARTED) ? EMPTY : timer(1000)
+                delay: (e, n) => {
+                    if (e === ENDPOINT_RESTARTED) return EMPTY
+                    if (n >= 30) {
+                        console.error(`[livequery] Gateway connection to ${url} failed after ${n} retries, giving up.`)
+                        return EMPTY
+                    }
+                    return timer(Math.min(1000 * 2 ** n, 30000))
+                }
             }),
             finalize(() => ondisconnect?.())
         ).subscribe()
