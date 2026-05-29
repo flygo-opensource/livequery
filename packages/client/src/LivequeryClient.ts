@@ -129,7 +129,7 @@ export class LivequeryClient {
             this.#queries$.pipe(
                 filter(req => req.collection.mode == 'server-first' || req.collection.mode == 'cache-first'),
                 mergeMap(e => {
-                    const deduplicate_key = `${e.collection.collection_id}:${JSON.stringify(e.filters)}`
+                    const deduplicate_key = `${e.collection.collection_id}:${JSON.stringify(e.filters, Object.keys(e.filters || {}).sort())}`
                     const before = e.filters?.[':before']
                     const after = e.filters?.[':after']
                     const around = e.filters?.[':around']
