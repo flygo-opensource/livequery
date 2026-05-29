@@ -119,7 +119,9 @@ export class RestTransporter implements LivequeryTransporter {
         }
         const response: LivequeryResult<T> = await (async () => {
             try {
-                const result = await fetch(request.url, request);
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), 30000)
+                const result = await fetch(request.url, { ...request, signal: controller.signal }).finally(() => clearTimeout(timer))
                 const body = await result.text()
                 const parsed = parseJson(body)
                 if (!result.ok) {

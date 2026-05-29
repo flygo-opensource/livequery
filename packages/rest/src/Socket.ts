@@ -1,4 +1,4 @@
-import { fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject, Subscription, of, interval, EMPTY } from "rxjs";
+import { fromEvent, Observable, Subject, BehaviorSubject, merge, ReplaySubject, Subscription, of, interval, EMPTY, timer } from "rxjs";
 import { catchError, finalize, map, mergeMap, retry, switchMap, takeUntil, tap } from "rxjs/operators";
 import type { DataChangeEvent } from '@livequery/client'
 import { v7 as uuidv7 } from 'uuid';
@@ -77,7 +77,7 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 })
                 throw e
             }),
-            retry({ delay: 1000 }),
+            retry({ delay: (_, attempt) => timer(Math.min(1000 * 2 ** attempt, 30000)) }),
             takeUntil(this.#stop$)
         ).subscribe()
     }
@@ -87,10 +87,18 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
             try {
                 return JSON.parse(data)
             } catch {
-                return decode(new TextEncoder().encode(data))
+                try {
+                    return decode(new TextEncoder().encode(data))
+                } catch {
+                    return undefined
+                }
             }
         }
-        return decode(new Uint8Array(data))
+        try {
+            return decode(new Uint8Array(data))
+        } catch {
+            return undefined
+        }
     }
 
     #send(ws: WebSocket, data: { data?: object, event: string }) {
