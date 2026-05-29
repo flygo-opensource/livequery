@@ -211,6 +211,22 @@ type DocState<T extends Doc> = T & {
 
 Do not strip `_adding`, `_updating`, `_deleting`, or error fields if your UI needs to show mutation progress or failure state.
 
+Field reference:
+
+| Field | Set when | Meaning |
+|---|---|---|
+| `_adding` | `local-first` / `local-only` add in progress | Document is being created on the server |
+| `_adding_error` | Server add rejected | Error from the failed transporter call |
+| `_updating` | `local-first` update in progress | Document is being synced to the server |
+| `_updating_error` | Server update rejected | Error from the failed transporter call |
+| `_deleting` | `local-first` delete in progress | Document is pending deletion on the server |
+| `_deleting_error` | Server delete rejected | Error from the failed transporter call |
+| `_local_only` | `local-only` add | Document was created locally and never sent to the server |
+| `_prev` | `local-first` update pending | Fields that existed before the local update — used to push only changed fields to the server |
+| `_selected` | `select()` called | Whether the document is currently selected |
+| `_index` | Assigned on insert | Stable insertion order used for sort reset |
+| `_remotes` | Transporter-specific | Optional metadata from transporters; not used by the client core |
+
 ### `DataChangeEvent`
 
 Transporter query streams and internal broadcasts use incremental change events:
@@ -346,6 +362,10 @@ type LivequeryCollectionOptions<T extends Doc> = {
   lazy: boolean
   debounce: number
   mode: "server-first" | "cache-first" | "local-first" | "local-only"
+  seed: {
+    data: T[]
+    persist: boolean
+  }
 }
 ```
 
@@ -353,6 +373,37 @@ type LivequeryCollectionOptions<T extends Doc> = {
 - `lazy`: when not `true`, `initialize()` schedules an automatic query with current filters.
 - `debounce`: enables `debounceQuery()`.
 - `mode`: controls query behavior. Mutation methods still default to `server-first` unless you pass a mode override.
+- `seed`: optional initial data. `seed.data` is an array of documents loaded into `items` before any query runs. `seed.persist: false` populates items in memory only — storage is not written. `seed.persist: true` writes the seed to storage before the first query, so a `cache-first` or `local-first` query can read from it immediately.
+
+### `seed`
+
+Pre-populate a collection with data before any query runs. Useful for hardcoded defaults, SSR-hydrated data, or offline stubs.
+
+```ts
+const todos = new LivequeryCollection<Todo>(client, {
+  mode: "cache-first",
+  seed: {
+    data: [
+      { id: "1", title: "Buy milk", done: false, createdAt: Date.now() },
+    ],
+    persist: true,
+  },
+})
+
+todos.initialize("todos")
+// items.value already has the seeded document before the first query
+```
+
+`persist: false` — items are loaded into `items` immediately in the constructor. Storage is never written. The seed disappears after a query replaces items.
+
+`persist: true` — seed data is written to storage before the first auto-query runs. This lets a `cache-first` query read the seed from storage on the first render.
+
+Rules:
+
+- Seed documents must include `id`.
+- When `persist: true` and `lazy: false`, the client calls `seedToStorage()` then starts the auto-query. The auto-query may overwrite seed items when the transporter responds.
+- When `persist: false`, seed items are available immediately in `items.value` from the constructor but are replaced on the first `query()` call.
+- `seed` has no effect on the mode behavior. The collection still uses the configured mode for queries.
 
 ### Reactive Properties
 
@@ -447,7 +498,7 @@ await todos.loadAround("cursor-123")
 
 - `loadMore()` adds `:after`.
 - `loadPrev()` adds `:before`.
-- `loadAround(cursor)` currently sets both `:after` and `:before` to the same cursor.
+- `loadAround(cursor)` loads a page centered on the given cursor. It sets both `:after` and `:before` to the same cursor value — the backend decides what "around a cursor" means for that collection.
 
 ### `add(payload, mode?)`
 
@@ -473,7 +524,42 @@ const many = await todos.add([
 
 The return shape follows the input shape: one payload returns one document; an array returns an array.
 
-Important: the current method signature defaults `mode` to `"server-first"`. A collection configured with `mode: "local-only"` still needs `add(payload, "local-only")` if you want the mutation to stay local.
+The default mutation mode follows `#defaultMode()`:
+
+| Collection `mode` | Mutation default |
+|---|---|
+| `server-first` | `server-first` |
+| `cache-first` | `server-first` |
+| `local-first` | `local-first` |
+| `local-only` | `local-only` |
+| not set | `server-first` |
+
+```ts
+// local-only collection — mutations also default to local-only
+const drafts = new LivequeryCollection<Todo>(client, { mode: "local-only" })
+drafts.initialize("drafts")
+await drafts.add({ title: "Draft", done: false, createdAt: Date.now() })
+// ✓ stored locally, no server call
+
+// local-first collection — optimistic local write + background server sync
+const notes = new LivequeryCollection<Todo>(client, { mode: "local-first" })
+notes.initialize("notes")
+await notes.add({ title: "Note", done: false, createdAt: Date.now() })
+// ✓ appears immediately, syncs to server in background
+
+// cache-first collection — mutations go server-first by default
+const posts = new LivequeryCollection<Post>(client, { mode: "cache-first" })
+posts.initialize("posts")
+await posts.add({ title: "Post", done: false, createdAt: Date.now() })
+// ✓ blocks until server responds (server-first default)
+```
+
+Pass an explicit mode to override the default on a per-call basis:
+
+```ts
+await drafts.add({ title: "Force server", done: false, createdAt: Date.now() }, "server-first")
+await posts.add({ title: "Local draft", done: false, createdAt: Date.now() }, "local-only")
+```
 
 ### `update(payload, mode?)`
 
@@ -547,13 +633,31 @@ todos.resetError()
 
 Watches pairwise document changes and emits when `check(prev, next)` returns `true`.
 
+Returns `Observable<[DocState<T>, DocState<T>]>` — each emission is a `[previous, current]` pair for the document that changed.
+
 ```ts
-const doneSub = todos.watch((prev, next) => prev.done !== next.done).subscribe(([prev, next]) => {
-  console.log(prev.id, "done changed", prev.done, "=>", next.done)
-})
+// Watch when the `done` field changes on any todo
+const doneSub = todos.watch((prev, next) => prev.done !== next.done)
+  .subscribe(([prev, next]) => {
+    console.log(next.id, "done changed:", prev.done, "→", next.done)
+  })
 
 doneSub.unsubscribe()
+
+// Watch when any field changes
+const anySub = todos.watch((prev, next) => prev !== next).subscribe(([prev, next]) => {
+  console.log("document changed:", next.id)
+})
+
+// Watch for optimistic mutation completion
+const saveSub = todos.watch(
+  (prev, next) => prev._updating === true && next._updating == null
+).subscribe(([, next]) => {
+  console.log("save confirmed for:", next.id)
+})
 ```
+
+`check` is called for every field emission of every document in `items`. Keep it fast. Avoid closures that capture large objects.
 
 ### `flush()`
 
@@ -881,6 +985,52 @@ if (matchesAllFilters(todo, { "done:eq-boolean": "false" })) {
 }
 ```
 
+### `parseFilters(filters)`
+
+Pre-parses a filter object into a `ParsedFilter[]` array. Call this once per query rather than calling `matchesAllFilters` in a tight loop.
+
+```ts
+import { parseFilters, matchesParsedFilters } from "@livequery/client"
+
+const filters = { "done:eq-boolean": "false", "createdAt:sort": "desc" }
+const parsed = parseFilters(filters)
+
+// Efficient: parse once, match many
+const openTodos = todos.filter(doc => matchesParsedFilters(doc, parsed))
+```
+
+Pagination keys (`:limit`, `:before`, `:after`, `:around`, `:page`) and sort keys (`:sort` suffix) are excluded from the returned array.
+
+### `matchesParsedFilters(doc, parsedFilters)`
+
+Matches one document against a pre-parsed `ParsedFilter[]`. Use together with `parseFilters()` when checking many documents against the same filters.
+
+```ts
+const parsed = parseFilters({ "status": "active", "score:gte": 10 })
+
+for (const doc of largeList) {
+  if (matchesParsedFilters(doc, parsed)) {
+    // ...
+  }
+}
+```
+
+### `getByPath(obj, path)`
+
+Reads a value from a nested object using dot-notation path. Returns `undefined` when any segment is missing.
+
+```ts
+import { getByPath } from "@livequery/client"
+
+const doc = { author: { profile: { name: "Ada" } } }
+
+getByPath(doc, "author.profile.name") // "Ada"
+getByPath(doc, "author.missing.field") // undefined
+getByPath(doc, "title")               // undefined (not present)
+```
+
+Used internally by filter evaluation and storage sorting. Available as a public export for custom storage adapters.
+
 ## React Usage
 
 Bridge `BehaviorSubject` values into React state.
@@ -971,10 +1121,11 @@ A document ref still exposes `items`; the matching document is represented as a 
 
 - `LivequeryCollection.initialize()` is browser-only in the current implementation.
 - Mutations default to `server-first` because the method parameter has that default. Pass `"local-first"` or `"local-only"` explicitly when needed.
+- `ConflictResolverFunction` is exported as a TypeScript type but is not wired into `LivequeryClient`. It documents the intended shape for future conflict resolution support. Do not pass it to the client — there is currently no parameter that accepts it.
 - `LivequeryCollection` has no initialized `metadata` subject in the current constructor, so transporter `metadata` should not be considered reliable consumer state yet.
 - `trigger()` returns an observable with a Promise-like `then()` method.
 - Transporter streams should emit incremental changes. Do not send full snapshots as repeated `added` events unless the client can safely deduplicate by id.
-- There is no dedicated test suite in this package yet. Use `bun run build` for the current validation baseline.
+- Run `bun test` to execute the test suite. It covers collection behavior, seed loading, mutation mode defaults, query error propagation, filter parsing, and sort stability.
 
 ## Development
 
