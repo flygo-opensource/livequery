@@ -203,3 +203,109 @@ describe('reset state on re-initialize', () => {
         expect(collection.items.value).toHaveLength(1)
     })
 })
+
+// ─── fix #1: timer leak on re-initialize ─────────────────────────────────────
+
+describe('timer leak fix', () => {
+    test('pending auto-query from previous ref does not fire after re-initialize', async () => {
+        const queries: string[] = []
+        const client = makeClient(makeStorage(), {
+            query: (req) => {
+                queries.push(req.ref)
+                return of({
+                    changes: [],
+                    paging: { total: 0, current: 0 },
+                    source: 'query' as const,
+                })
+            },
+            add: async (_ref, doc) => ({ id: 'x', ...doc }) as Todo,
+            update: async (_ref, id, patch) => ({ id, ...patch }) as Todo,
+            delete: async (_ref, id) => ({ id } as Todo),
+            trigger: async () => ({} as any),
+        })
+        const collection = new LivequeryCollection<Todo>(client)
+
+        // initialize with ref-A (lazy: false triggers a setTimeout startQuery)
+        collection.initialize('todos-a')
+        // immediately re-initialize with ref-B before timer fires
+        collection.initialize('todos-b')
+        await tick(50)
+
+        // only todos-b should have been queried, not todos-a
+        expect(queries.every(r => r === 'todos-b')).toBe(true)
+    })
+})
+
+// ─── fix #2: query error propagates to collection.error ──────────────────────
+
+describe('query error handling', () => {
+    test('storage rejection sets collection.error and clears loading', async () => {
+        const storage = makeStorage()
+        storage.query = async () => { throw { code: 'STORAGE_ERROR', message: 'disk full' } }
+        // local-only mode: only storage is used, no server query fires after error
+        const client = makeClient(storage)
+        const collection = new LivequeryCollection<Todo>(client, { mode: 'local-only', lazy: true })
+        collection.initialize('todos')
+
+        await collection.query({})
+        await tick()
+
+        expect(collection.error.value?.code).toBe('STORAGE_ERROR')
+        expect(collection.error.value?.message).toBe('disk full')
+        expect(collection.loading.value).toBeNull()
+    })
+})
+
+// ─── fix #3: parseArray warns on invalid JSON ─────────────────────────────────
+
+describe('filterDocs parseArray', () => {
+    test('warns when filter value is not valid JSON', () => {
+        const { matchesAllFilters } = require('../src/helpers/filterDocs.js')
+        const warns: string[] = []
+        const original = console.warn
+        console.warn = (...args: any[]) => warns.push(args.join(' '))
+
+        const result = matchesAllFilters({ status: 'active' }, { 'status:in': 'active,pending' })
+
+        console.warn = original
+        expect(result).toBe(false) // returns [] → includes = false
+        expect(warns.some(w => w.includes('not valid JSON'))).toBe(true)
+    })
+
+    test('valid JSON array still works without warning', () => {
+        const { matchesAllFilters } = require('../src/helpers/filterDocs.js')
+        const warns: string[] = []
+        const original = console.warn
+        console.warn = (...args: any[]) => warns.push(args.join(' '))
+
+        const result = matchesAllFilters({ status: 'active' }, { 'status:in': '["active","pending"]' })
+
+        console.warn = original
+        expect(result).toBe(true)
+        expect(warns).toHaveLength(0)
+    })
+})
+
+// ─── fix #4: sort NaN → 0 ────────────────────────────────────────────────────
+
+describe('sort stability with mixed types', () => {
+    test('sort does not crash when field has incompatible types', () => {
+        const client = makeClient()
+        // seed data directly — no async query needed
+        const collection = new LivequeryCollection<Todo>(client, {
+            mode: 'local-only',
+            seed: {
+                data: [
+                    { id: '1', title: 'A', done: false },
+                    { id: '2', title: 'B', done: false },
+                ],
+                persist: false,
+            },
+        })
+        collection.initialize('todos')
+
+        // sort on boolean field with local-only mode (synchronous sort)
+        expect(() => collection.sort('done', 1)).not.toThrow()
+        expect(collection.items.value).toHaveLength(2)
+    })
+})

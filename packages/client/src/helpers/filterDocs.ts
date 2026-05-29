@@ -75,6 +75,7 @@ function parseArray(value: unknown) {
         const parsed = JSON.parse(value)
         return Array.isArray(parsed) ? parsed : []
     } catch {
+        console.warn(`[livequery] filter value is not valid JSON: "${value}". Expected a JSON array e.g. '["a","b"]'.`)
         return []
     }
 }

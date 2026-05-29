@@ -70,9 +70,13 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     #subscription: Subscription | null = null
+    #timer: ReturnType<typeof setTimeout> | undefined
     initialize(ref: string) {
         if (!ref) return
         if (typeof window == 'undefined') return
+        // Fix #1: clear pending timer from previous initialize before starting new one
+        this.#timer && clearTimeout(this.#timer)
+        this.#timer = undefined
         if (this.#subscription) {
             this.#index = 0
             this.#commit([])
@@ -85,12 +89,11 @@ export class LivequeryCollection<T extends Doc> {
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
         const startQuery = () => { !ref.includes('undefined') && this.query(this.filters.value || {}) }
-        let timer: ReturnType<typeof setTimeout> | undefined
         if (this.options.seed?.persist && this.collection_ref) {
             const persist = this.client.seedToStorage(this.collection_ref, this.options.seed.data)
             if (this.options.lazy !== true) persist.then(startQuery)
         } else if (this.options.lazy !== true) {
-            timer = setTimeout(startQuery)
+            this.#timer = setTimeout(startQuery)
         }
         this.#subscription?.unsubscribe()
         this.#subscription = merge(
@@ -103,7 +106,8 @@ export class LivequeryCollection<T extends Doc> {
 
             this.client.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
                 finalize(() => {
-                    timer && clearTimeout(timer)
+                    this.#timer && clearTimeout(this.#timer)
+                    this.#timer = undefined
                 }),
                 tap(event => {
                     event.loading !== undefined && event.loading !== this.loading.value && this.loading.next(event.loading)
@@ -143,7 +147,7 @@ export class LivequeryCollection<T extends Doc> {
                             if (typeof va === 'string' && typeof vb === 'string') {
                                 return va.localeCompare(vb) * order
                             }
-                            return NaN
+                            return 0
                         }
                         return a.value.id.localeCompare(b.value.id)
                     }
@@ -248,7 +252,15 @@ export class LivequeryCollection<T extends Doc> {
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {
-        await this.#query(filters, true)
+        try {
+            await this.#query(filters, true)
+        } catch (e) {
+            this.loading.next(null)
+            this.error.next({
+                code: (e as any)?.code ?? 'QUERY_ERROR',
+                message: (e as any)?.message ?? String(e)
+            })
+        }
     }
 
     async sort(field: keyof T | 'reset', order: 1 | -1 | 'asc' | 'desc') {
@@ -283,7 +295,7 @@ export class LivequeryCollection<T extends Doc> {
             if (typeof va === 'string' && typeof vb === 'string') {
                 return va.localeCompare(vb) * i
             }
-            return NaN
+            return 0
         }
         const items = [...this.items.value].sort(sorter)
         this.#commit(items)
