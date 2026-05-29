@@ -1,60 +1,71 @@
-import { Controller, Inject, Injectable, Optional } from "@nestjs/common";
-import { ModulesContainer } from "@nestjs/core";
-import { listPaths } from "./helpers/listPaths.js";
-import { ServiceApiMetadata } from "./ApiGateway.js";
-import { LivequeryWebsocketSync, WEBSOCKET_PATH } from "./LivequeryWebsocketSync.js";
-import { Subject, map, filter, debounceTime, mergeMap, firstValueFrom, tap, ReplaySubject} from "rxjs";
-import { RxjsUdp } from "./RxjsUdp.js";
-import { API_GATEWAY_NAMESPACE, NODE_ID } from "./const.js";
+import { Controller, Inject, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common'
+import { HttpAdapterHost } from '@nestjs/core'
+import { type IncomingMessage, type ServerResponse } from 'http'
+import { type Response } from 'express'
+import { ApiGatewayHandler, type ServiceApiMetadata, type ServiceApiStatus, UdpDiscovery, WebsocketGateway } from '@livequery/core'
+export type { ServiceApiMetadata, ServiceApiStatus }
 
+export type ApiGatewayClientOptions = {
+    id: string
+    name: string
+    controllers: any[]
+    port: number
+}
 
 @Controller()
-@Injectable()
-export class ApiGatewayLinker {
-
-    private static $me = new ReplaySubject<{ name: string, port: number }>(1)
+export class ApiGateway implements OnModuleInit, OnModuleDestroy {
+    readonly #linker: ApiGatewayHandler
+    readonly #lws?: WebsocketGateway
+    readonly #httpAdapterHost: HttpAdapterHost | undefined
 
     constructor(
-        @Optional() @Inject() LivequeryWebsocketSync: LivequeryWebsocketSync,
-        private readonly modulesContainer: ModulesContainer,
+        @Optional() @Inject(WebsocketGateway) lws: WebsocketGateway,
+        @Optional() @Inject(UdpDiscovery) discovery: UdpDiscovery<ServiceApiMetadata> | undefined,
+        @Optional() @Inject(HttpAdapterHost) httpAdapterHost: HttpAdapterHost | undefined,
     ) {
-        const paths = [...this.modulesContainer.values()].map(m => (
-            listPaths([...m.controllers.keys()].map(c => c))
-        )).flat(2)
-
-        const metadata$ = ApiGatewayLinker.$me.pipe(map(({ name, port }) => {
-            const metadata: ServiceApiMetadata = {
-                node_id: NODE_ID,
-                host: '',
-                namespace: API_GATEWAY_NAMESPACE,
-                name,
-                port,
-                role: 'service',
-                paths,
-                linked: [],
-                wsauth: LivequeryWebsocketSync?.auth,
-                websocket: LivequeryWebsocketSync ? WEBSOCKET_PATH : undefined
-            }
-            return metadata;
-        })) as any as ReplaySubject<ServiceApiMetadata>
-        const udp$ = new RxjsUdp()
-
-        udp$.link(metadata$).pipe(
-            filter(node => node.role == 'gateway'),
-            debounceTime(1000),
-            mergeMap(async node => {
-                const metadata = await firstValueFrom(metadata$)
-                await udp$.broadcast({
-                    hi: false,
-                    node: metadata,
-                    sender_id: metadata.node_id
-                })
-            })
-        ).subscribe()
+        this.#lws = lws
+        this.#httpAdapterHost = httpAdapterHost
+        this.#linker = new ApiGatewayHandler({
+            ws: lws,
+            ...(discovery ? { discovery } : {}),
+        })
     }
 
+    onModuleInit(): void {
+        const app = this.#httpAdapterHost?.httpAdapter?.getInstance?.()
+        if (!app) return
 
-    static async broadcast(name: string, port: number) {
-        this.$me.next({ name, port })
+        for (const method of ['get', 'post', 'patch', 'put', 'delete'] as const) {
+            if (typeof app[method] === 'function') {
+                app[method]('*', (req: IncomingMessage & { url: string; method: string; rawBody: Buffer }, res: Response) => {
+                    void this.#proxy(req, res)
+                })
+            }
+        }
+    }
+
+    onModuleDestroy(): void {
+        this.#linker.close()
+    }
+
+    #proxy(req: IncomingMessage & { url: string; method: string; rawBody: Buffer }, res: Response) {
+        if (Number(req.headers['content-length'] || 0) > 0 && !req.rawBody) {
+            res.status(500)
+            return res.json({
+                error: {
+                    status: 500,
+                    code: 'MISSING_API_GATEWAY_RAW_BODY',
+                    message: 'Please enable rawBody = true in NestFactory.create()'
+                }
+            })
+        }
+
+        const client_id = req.headers['x-lcid'] || req.headers['socket_id']
+        const extraHeaders = client_id && this.#lws ? {
+            'x-lcid': client_id as string,
+            'x-lgid': (req.headers['x-lgid'] ?? this.#lws.id) as string
+        } : undefined
+
+        return this.#linker.fetch(req, res as unknown as ServerResponse, extraHeaders)
     }
 }

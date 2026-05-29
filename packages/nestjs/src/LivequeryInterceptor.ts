@@ -1,71 +1,53 @@
-import { LivequeryRequest } from "@livequery/types";
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
-import { PathHelper } from "./helpers/PathHelper.js";
-import { LivequeryWebsocketSync } from "./LivequeryWebsocketSync.js";
-import { hidePrivateFields } from "./helpers/hidePrivateFields.js";
-
-export type RealtimeSubscription = {
-    ref: string,
-    client_id: string
-    gateway_id: string
-    listener_node_id: string
-
-}
+import { hidePrivateFields, LivequeryRequestParser, WebsocketGateway, type LivequeryContext } from "@livequery/core";
+import type { LivequeryRequest } from "@livequery/types";
 
 
 
 @Injectable()
 export class LivequeryInterceptor implements NestInterceptor {
+    readonly #parser = new LivequeryRequestParser()
 
     constructor(
-        @Optional() @Inject(LivequeryWebsocketSync) private LivequeryWebsocketSync: LivequeryWebsocketSync
+        @Optional() @Inject(WebsocketGateway) private WebsocketGateway?: WebsocketGateway
     ) {
     }
 
     async intercept(context: ExecutionContext, next: CallHandler) {
 
         const req = context.switchToHttp().getRequest()
+        const ctx: LivequeryContext = {
+            request: {
+                path: req.originalUrl ?? req.url ?? req._parsedUrl?.pathname ?? '',
+                ref: req.route?.path ?? req.path ?? req.url ?? '',
+                params: req.params ?? {},
+                query: req.query ?? {},
+                body: req.body,
+                method: req.method,
+                headers: new Headers(req.headers as HeadersInit) as unknown as Map<string, string>,
+            }
+        }
 
+        this.#parser.handle(ctx)
 
-        const {
-            ref,
-            is_collection,
-            collection_ref,
-            doc_id,
-
-        } = PathHelper.parseHttpRequestPath(req._parsedUrl.pathname)
-
-        const {
-            collection_ref: schema_collection_ref,
-            ref: schema_ref
-        } = PathHelper.parseHttpRequestPath(req.route.path)
-
-
-        req.livequery = {
-            ref,
-            schema_ref,
-            collection_ref,
-            schema_collection_ref,
-            is_collection,
-            doc_id,
-            options: req.query,
-            keys: req.params,
-            body: req.body,
-            method: req.method.toLowerCase()
-        } as LivequeryRequest
+        const parsed = ctx.livequery
+        if (parsed) {
+            req.livequery = {
+                ...parsed,
+                schema_ref: parsed.schema_collection_ref,
+                is_collection: parsed.document_id === undefined,
+                doc_id: parsed.document_id,
+                options: parsed.query,
+                method: parsed.method.toLowerCase(),
+            } as LivequeryRequest & typeof parsed
+        }
 
         // Allow realtime by default    
-        const client_id = req.headers['x-lcid'] || req.headers.socket_id
-        const gateway_id = req.headers['x-lgid'] || this.LivequeryWebsocketSync?.id
-        const cursor = req.query[':after'] || req.query[':before'] || req.query[':around']
-        const e = {
-            client_id,
-            gateway_id,
-            ref: req.livequery.ref,
-            listener_node_id: this.LivequeryWebsocketSync.id
+        const cursor = req.query?.[':after'] || req.query?.[':before'] || req.query?.[':around']
+        if (parsed && req.method === 'GET' && !cursor) {
+            this.WebsocketGateway?.handle(ctx)
         }
-        req.method == 'GET' && gateway_id && client_id && !cursor ? this.LivequeryWebsocketSync?.listen([e]) : null
 
         return next.handle().pipe(
             map(response => {

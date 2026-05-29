@@ -1,4 +1,4 @@
-const RequestMethodList = [
+const REQUEST_METHODS = [
     'GET',
     'POST',
     'PUT',
@@ -7,31 +7,37 @@ const RequestMethodList = [
     'ALL',
     'OPTIONS',
     'HEAD',
-    'SEARCH'
-]
+    'SEARCH',
+] as const
 
+function normalizePath(...parts: unknown[]): string {
+    return parts
+        .flat(3)
+        .filter(part => part !== undefined && part !== null)
+        .map(part => `${part}`.trim())
+        .flatMap(part => part.split('/'))
+        .filter(part => part.trim())
+        .join('/')
+}
 
+export function listPaths(controllers: any[]): Array<{ method: string; path: string }> {
+    return controllers.flatMap(controller => {
+        const actions = Object.getOwnPropertyNames(controller.prototype)
+            .filter(action => action !== 'constructor')
+        const metadata = Reflect as any
+        const prefixes = [metadata.getMetadata('path', controller) ?? ''].flat(2)
 
-export const listPaths = (controllers: any[]) => {
-    return controllers.map(controller => {
-        const actions = Object.getOwnPropertyNames(controller.prototype).filter(c => c != 'constructor')
-        const prefixs = [Reflect.getMetadata('path', controller)].flat(2)
-       
-        const refs =  actions.map(action => {
-            const method = Reflect.getMetadata('method', controller.prototype[action])
+        return actions.flatMap(action => {
+            const method = metadata.getMetadata('method', controller.prototype[action])
             if (method === undefined) return []
-            const paths =  [Reflect.getMetadata('path', controller.prototype[action]) || ['']].flat(3)
+            const methodName = REQUEST_METHODS[method]
+            if (!methodName) return []
 
-
-            return prefixs.map(prefix => {
-                return paths.map(p => ({
-                    method: RequestMethodList[method],
-                    path: `${prefix}/${p}`.split('/').filter(x => !!x.trim()).join('/')
-                }))
-            }).flat(3)
-
-        }).flat(2) 
-
-        return refs 
-    }).flat(4)
+            const paths = [metadata.getMetadata('path', controller.prototype[action]) ?? ''].flat(3)
+            return prefixes.flatMap(prefix => paths.map(path => ({
+                method: methodName,
+                path: normalizePath(prefix, path),
+            })))
+        })
+    })
 }

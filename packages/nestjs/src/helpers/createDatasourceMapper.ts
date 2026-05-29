@@ -5,7 +5,7 @@ import { RouterOptions } from "express";
 import { Observable } from 'rxjs'
 import { ModuleRef } from "@nestjs/core";
 import { UpdatedData } from "@livequery/types";
-import { LivequeryWebsocketSync } from "../LivequeryWebsocketSync.js";
+import { WebsocketGateway } from "@livequery/core";
 
 export type ResolverRoutes = Array<{
     path: string,
@@ -33,7 +33,7 @@ export type CreateDatasourceOptions<Config, RouteOptions> = {
     querier: LivequeryDatasourceFactory<Config, RouteOptions>
     watcher?: LivequeryDatasourceWatcherFactory<Config, RouteOptions>
     injects?: any[]
-    config?: Config | ((...args: any[]) => Promise<Config> | Config)
+    config: Config | ((...args: any[]) => Promise<Config> | Config)
 }
 
 export const createDatasourceMapper = <Config, RouteOptions>({
@@ -58,8 +58,8 @@ export const createDatasourceMapper = <Config, RouteOptions>({
 
     const provider = {
         provide: querier,
-        inject: [ModuleRef, LivequeryWebsocketSync, ...injects],
-        useFactory: async (moduleRef: ModuleRef, ws: LivequeryWebsocketSync, ...injections: any[]) => {
+        inject: [ModuleRef, WebsocketGateway, ...injects],
+        useFactory: async (moduleRef: ModuleRef, ws: WebsocketGateway, ...injections: any[]) => {
             const ds = await moduleRef.create<LivequeryDatasource<Config, RouteOptions>>(querier)
             const interceptor = await moduleRef.create<LivequeryDatasourceInterceptors>(LivequeryDatasourceInterceptors)
             const routes = interceptor.getRoutes<RouteOptions>(querier as unknown as Symbol)
