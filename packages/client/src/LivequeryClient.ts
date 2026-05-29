@@ -1,10 +1,10 @@
-import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap, toArray } from "rxjs"
+import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
-import { matchesAllFilters } from "./helpers/filterDocs.js"
+import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
 import { useDispose } from "./helpers/useDispose.js"
 import { uuidv7 } from 'uuidv7'
 
@@ -52,6 +52,7 @@ export type CollectionMetadata = {
     collection_ref: string
     mode: 'server-first' | 'local-first' | 'cache-first' | 'local-only'
     filters: Partial<LivequeryFilters<any>>
+    parsedFilters: ParsedFilter[]
 }
 
 type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
@@ -211,7 +212,8 @@ export class LivequeryClient {
             collection_id,
             collection_ref,
             mode,
-            filters: {}
+            filters: {},
+            parsedFilters: []
         })
         return data$.pipe(
             finalize(() => {
@@ -245,8 +247,9 @@ export class LivequeryClient {
         }))
 
 
-        // If collection 
+        // If collection
         collection.filters = req.filters || {}
+        collection.parsedFilters = parseFilters(collection.filters as Record<string, any>)
         if (collection.mode == 'local-first') {
             return await this.config.storage.query<T>(req.ref, req.filters)
         }
@@ -283,7 +286,7 @@ export class LivequeryClient {
             }
 
             if (event.type == 'added') {
-                event.data && matchesAllFilters(event.data, collection.filters) && changes.push(event)
+                event.data && matchesParsedFilters(event.data, collection.parsedFilters) && changes.push(event)
                 continue
             }
 
@@ -291,7 +294,7 @@ export class LivequeryClient {
             const cached = docs.get(cache_key) || this.config.storage.get(collection.collection_ref, event.id)
             docs.set(cache_key, cached)
             const doc = await cached
-            if (doc && matchesAllFilters(doc, collection.filters)) {
+            if (doc && matchesParsedFilters(doc as Record<string, any>, collection.parsedFilters)) {
                 changes.push(event)
                 continue
             }
@@ -306,6 +309,7 @@ export class LivequeryClient {
     }
 
     async #broadcast(collection_ref: string, from: RealtimeChangeSource, events: Array<DataChangeEvent>) {
+        if (events.length === 0) return
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         const docs = new Map<string, Promise<Doc | null>>()
         for (const collection_id of collections) {
@@ -346,13 +350,13 @@ export class LivequeryClient {
         }
     }
 
-    #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean) {
-        return lastValueFrom(from(docs).pipe(
-            mergeMap(doc => from(Object.entries(this.config.transporters)).pipe(
-                mergeMap(async ([tid, transporter]) => {
+    async #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean): Promise<DocState<T>[]> {
+        const results = await Promise.all(
+            docs.flatMap(doc =>
+                Object.entries(this.config.transporters).map(async ([tid, transporter]) => {
                     const id = doc.id
                     if (String(id).startsWith('local:')) {
-                        // lock by collection_ref 
+                        // lock by collection_ref
                         const o = new Subject<void>()
                         this.#adding.set(collection_ref, o)
                         using $ = useDispose(() => {
@@ -362,7 +366,7 @@ export class LivequeryClient {
                         })
                         const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T), tid)
                         if (e && server_first) throw e
-                        // unlock 
+                        // unlock
                         const fnd = {
                             ...data,
                             _adding: undefined,
@@ -378,7 +382,7 @@ export class LivequeryClient {
                         return data as DocState<T>
                     }
 
-                    // _deleting flag → soft-delete on remote then hard-delete locally 
+                    // _deleting flag → soft-delete on remote then hard-delete locally
                     if (doc._deleting) {
                         const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id), tid)
                         if (e && server_first) throw e
@@ -428,10 +432,9 @@ export class LivequeryClient {
                         return data as DocState<T>
                     }
                 })
-            )),
-            filter(Boolean),
-            toArray(),
-        ), { defaultValue: [] as DocState<T>[] })
+            )
+        )
+        return results.filter(Boolean) as DocState<T>[]
     }
 
 
@@ -440,15 +443,12 @@ export class LivequeryClient {
             const list = documents.map(doc => ({ ...doc, id: `local:${uuidv7()}` }))
             return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true)
         }
-        const docs = await lastValueFrom(from(documents).pipe(
-            mergeMap(doc => {
-                return this.config.storage.add<T>(collection_ref, {
-                    ...doc,
-                    _adding: true,
-                    ...mode === 'local-only' ? { _local_only: true } : {}
-                } as DocState<T>) as Promise<DocState<T>>
-            }),
-            toArray()
+        const docs = await Promise.all(documents.map(doc =>
+            this.config.storage.add<T>(collection_ref, {
+                ...doc,
+                _adding: true,
+                ...mode === 'local-only' ? { _local_only: true } : {}
+            } as DocState<T>) as Promise<DocState<T>>
         ))
         await this.#broadcast(
             collection_ref,
@@ -469,26 +469,15 @@ export class LivequeryClient {
             const list = documents.map(doc => ({ ...doc, _prev: doc }))
             return await this.#push<T>(collection_ref, list, true)
         }
-        const merged = await lastValueFrom(from(documents).pipe(
-            mergeMap(async doc => {
-                const old = await this.config.storage.get<T>(
-                    collection_ref,
-                    doc.id
-                ) as undefined | DocState<T>
-                if (!old) return
-                const _prev = Object.keys(doc).reduce((acc, key) => {
-                    if (key in (old._prev || {})) return acc
-                    return {
-                        ...acc,
-                        [key]: (old as any)[key]
-                    }
-                }, old._prev || {})
-                const data = await this.config.storage.update<T>(collection_ref, doc.id, { _prev, _updating: true, ...doc, })
-                return data as DocState<T>
-            }),
-            filter(Boolean),
-            toArray()
-        ))
+        const merged = (await Promise.all(documents.map(async doc => {
+            const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
+            if (!old) return
+            const _prev = Object.keys(doc).reduce((acc, key) => {
+                if (key in (old._prev || {})) return acc
+                return { ...acc, [key]: (old as any)[key] }
+            }, old._prev || {})
+            return await this.config.storage.update<T>(collection_ref, doc.id, { _prev, _updating: true, ...doc }) as DocState<T>
+        }))).filter(Boolean) as DocState<T>[]
         await this.#broadcast(
             collection_ref,
             'action',
@@ -509,20 +498,15 @@ export class LivequeryClient {
             return await this.#push<T>(collection_ref, list, true)
         }
         const soft = Object.keys(this.config.transporters).length > 0
-        const merged = await lastValueFrom(from(ids).pipe(
-            mergeMap(async id => {
-                const is_local_doc = id.startsWith('local:')
-                if (!soft || is_local_doc || mode == 'local-only') {
-                    const doc = await this.config.storage.delete<T>(collection_ref, id)
-                    return doc
-                }
-                return await this.config.storage.update<T>(collection_ref, id, { _deleting: true })
-            }),
-            filter(Boolean),
-            toArray()
-        ))
-        const deleting_list = merged.filter(doc => doc._deleting)
-        const deleted_list = merged.filter(doc => !doc._deleting)
+        const merged = (await Promise.all(ids.map(async id => {
+            const is_local_doc = id.startsWith('local:')
+            if (!soft || is_local_doc || mode == 'local-only') {
+                return await this.config.storage.delete<T>(collection_ref, id)
+            }
+            return await this.config.storage.update<T>(collection_ref, id, { _deleting: true })
+        }))).filter(Boolean) as T[]
+        const deleting_list = (merged as any[]).filter(doc => doc._deleting)
+        const deleted_list = (merged as any[]).filter(doc => !doc._deleting)
 
         await this.#broadcast(
             collection_ref,
@@ -560,9 +544,7 @@ export class LivequeryClient {
     }
 
     async seedToStorage<T extends Doc>(collection_ref: string, docs: T[]) {
-        for (const doc of docs) {
-            await this.config.storage.add<T>(collection_ref, doc as any)
-        }
+        await Promise.all(docs.map(doc => this.config.storage.add<T>(collection_ref, doc as any)))
     }
 
     async flush(collection_ref: string) {

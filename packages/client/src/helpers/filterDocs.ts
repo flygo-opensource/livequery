@@ -2,9 +2,9 @@ import type { Doc, LivequeryFilters } from "../types.js"
 
 export type LivequeryFilterInput<T extends Doc> = Partial<LivequeryFilters<T>> | Record<string, any>
 
-type ParsedFilter = { fieldPath: string; op: string; expected: unknown }
+export type ParsedFilter = { fieldPath: string; op: string; expected: unknown }
 
-function parseFilters(filters: Record<string, any>): ParsedFilter[] {
+export function parseFilters(filters: Record<string, any>): ParsedFilter[] {
     const result: ParsedFilter[] = []
     for (const key of Object.keys(filters)) {
         if (key.startsWith(':') || key.endsWith(':sort')) continue
@@ -30,7 +30,7 @@ export function matchesAllFilters(doc: Record<string, any>, filters: Record<stri
     return matchesParsedFilters(doc, parseFilters(filters))
 }
 
-function matchesParsedFilters(doc: Record<string, any>, parsed: ParsedFilter[]) {
+export function matchesParsedFilters(doc: Record<string, any>, parsed: ParsedFilter[]) {
     for (const { fieldPath, op, expected } of parsed) {
         if (!matchByOperator(getByPath(doc, fieldPath), op, expected)) return false
     }
