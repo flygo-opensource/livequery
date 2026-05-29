@@ -251,7 +251,7 @@ export class ApiGatewayHandler {
         if (!entry) return undefined
 
         const online = entry.hosts.filter(h => !h.offlineAt)
-        if (online.length === 0) return entry.hosts.length > 0 ? null : undefined
+        if (online.length === 0) return null
 
         const host = online[entry.rr_index % online.length]
         entry.rr_index++
