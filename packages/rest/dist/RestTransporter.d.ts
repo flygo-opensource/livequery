@@ -21,20 +21,20 @@ export type RestTransporterConfig = {
 };
 export type LivequeryCollectionResponse<T extends Doc> = {
     summary?: any;
-    items: T[];
-    item: T;
+    items?: T[];
+    item?: T;
     subscription_token?: string;
-    count: {
+    count?: {
         prev: number;
         next: number;
         total: number;
         current: number;
     };
-    has: {
+    has?: {
         prev: boolean;
         next: boolean;
     };
-    cursor: {
+    cursor?: {
         first: string;
         last: string;
     };

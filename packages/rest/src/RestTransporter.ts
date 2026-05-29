@@ -27,14 +27,14 @@ export type RestTransporterConfig = {
 
 export type LivequeryCollectionResponse<T extends Doc> = {
     summary?: any,
-    items: T[],
-    item: T
+    items?: T[],
+    item?: T
     subscription_token?: string,
-    count: {
+    count?: {
         prev: number, next: number, total: number, current: number
     }
-    has: { prev: boolean, next: boolean }
-    cursor: { first: string, last: string }
+    has?: { prev: boolean, next: boolean }
+    cursor?: { first: string, last: string }
 }
 
 
@@ -165,6 +165,8 @@ export class RestTransporter implements LivequeryTransporter {
         const refs = ref.split('/')
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
 
+        const is_document = refs.length % 2 == 0
+
         return merge(
 
 
@@ -180,7 +182,7 @@ export class RestTransporter implements LivequeryTransporter {
                         map(collection => {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
                             // If collection
-                            if (collection.items) {
+                            if (collection.items != null) {
                                 const items = Array.isArray(collection.items) ? collection.items : []
                                 const length = items.length
                                 return {
@@ -207,15 +209,28 @@ export class RestTransporter implements LivequeryTransporter {
                                 } as Partial<LivequeryQueryResult>
                             }
 
-                            // If document  
+                            // If document
+                            if (collection.item != null) {
+                                return {
+                                    summary: collection.summary,
+                                    changes: [{
+                                        data: collection.item,
+                                        type: 'added',
+                                        id: collection.item.id,
+                                        collection_ref
+                                    }],
+                                    source: "query"
+                                } as Partial<LivequeryQueryResult>
+                            }
+
+                            // Missing items/item field — server returned unexpected format
                             return {
-                                summary: collection.summary,
-                                changes: [{
-                                    data: collection.item,
-                                    type: 'added',
-                                    id: collection.item.id,
-                                    collection_ref
-                                }],
+                                error: {
+                                    code: is_document ? 'DOCUMENT_NOT_FOUND' : 'INVALID_RESPONSE',
+                                    message: is_document
+                                        ? `Document not found: server response is missing the 'item' field`
+                                        : `Server response is missing the 'items' field for collection query`
+                                },
                                 source: "query"
                             } as Partial<LivequeryQueryResult>
                         }),
