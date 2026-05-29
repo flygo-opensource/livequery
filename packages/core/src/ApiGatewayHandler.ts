@@ -15,6 +15,7 @@ import { writeWebResponse } from './helpers/writeWebResponse.js'
 type RouteHost = {
     uri: string
     node_id: string
+    offlineAt?: number
 }
 
 type RouteEntry = {
@@ -84,6 +85,7 @@ export class ApiGatewayHandler {
         metadata: ServiceApiMetadata
         subscription?: Subscription
     }>()
+    #cleanupTimer: ReturnType<typeof setInterval> | undefined
 
     constructor(private options: ApiGatewayOptions) {
         this.#nodeId = options.node_id ?? randomUUID()
@@ -109,6 +111,8 @@ export class ApiGatewayHandler {
         })
 
         this.#discovery.broadcast(this.#metadata()).catch(e => console.error(e))
+
+        this.#cleanupTimer = setInterval(() => this.#cleanupOfflineHosts(), 5000)
     }
 
     register({ node_id, hostname, port, paths }: RegisterOptions): void {
@@ -127,8 +131,12 @@ export class ApiGatewayHandler {
 
             const METHOD = method.toUpperCase()
             if (!node.methods[METHOD]) node.methods[METHOD] = { hosts: [], rr_index: 0 }
-            const exists = node.methods[METHOD].hosts.some(host => host.node_id === node_id && host.uri === uri)
-            if (!exists) node.methods[METHOD].hosts.push({ node_id, uri })
+            const existing = node.methods[METHOD].hosts.find(h => h.node_id === node_id && h.uri === uri)
+            if (existing) {
+                existing.offlineAt = undefined  // host re-announced — back online
+            } else {
+                node.methods[METHOD].hosts.push({ node_id, uri })
+            }
         }
     }
 
@@ -180,6 +188,7 @@ export class ApiGatewayHandler {
     }
 
     close(): void {
+        clearInterval(this.#cleanupTimer)
         this.#discoverySubscription.unsubscribe()
         for (const { subscription } of this.#services.values()) {
             subscription?.unsubscribe()
@@ -217,7 +226,7 @@ export class ApiGatewayHandler {
                 duplex: 'half',
             } as RequestInit)
         } catch {
-            this.deregister(target.node_id)
+            target.offlineAt = Date.now()
             return Response.json({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } }, { status: 502 })
         }
     }
@@ -240,9 +249,11 @@ export class ApiGatewayHandler {
 
         const entry = node.methods[method.toUpperCase()]
         if (!entry) return undefined
-        if (entry.hosts.length === 0) return null
 
-        const host = entry.hosts[entry.rr_index % entry.hosts.length]
+        const online = entry.hosts.filter(h => !h.offlineAt)
+        if (online.length === 0) return entry.hosts.length > 0 ? null : undefined
+
+        const host = online[entry.rr_index % online.length]
         entry.rr_index++
         return host
     }
@@ -251,7 +262,13 @@ export class ApiGatewayHandler {
         const { port, node_id, name, paths, ws } = metadata
         const host = metadata.host ?? ''
         const subscription = ws
-            ? this.#lws?.connect(`ws://${host}:${port}${ws.path}`, ws.auth, () => this.#disconnect(node_id))
+            ? this.#lws?.connect(
+                `ws://${host}:${port}${ws.path}`,
+                ws.auth,
+                () => this.#markNodeOffline(node_id),
+                () => this.#removeService(node_id, true),
+                () => this.#markNodeOnline(node_id)
+            )
             : undefined
 
         this.#services.set(node_id, { metadata, subscription, host })
@@ -262,8 +279,59 @@ export class ApiGatewayHandler {
         )
     }
 
-    #disconnect(id: string): void {
-        this.#removeService(id, true)
+    #markNodeOffline(node_id: string): void {
+        const now = Date.now()
+        const queue: RoutingNode[] = [this.#root]
+        while (queue.length > 0) {
+            const node = queue.shift()!
+            for (const entry of Object.values(node.methods)) {
+                for (const host of entry.hosts) {
+                    if (host.node_id === node_id) host.offlineAt = now
+                }
+            }
+            queue.push(...Object.values(node.children))
+        }
+        LIVEQUERY_API_GATEWAY_DEBUG && console.warn(
+            `[${new Date().toLocaleString()}] Service API offline (reconnecting): ${node_id}`
+        )
+    }
+
+    #markNodeOnline(node_id: string): void {
+        const queue: RoutingNode[] = [this.#root]
+        while (queue.length > 0) {
+            const node = queue.shift()!
+            for (const entry of Object.values(node.methods)) {
+                for (const host of entry.hosts) {
+                    if (host.node_id === node_id) host.offlineAt = undefined
+                }
+            }
+            queue.push(...Object.values(node.children))
+        }
+        LIVEQUERY_API_GATEWAY_DEBUG && console.info(
+            `[${new Date().toLocaleString()}] Service API back online: ${node_id}`
+        )
+    }
+
+    #cleanupOfflineHosts(): void {
+        const deadline = Date.now() - 30_000
+        const deadNodes = new Set<string>()
+        const queue: RoutingNode[] = [this.#root]
+        while (queue.length > 0) {
+            const node = queue.shift()!
+            for (const entry of Object.values(node.methods)) {
+                for (const host of entry.hosts) {
+                    if (!host.offlineAt || host.offlineAt > deadline) continue
+                    const svc = this.#services.get(host.node_id)
+                    // skip if WS reconnect is still in progress
+                    if (svc?.subscription && !svc.subscription.closed) continue
+                    deadNodes.add(host.node_id)
+                }
+            }
+            queue.push(...Object.values(node.children))
+        }
+        for (const node_id of deadNodes) {
+            this.#removeService(node_id, true)
+        }
     }
 
     #removeService(id: string, logOffline: boolean): void {

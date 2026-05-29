@@ -380,10 +380,11 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
     }
 
     // Connect outbound to another gateway node with auto-retry
-    connect(url: string, auth: string, ondisconnect?: () => void): Subscription {
+    connect(url: string, auth: string, onoffline?: () => void, ondone?: () => void, onreconnect?: () => void): Subscription {
         if (this.#closed) return new Subscription()
 
         const gateway$ = new BehaviorSubject({ id: '', stop: false })
+        let everConnected = false
 
         return of(0).pipe(
             takeWhile(() => !gateway$.getValue().stop),
@@ -402,10 +403,15 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
                         if (parsed.event === 'hello') {
                             const old_id = gateway$.getValue().id
                             if (old_id === '') {
+                                everConnected = true
                                 gateway$.next({ id: parsed.gid, stop: false })
                             } else if (old_id !== parsed.gid) {
                                 gateway$.next({ id: parsed.gid, stop: true })
                                 throw ENDPOINT_RESTARTED
+                            } else {
+                                // same gateway ID — reconnected after a drop
+                                everConnected = true
+                                onreconnect?.()
                             }
                             this.#connections.set(parsed.gid,
                                 Object.assign(ws, { id: parsed.gid, gateway: true, refs: new Set<string>() }) as unknown as SocketMeta
@@ -431,19 +437,24 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
                 finalize(() => {
                     const id = (ws as any).id as string | undefined
                     if (id) this.#connections.delete(id)
+                    if (everConnected) {
+                        everConnected = false
+                        onoffline?.()
+                    }
                 })
             )),
             retry({
+                resetOnSuccess: true,
                 delay: (e, n) => {
                     if (e === ENDPOINT_RESTARTED) return EMPTY
-                    if (n >= 30) {
-                        console.error(`[livequery] Gateway connection to ${url} failed after ${n} retries, giving up.`)
+                    if (n >= 3) {
+                        console.error(`[livequery] Gateway connection to ${url} failed after ${n} consecutive retries, giving up.`)
                         return EMPTY
                     }
-                    return timer(Math.min(1000 * 2 ** n, 30000))
+                    return timer(1000)
                 }
             }),
-            finalize(() => ondisconnect?.())
+            finalize(() => ondone?.())
         ).subscribe()
     }
 
