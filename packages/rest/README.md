@@ -492,6 +492,46 @@ Invalid JSON becomes:
 }
 ```
 
+### Collection and document response errors
+
+When the server returns a valid response envelope but the payload is missing expected fields, the transporter emits a structured error through the query observable:
+
+**Missing `items` field on a collection query:**
+
+```ts
+{
+  source: 'query',
+  error: {
+    code: 'INVALID_RESPONSE',
+    message: "Server response is missing the 'items' field for collection query"
+  }
+}
+```
+
+**Missing `item` field on a document query:**
+
+```ts
+{
+  source: 'query',
+  error: {
+    code: 'DOCUMENT_NOT_FOUND',
+    message: "Document not found: server response is missing the 'item' field"
+  }
+}
+```
+
+These errors surface in `LivequeryCollection.error` and are available in React via `useObservable(collection.error)` or the third element of `useDocument()`.
+
+### Complete error code reference
+
+| Code | Source | Meaning |
+|---|---|---|
+| `HTTP_<status>` | `query()` | Non-2xx HTTP response, e.g. `HTTP_404`, `HTTP_500` |
+| `InvalidResponse` | `query()`, `add()`, `update()`, `delete()` | Response body is not valid JSON |
+| `INVALID_RESPONSE` | `query()` | Collection query succeeded but response has no `items` field |
+| `DOCUMENT_NOT_FOUND` | `query()` | Document query succeeded but response has no `item` field |
+| Backend-defined | Any | Your backend returned `{ error: { code, message } }` |
+
 ## Practical Example
 
 ```ts
