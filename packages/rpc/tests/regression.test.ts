@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { BehaviorSubject } from "rxjs"
+import { BehaviorSubject, Observable } from "rxjs"
 import { LimitConcurrency } from "../src/LimitConcurrency.js"
 import type { RpcMessage } from "../src/RpcChannel.js"
 import { RpcChannel } from "../src/RpcChannel.js"
@@ -81,6 +81,62 @@ describe("RPC regression behavior", () => {
             expect(error).toBeInstanceOf(Error)
             expect((error as Error).message).toBe("Invalid method path: getName")
         }
+    })
+
+    test("WorkerManager blocks prototype-chain access (constructor)", async () => {
+        const { client, worker } = createRpcPair()
+        const manager = new WorkerManager(worker)
+        const linker = new ServiceLinker(client)
+
+        manager.exposeService("svc", { hello: () => "hi" })
+        const svc = linker.linkService<any>("svc")
+
+        try {
+            await svc.constructor.constructor("return 1")
+            throw new Error("Expected forbidden path to reject")
+        } catch (error) {
+            expect((error as Error).message).toContain("Invalid method path")
+        }
+    })
+
+    test("worker errors propagate the worker-side stack", async () => {
+        const { client, worker } = createRpcPair()
+        const manager = new WorkerManager(worker)
+        const linker = new ServiceLinker(client)
+
+        manager.exposeService("boom", {
+            fail: () => { throw new Error("kaboom") },
+        })
+        const svc = linker.linkService<any>("boom")
+
+        try {
+            await svc.fail()
+            throw new Error("Expected fail() to reject")
+        } catch (error) {
+            expect((error as Error).message).toBe("kaboom")
+            expect((error as Error).stack).toContain("kaboom")
+        }
+    })
+
+    test("disconnect releases streaming subscriptions for that connection", async () => {
+        const { client, worker } = createRpcPair()
+        const manager = new WorkerManager(worker)
+        const linker = new ServiceLinker(client)
+
+        let torndown = false
+        const stream$ = new Observable(() => () => { torndown = true })
+        manager.exposeService("live", { data$: () => stream$ })
+
+        const svc = linker.linkService<any>("live")
+        svc.data$.subscribe(() => undefined)
+        await new Promise(r => setTimeout(r, 10))
+
+        // Simulate the channel reporting the connection dropped (connection_id matches
+        // the request's — both undefined for MemoryChannel).
+        worker.next({ id: 0, disconnect: true, respond: () => undefined })
+        await new Promise(r => setTimeout(r, 10))
+
+        expect(torndown).toBe(true)
     })
 })
 

@@ -5,6 +5,8 @@ import { RpcChannel, type RpcMessage } from "./RpcChannel.js";
 
 export class SharedWorkerChannel extends RpcChannel {
 
+    #connection_seq = 0
+
     constructor(private worker?: SharedWorker) {
         super();
         if (typeof window == 'undefined') {
@@ -24,6 +26,7 @@ export class SharedWorkerChannel extends RpcChannel {
                 const port = e.ports[0]
                 if (!port) return EMPTY
                 port.start()
+                const connection_id = `c${this.#connection_seq++}`
                 return fromEvent<MessageEvent<RpcMessage>>(port, 'message').pipe(
                     takeUntil(fromEvent(port, 'messageerror')),
                     tap(msg => {
@@ -34,9 +37,11 @@ export class SharedWorkerChannel extends RpcChannel {
                             })
                         }
 
-                        this.next({ ...msg.data, respond })
+                        this.next({ ...msg.data, respond, connection_id })
                     }),
                     finalize(() => {
+                        // Notify the manager so it can drop subscriptions for this connection.
+                        this.next({ id: 0, disconnect: true, connection_id, respond: () => undefined })
                         port.close()
                     })
                 )

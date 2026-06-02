@@ -21,10 +21,16 @@ export class ServiceLinker {
                 if (!e.response) return
                 const request = this.#requests.get(e.id)
                 if (!request) return
-                const { completed, data, error } = e.response
+                const { completed, data, error, stack } = e.response
                 if (completed || error) request.completed = true
                 if ("data" in e.response) request.o.next(data)
-                error && request.o.error(new Error(error))
+                if (error) {
+                    const err = new Error(error)
+                    // Surface the worker-side stack for debugging instead of the (useless)
+                    // foreground stack pointing at this rxjs callback.
+                    if (stack) err.stack = stack
+                    request.o.error(err)
+                }
                 completed && !error && request.o.complete()
             })
         ).subscribe()
