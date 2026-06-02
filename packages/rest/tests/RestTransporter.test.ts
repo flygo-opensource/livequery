@@ -80,6 +80,20 @@ describe("RestTransporter", () => {
         });
     });
 
+    test("update strips client-private (underscore) fields before sending", async () => {
+        const calls: Array<{ init?: RequestInit }> = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            calls.push({ init });
+            return new Response(JSON.stringify({ data: { id: "todo-1" } }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({ api: "https://api.example.com" });
+        await transporter.update("todos", "todo-1", { title: "Updated", _id: "x", _local: true } as any);
+
+        const sent = JSON.parse(calls[0].init?.body as string);
+        expect(sent).toEqual({ title: "Updated" });
+    });
+
     test("throws InvalidResponse for invalid JSON responses", async () => {
         globalThis.fetch = (async () => new Response("not json")) as typeof fetch;
 

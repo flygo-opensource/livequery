@@ -266,12 +266,18 @@ export class RestTransporter implements LivequeryTransporter {
         )
     }
 
-    async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
-        type DT = { id: string, _id: string } & T
-        const body = Object.entries(data).reduce((acc, [k, v]) => {
+    // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) before sending
+    // a write to the server. Applied consistently across add/update.
+    #stripPrivateFields(data: Record<string, any>) {
+        return Object.entries(data).reduce((acc, [k, v]) => {
             if (k.startsWith('_')) return acc
             return { ...acc, [k]: v }
         }, {} as Record<string, any>)
+    }
+
+    async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
+        type DT = { id: string, _id: string } & T
+        const body = this.#stripPrivateFields(data)
         const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body, query: {} })
         for (const [k, v] of [['', r], ...Object.entries(r)]) {
             const target = v as any as DT
@@ -285,7 +291,7 @@ export class RestTransporter implements LivequeryTransporter {
     }
 
     update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>) {
-        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: data, query: {} })
+        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: this.#stripPrivateFields(data), query: {} })
     }
 
     delete<T extends Doc>(collection_ref: string, id: string) {
