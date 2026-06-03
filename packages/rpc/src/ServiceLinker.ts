@@ -1,4 +1,4 @@
-import { BehaviorSubject, finalize, firstValueFrom, Observable, share, Subject, tap } from "rxjs";
+import { BehaviorSubject, defer, finalize, firstValueFrom, Observable, ReplaySubject, share, Subject, tap, timer } from "rxjs";
 import type { RpcChannel } from "./RpcChannel.js";
 import type { WorkerService } from "./WorkerService.js";
 
@@ -23,15 +23,18 @@ export class ServiceLinker {
                 if (!request) return
                 const { completed, data, error, stack } = e.response
                 if (completed || error) request.completed = true
-                if ("data" in e.response) request.o.next(data)
+                if ("data" in e.response) {
+                    request.o.next(data)
+                }
                 if (error) {
                     const err = new Error(error)
                     // Surface the worker-side stack for debugging instead of the (useless)
                     // foreground stack pointing at this rxjs callback.
                     if (stack) err.stack = stack
                     request.o.error(err)
+                } else {
+                    completed && request.o.complete()
                 }
-                completed && !error && request.o.complete()
             })
         ).subscribe()
 
@@ -40,8 +43,6 @@ export class ServiceLinker {
     linkService<T>(name: string): WorkerService<T> {
         const cache = this.#services.get(name)
         if (cache) return cache
-
-        const observables = new Map<string, any>()
 
         const rpc = <T = any>(paths: string[], args: any[]): ThenableObservable<T> => {
             if (paths.length == 0 || paths[0] == '#') throw new Error(`Invalid method path: ${paths.join('.')}`)
@@ -75,45 +76,47 @@ export class ServiceLinker {
             }) as ThenableObservable<any>
         }
 
-        const build = (paths: string[] = []) => {
-            const fn = (...args: any[]) => rpc(paths, args)
-            return new Proxy(fn, {
-                get: (_, prop) => {
-                    if (prop == 'then' || typeof prop != 'string') return null
-                    if (prop == 'pipe' || prop == 'subscribe' || prop == 'getValue') {
-                        return (...args: any) => {
-                            const key = paths.join('.')
-                            const cache = observables.get(key)
-                            if (cache) return cache[prop](...args)
-                            const sbj = new BehaviorSubject(null)
-                            const observable = Object.assign(
-                                rpc(paths, []).pipe(
-                                    share({
-                                        connector: () => sbj,
-                                        resetOnRefCountZero: false,
-                                        resetOnComplete: false,
-                                        resetOnError: false,
-                                    })
-                                ),
-                                {
-                                    getValue: () => sbj.getValue()
-                                }
-                            )
-                            observables.set(key, observable)
-                            return observable[prop](...args)
-                        }
-                    }
-                    return build([...paths, prop])
-                },
-                has(target, prop) {
-                    if (prop == 'pipe' || prop == 'subscribe' || prop == 'getValue') {
-                        return true
-                    }
-                    return prop in target
+        const values = new Map<string, any>()
+        const observables = new Map<string, any>()
+
+        const service = new Proxy({}, {
+            get: (_, key) => {
+                if (key == 'then' || typeof key != 'string') return null
+                if (observables.has(key)) {
+                    return Object.assign(observables.get(key), {
+                        getValue: () => values.get(key)
+                    })
                 }
-            }) as T
-        }
-        const service = build() as any
+                const fn = (...args: any[]) => rpc([key], args)
+                return new Proxy(fn, {
+                    get: (_, prop) => {
+                        if (prop == 'then' || typeof prop != 'string') return null
+                        if (prop == 'pipe' || prop == 'subscribe') {
+                            const $ = observables.get(key) || defer(() => rpc([key], [])).pipe(
+                                tap(value => values.set(key, value)),
+                                finalize(() => observables.delete(key)),
+                                share({
+                                    connector: () => new ReplaySubject(1),
+                                    resetOnError: true,
+                                    resetOnComplete: false,
+                                    resetOnRefCountZero: () => timer(1000)
+                                })
+                            )
+                            !observables.has(key) && observables.set(key, $)
+                            return (...args: any[]) => $[prop](...args)
+                        }
+                        if (prop == 'getValue') return () => values.get(key)
+                        return (...args: any[]) => rpc([key, prop], args)
+                    }
+                })
+            },
+            has(target, prop) {
+                if (prop == 'pipe' || prop == 'subscribe' || prop == 'getValue') {
+                    return true
+                }
+                return prop in target
+            }
+        }) as WorkerService<T>
         this.#services.set(name, service)
         return service
     }
