@@ -94,14 +94,14 @@ describe("RestTransporter", () => {
         expect(sent).toEqual({ title: "Updated" });
     });
 
-    test("throws InvalidResponse for invalid JSON responses", async () => {
+    test("throws InvalidJsonResponse for invalid JSON responses", async () => {
         globalThis.fetch = (async () => new Response("not json")) as typeof fetch;
 
         const transporter = new RestTransporter({ api: "https://api.example.com" });
 
         await expect(transporter.delete("todos", "todo-1")).rejects.toMatchObject({
-            code: "InvalidResponse",
-            message: "The server did not return valid JSON."
+            code: "InvalidJsonResponse",
+            message: "InvalidJsonResponse"
         });
     });
 });

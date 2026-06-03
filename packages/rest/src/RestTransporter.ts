@@ -127,16 +127,16 @@ export class RestTransporter implements LivequeryTransporter {
                 if (!result.ok) {
                     return {
                         error: {
-                            code: `HTTP_${result.status}`,
-                            message: parsed?.error?.message || result.statusText || 'Request failed'
+                            code: parsed?.error?.code || `HTTP_${result.status}`,
+                            message: parsed?.error?.message || 'REQUEST_FAILED'
                         }
                     }
                 }
                 if (!parsed) {
                     return {
                         error: {
-                            code: 'InvalidResponse',
-                            message: 'The server did not return valid JSON.'
+                            code: 'InvalidJsonResponse',
+                            message: 'InvalidJsonResponse'
                         }
                     }
                 }
@@ -145,7 +145,7 @@ export class RestTransporter implements LivequeryTransporter {
                 return {
                     error: {
                         code: e instanceof Error ? e.name : 'UnknownError',
-                        message: e instanceof Error ? e.message : 'An unknown error occurred'
+                        message: e instanceof Error ? e.message : 'UnknownError'
 
                     }
                 }
