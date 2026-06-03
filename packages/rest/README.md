@@ -185,7 +185,7 @@ Private fields whose names start with `_` are not sent.
 
 ### `update(collectionRef, id, data)`
 
-Updates a document through HTTP `PATCH`.
+Updates a document through HTTP `PATCH`. As with `add()`, fields whose names start with `_` are stripped before the request is sent.
 
 ```ts
 const user = await transporter.update('users', 'u1', {
