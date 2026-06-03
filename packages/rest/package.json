@@ -34,7 +34,7 @@
     "dist/**/*"
   ],
   "devDependencies": {
-    "@livequery/client": "^2.0.141",
+    "@livequery/client": "^2.0.142",
     "typescript": "5.6.3"
   },
   "peerDependencies": {
