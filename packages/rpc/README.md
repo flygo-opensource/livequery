@@ -245,8 +245,9 @@ export * from "./RxjsQueue.js"
 - Service paths beginning with `#` are invalid.
 - Worker streams are detected by checking for a `pipe()` method.
 - Falsy values such as `0`, `false`, `""`, and `null` are valid RPC payloads.
-- Errors are propagated to the client as `Error(message)`.
+- Errors are propagated to the client as `Error(message)`, with the worker-side `stack` preserved on the error for debugging.
 - There is no built-in readiness API in `ServiceLinker`.
+- When a connection (port) drops, the channel emits `{ disconnect: true, connection_id }` so the `WorkerManager` releases any streaming subscriptions owned by that connection.
 
 ## Development
 

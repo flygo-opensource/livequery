@@ -130,9 +130,11 @@ type RpcMessage = {
     args: any[]
   }
   cancel?: { id: number }
+  disconnect?: boolean
   response?: Partial<{
     data: any
     error: string
+    stack: string
     completed: boolean
   }>
 }
@@ -151,10 +153,11 @@ Any protocol change must keep these files aligned:
 - Falsy values are valid RPC data: `0`, `false`, `""`, and `null` must reach the client.
 - RPC errors must error the client observable before completion.
 - Client unsubscribe before completion sends `{ id: 0, cancel: { id: requestId } }`.
-- `WorkerManager` maps request ids to RxJS subscriptions and unsubscribes on cancel.
+- `WorkerManager` maps request ids to RxJS subscriptions and unsubscribes on cancel, and on connection disconnect (channels emit `{ disconnect: true, connection_id }` on port close).
+- Method paths must not reach prototype-chain props: `constructor`, `prototype`, and `__proto__` are forbidden at every segment.
 - Observable-like worker results are detected with a `pipe()` method, not `instanceof Observable`.
 - Non-observable worker results are awaited and sent once with `completed: true`.
-- Thrown worker errors are serialized as `error: string`.
+- Thrown worker errors are serialized as `error: string` plus the worker-side `stack: string`.
 - Empty paths and paths beginning with `#` are invalid on both client and worker sides.
 
 ## Type Expectations
