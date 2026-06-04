@@ -146,7 +146,6 @@ export class RestTransporter implements LivequeryTransporter {
                     error: {
                         code: e instanceof Error ? e.name : 'UnknownError',
                         message: e instanceof Error ? e.message : 'UnknownError'
-
                     }
                 }
             }
