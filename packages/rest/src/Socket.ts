@@ -54,7 +54,6 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                             connected: true,
                             session: this.value.session + 1
                         })
-                        console.log(this.value.session == 1 ? 'Websocket connected' : `Websocket re-connected (${this.value.session})`)
                         this.#send(ws, { event: 'start', data: { id: this.client_id } })
                     }),
                     mergeMap(() => this.#$input),
