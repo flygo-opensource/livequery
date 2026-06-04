@@ -8,7 +8,7 @@
         "@msgpack/msgpack": "^3.0.0",
       },
       "devDependencies": {
-        "@livequery/client": "^2.0.143",
+        "@livequery/client": "^2.0.145",
         "typescript": "5.6.3",
       },
       "peerDependencies": {
@@ -18,7 +18,7 @@
     },
   },
   "packages": {
-    "@livequery/client": ["@livequery/client@2.0.143", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-qtbrMmNtkNurOGLWZwvdKRFRwz0DWHjgmY1v/kTrAJ868mIP2NFKYjxgfuKAoOzxbk75ju5YgZKgrTDRXDpDNw=="],
+    "@livequery/client": ["@livequery/client@2.0.145", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-QOnV5QwhGc7dFSMSefK77Whh/f2C5e9iFw9taSdPreRTtbXSkjeb7gbxrR1ZSPloc1HitdZr+vbAXj0JWZHbfQ=="],
 
     "@msgpack/msgpack": ["@msgpack/msgpack@3.1.3", "", {}, "sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA=="],
 
