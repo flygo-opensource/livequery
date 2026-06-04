@@ -415,7 +415,7 @@ export class LivequeryClient {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid)
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid) 
                         if (e && server_first) throw e
                         const fnd = {
                             _prev: undefined,
