@@ -11,9 +11,7 @@ const FORBIDDEN_PROPS = new Set(['constructor', 'prototype', '__proto__'])
 
 export class WorkerManager {
 
-    #services = new BehaviorSubject(new Map<string, any>())
-
-
+    #services = new BehaviorSubject(new Map<string, any>()) 
 
     async #call<T>(target: any, paths: string[], args: any[]): Promise<T | null> {
         const [first, ...rest] = paths
@@ -54,9 +52,19 @@ export class WorkerManager {
                 }
                 if (!request) return
                 const service = this.#services.getValue().get(request.service)
-                if (!service) return respond({ error: `Service ${request.service} not found` })
+                if (!service) return respond({
+                    error: {
+                        code: 'ServiceNotFound',
+                        message: `Service [${request.service}] not found`
+                    }
+                })
                 if (request.method.length == 0 || request.method[0] == '#') {
-                    respond({ error: `Can not call [${request.service}.${request.method.join('.')}]` })
+                    respond({
+                        error: {
+                            code: 'InvalidMethodPath',
+                            message: `Invalid method path: ${request.method.join('.')}`
+                        }
+                    })
                     return
                 }
                 return { request, id, respond, service, connection_id }
@@ -73,7 +81,10 @@ export class WorkerManager {
                             })
                         ).subscribe(
                             (data: any) => respond({ data }),
-                            (err: any) => respond({ error: err?.message ?? String(err), stack: err?.stack, completed: true }),
+                            (error: any) => respond({
+                                error,
+                                completed: true
+                            }),
                             () => respond({ completed: true })
                         )
                         responses.set(id, { subscription, connection_id })
@@ -83,8 +94,11 @@ export class WorkerManager {
                     }
                 } catch (err: any) {
                     respond({
-                        error: err?.message ?? String(err),
-                        stack: err?.stack,
+                        error: {
+                            code: err.code || err.name || 'InternalError',
+                            message: err?.message ||  String(err),
+                            stack: err?.stack
+                        },
                         completed: true
                     })
                 }

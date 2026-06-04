@@ -14,8 +14,11 @@ export type RpcMessage = {
     disconnect?: boolean
     response?: Partial<{
         data: any
-        error: string
-        stack: string
+        error?: {
+            code:string 
+            message: string
+            stack?: string
+        }
         completed: boolean
     }>
 }
