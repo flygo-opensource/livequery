@@ -78,8 +78,9 @@ describe("RPC regression behavior", () => {
             await values.profile.getName()
             throw new Error("Expected invalid path to reject")
         } catch (error) {
-            expect(error).toBeInstanceOf(Error)
-            expect((error as Error).message).toBe("Invalid method path: getName")
+            // RPC errors reject with a structured { code, message } object (LIVEQUERY_SPEC envelope).
+            expect((error as any).message).toBe("Invalid method path: getName")
+            expect((error as any).code).toBeDefined()
         }
     })
 
