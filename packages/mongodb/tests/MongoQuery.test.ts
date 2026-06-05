@@ -102,6 +102,123 @@ describe('MongoQuery.query', () => {
         })
     })
 
+    test(':or builds an $or of its nested conditions (not gated on :and)', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    ':or': { status: 'active', 'role:eq': 'admin' },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $or: [
+                    { status: { $eq: 'active' } },
+                    { role: { $eq: 'admin' } },
+                ],
+            },
+        })
+    })
+
+    test(':not builds a $nor of its nested conditions', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    ':not': { status: 'archived' },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $nor: [
+                    { status: { $eq: 'archived' } },
+                ],
+            },
+        })
+    })
+
+    test(':and ANDs its nested conditions', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    ':and': { 'price:gte': '10', status: 'active' },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                price: { $gte: 10 },
+                status: { $eq: 'active' },
+            },
+        })
+    })
+
+    test('combines a top-level field with an :or group via $and', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                options: {
+                    status: 'active',
+                    ':or': { 'role:eq': 'admin', 'level:gte': '5' },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $and: [
+                    { status: { $eq: 'active' } },
+                    { $or: [{ role: { $eq: 'admin' } }, { level: { $gte: 5 } }] },
+                ],
+            },
+        })
+    })
+
+    test(':like escapes regex metacharacters and matches case-insensitively', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({ options: { 'name:like': 'a.b+c' } }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: { $or: [{ name: { $regex: 'a\\.b\\+c', $options: 'i' } }] },
+        })
+    })
+
+    test('offset paging (:page) skips and limits and is not treated as cursor paging', async () => {
+        const collection = createMockCollection('products', [{
+            items: [{ id: '1' }],
+            has: { prev: true, next: false },
+            count: { prev: 10, next: 0 },
+            summary: {},
+        }])
+
+        await MongoQuery.query(
+            baseRequest({ options: { ':page': '2', ':limit': '10' } }),
+            collection as any
+        )
+
+        const facetStage = collection.aggregateCalls[0].find((s: any) => s.$facet)
+        expect(facetStage.$facet.items).toEqual([{ $skip: 10 }, { $limit: 10 }])
+        expect(facetStage.$facet.total).toEqual([{ $count: 'count' }])
+    })
+
     test('adds summary facets for options beginning with ::', async () => {
         const collection = createMockCollection('orders', collectionReadResponse())
 

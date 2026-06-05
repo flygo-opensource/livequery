@@ -185,7 +185,7 @@ describe('MongoDatasource legacy query and writes', () => {
         const products = createMockCollection('products')
         const datasource = new MongoDatasource({ connections: { default: createMockDb({ products }) as any } })
 
-        await datasource.query(
+        const response = await datasource.query(
             baseRequest({
                 method: 'PUT',
                 keys: { id },
@@ -198,6 +198,8 @@ describe('MongoDatasource legacy query and writes', () => {
             filter: { _id: ObjectId.createFromHexString(id) },
             update: { $set: { name: 'new phone' } },
         })
+        // Normalized write response, not the raw MongoDB UpdateResult.
+        expect(response.item).toEqual({ id, name: 'new phone' })
     })
 
     test('patch passes operator updates through unchanged', async () => {
@@ -253,7 +255,7 @@ describe('MongoDatasource legacy query and writes', () => {
         const products = createMockCollection('products')
         const datasource = new MongoDatasource({ connections: { default: createMockDb({ products }) as any } })
 
-        await datasource.query(
+        const response = await datasource.query(
             baseRequest({
                 method: 'DELETE',
                 keys: { id },
@@ -262,6 +264,8 @@ describe('MongoDatasource legacy query and writes', () => {
         )
 
         expect(products.deleteOneCalls[0]).toEqual({ _id: ObjectId.createFromHexString(id) })
+        // Normalized write response, not the raw MongoDB DeleteResult.
+        expect(response.item).toEqual({ id })
     })
 
     test('dynamic connection, database, and collection resolvers choose the native collection', async () => {

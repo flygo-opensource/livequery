@@ -250,15 +250,33 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
     }
 
     async #put(req: LivequeryRequest, collection: Collection<any>) {
-        return await collection.updateOne(this.#keys(req), this.#update(req.body))
+        await collection.updateOne(this.#keys(req), this.#update(req.body))
+        return { item: this.#writtenItem(req) }
     }
 
     async #patch(req: LivequeryRequest, collection: Collection<any>) {
-        return await collection.updateOne(this.#keys(req), this.#update(req.body))
+        await collection.updateOne(this.#keys(req), this.#update(req.body))
+        return { item: this.#writtenItem(req) }
     }
 
     async #del(req: LivequeryRequest, collection: Collection<any>) {
-        return await collection.deleteOne(this.#keys(req))
+        await collection.deleteOne(this.#keys(req))
+        return { item: this.#writtenItem(req) }
+    }
+
+    // Build the standard Livequery `{ id, ...data }` shape for a write response from the
+    // request keys + body, instead of leaking the raw MongoDB UpdateResult/DeleteResult.
+    // Operator bodies ($set/$inc/...) are not spread into the returned item.
+    #writtenItem(req: LivequeryRequest) {
+        const keys = req.keys || {}
+        const isPlainBody = req.body && typeof req.body === 'object'
+            && !Object.keys(req.body).some(k => k.startsWith('$'))
+        const id = keys.id ?? req.doc_id
+        return {
+            ...keys,
+            ...isPlainBody ? req.body : {},
+            ...id ? { id } : {}
+        }
     }
 
     #keys(req: LivequeryRequest) {

@@ -92,6 +92,10 @@ export class MongoQuery {
         return stack.pop();
     }
 
+    static #escape_regex(value: string): string {
+        return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    }
+
     static #parse_array(value: unknown) {
         if (Array.isArray(value)) return value
         if (typeof value != 'string') return []
@@ -212,7 +216,16 @@ export class MongoQuery {
     }
 
     static #parse_conditions<T extends LivequeryBaseEntity>(filters: FilterConditions<T>) {
-        if (!filters) return []
+        const $match = this.#build_match(filters)
+        return Object.keys($match).length > 0 ? [{ $match }] : []
+    }
+
+    // Build a MongoDB query object (the body of a $match stage) from Livequery filter
+    // conditions, recursively expanding the :and / :or / :not logical groups. Logical
+    // operators ($and / $or / $nor) are query operators and must live inside a single
+    // $match — sibling $match stages can only AND, never express OR/NOR.
+    static #build_match<T extends LivequeryBaseEntity>(filters: FilterConditions<T>): Record<string, any> {
+        if (!filters) return {}
         const {
             ':and': and,
             ':or': or,
@@ -225,15 +238,17 @@ export class MongoQuery {
         ).map(([k, v]) => {
             const key = k.split(':like')[0]
             const value = `${v}`
+            // Escape regex metacharacters so user input is matched literally, and use
+            // case-insensitive substring matching (client `:like` semantics).
             return {
-                [key]: { $regex: value }
+                [key]: { $regex: this.#escape_regex(value), $options: 'i' }
             }
         })
 
-
-        const $match = Object.entries(rest).reduce(
+        const fields = Object.entries(rest).reduce(
             (p, [k, value]) => {
                 if (k.startsWith('::')) return p
+                if (k.endsWith(':like')) return p
                 const [key, expression] = k.split(':')
                 const map = {
                     eq: () => ({ $eq: value }),
@@ -265,15 +280,29 @@ export class MongoQuery {
                     }
                 }
             },
-            $or.length > 0 ? { $or } : {}
+            {} as Record<string, any>
         )
 
-        return [
-            ...Object.keys($match).length > 0 ? [{ $match }] : [],
-            ...and && Object.keys(and).length > 0 ? [{ $expr: { $and: this.#parse_conditions(and) } }] : [],
-            ...or && Object.keys(and).length > 0 ? [{ $expr: { $or: this.#parse_conditions(or) } }] : [],
-            ...not && Object.keys(and).length > 0 ? [{ $not: { $and: this.#parse_conditions(not) } }] : [],
-        ]
+        const clauses: Record<string, any>[] = []
+        if (Object.keys(fields).length > 0) clauses.push(fields)
+        if ($or.length > 0) clauses.push({ $or })
+
+        const andMatch = and ? this.#build_match(and) : {}
+        if (Object.keys(andMatch).length > 0) clauses.push(andMatch)
+
+        const orMatch = or ? this.#build_match(or) : {}
+        if (Object.keys(orMatch).length > 0) {
+            clauses.push({ $or: Object.entries(orMatch).map(([k, v]) => ({ [k]: v })) })
+        }
+
+        const notMatch = not ? this.#build_match(not) : {}
+        if (Object.keys(notMatch).length > 0) {
+            clauses.push({ $nor: Object.entries(notMatch).map(([k, v]) => ({ [k]: v })) })
+        }
+
+        if (clauses.length === 0) return {}
+        if (clauses.length === 1) return clauses[0]
+        return { $and: clauses }
     }
 
     static #build_search_query<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
@@ -426,7 +455,41 @@ export class MongoQuery {
     }
 
     static #build_offset_paging<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
-        return []
+        const limit = this.#get_limit(req)
+        const page = Math.max(1, Math.floor(Number(req.options[':page'])) || 1)
+        const skip = (page - 1) * limit
+        const { pipelines, summary } = this.#parse_summary(req)
+
+        return [
+            {
+                $facet: {
+                    ...pipelines,
+                    items: [{ $skip: skip }, { $limit: limit }],
+                    total: [{ $count: 'count' }],
+                }
+            },
+            {
+                $project: {
+                    summary,
+                    items: 1,
+                    total: { $ifNull: [{ $arrayElemAt: ['$total.count', 0] }, 0] },
+                }
+            },
+            {
+                $project: {
+                    summary: 1,
+                    items: 1,
+                    has: {
+                        prev: { $gt: [skip, 0] },
+                        next: { $gt: ['$total', skip + limit] },
+                    },
+                    count: {
+                        prev: { $literal: skip },
+                        next: { $max: [{ $subtract: ['$total', skip + limit] }, 0] },
+                    },
+                }
+            }
+        ]
     }
 
     static #build_query_filter<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
@@ -495,7 +558,7 @@ export class MongoQuery {
             }
         }
 
-        const is_cursor_paging = req.options[':after'] || req.options[':before'] || req.options[':around'] || !req.options['page']
+        const is_cursor_paging = req.options[':after'] || req.options[':before'] || req.options[':around'] || !req.options[':page']
 
         const $sort = this.#get_sorter(req)
 

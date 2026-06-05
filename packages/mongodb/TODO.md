@@ -2,6 +2,14 @@
 
 Notes to revisit before the next compatibility pass.
 
+## Bugs (fix trước khi release)
+
+- [x] **`:or` filter check sai**: FIXED — `#parse_conditions` đã tách thành `#build_match` đệ quy, sinh `$match` đơn với `$and`/`$or`/`$nor` hợp lệ. Test: `MongoQuery.test.ts` (`:or`, `:not`, `:and`, combo).
+- [x] **`:like` không escape regex** — FIXED: thêm `#escape_regex`, `$regex` dùng input đã escape + `$options: 'i'` (case-insensitive). Test: "`:like` escapes regex metacharacters".
+- [x] **Offset paging (`:page`) silent trả rỗng** — FIXED: `#build_offset_paging` đã implement `$facet` (skip/limit + total + paging metadata); sửa luôn lệch key `req.options['page']` → `req.options[':page']` ở `query()`. Test: "offset paging (`:page`) skips and limits".
+- [x] **Write response không normalize** — FIXED: `#put`/`#patch`/`#del` trả `{ item: { id, ...data } }` qua helper `#writtenItem` (bỏ operator `$set`/`$inc`). (`#post` vốn đã chuẩn.) Test bổ sung assertion return cho put/delete.
+- [x] **`reslover` typo trong SmartCache** — FIXED: đổi tên tham số thành `resolver` (cosmetic, không đổi hành vi).
+
 ## Filter Compatibility With `@livequery/client`
 
 - Use `@livequery/client` `LivequeryInlineFilters` as the public filter contract for this datasource.
@@ -16,9 +24,9 @@ Notes to revisit before the next compatibility pass.
 
 ## Logical Filters
 
-- Do not document `:and`, `:or`, and `:not` as stable until their MongoDB pipeline shape is corrected.
-- Current implementation needs review because `:or` and `:not` check `Object.keys(and)` and nested parsed conditions are not valid `$expr` operands.
-- Add tests for nested logical filters once semantics are finalized.
+- Pipeline shape corrected: `:and`/`:or`/`:not` now compile to a single `$match` with `$and`/`$or`/`$nor` query operators (no more invalid `$expr` + pipeline-stage operands).
+- Semantics: `:and` = AND of nested group, `:or` = OR over the group's conditions, `:not` = `$nor`. Tests cover these in `MongoQuery.test.ts`.
+- Still verify deeply-nested logical combinations against a real MongoDB server before documenting as stable.
 
 ## Pagination
 
