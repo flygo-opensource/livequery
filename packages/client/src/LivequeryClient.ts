@@ -99,7 +99,7 @@ export class LivequeryClient {
                         const lock$ = this.#adding.get(e.collection.collection_ref)
 
                         if (!lock$) {
-                            return from(this.#broadcast(e.collection.collection_ref, 'realtime', changes)).pipe(
+                            return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes })).pipe(
                                 switchMap(() => EMPTY)
                             )
                         }
@@ -107,9 +107,9 @@ export class LivequeryClient {
                         const ok_changes = changes.filter(c => c.type != 'added')
                         const delay_changes = changes.filter(c => c.type == 'added')
 
-                        return from(this.#broadcast(e.collection.collection_ref, 'realtime', ok_changes)).pipe(
+                        return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: ok_changes })).pipe(
                             switchMap(() => lock$.pipe(
-                                mergeMap(() => from(this.#broadcast(e.collection.collection_ref, 'realtime', delay_changes))),
+                                mergeMap(() => from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: delay_changes }))),
                                 switchMap(() => EMPTY)
                             ))
                         )
@@ -124,6 +124,8 @@ export class LivequeryClient {
     }
 
     #start() {
+
+        // const collection_errors = new Map<string, { code: string, message: string }>()
         this.#running = merge(
 
             // Server queries
@@ -175,8 +177,15 @@ export class LivequeryClient {
                                             filters: { ':after': next.cursor }
                                         })
                                     }),
-                                    mergeMap(result => {
-                                        return from(this.#broadcast(e.collection.collection_ref, 'query', result.changes || [])).pipe(
+                                    mergeMap((result, index) => {
+                                        // if (index == 0) {
+                                        //     if (result.error) {
+                                        //         collection_errors.set(e.collection.collection_ref, result.error)
+                                        //     } else {
+                                        //         collection_errors.delete(e.collection.collection_ref)
+                                        //     }
+                                        // }
+                                        return from(this.#broadcast(e.collection.collection_ref, 'query', result)).pipe(
                                             map(() => result)
                                         )
                                     })
@@ -265,14 +274,14 @@ export class LivequeryClient {
 
         if (collection.mode == 'local-only') {
             const data = await this.config.storage.query<T>(req.ref, req.filters)
-            await this.#broadcast(collection.collection_ref, 'query', data.documents.map(doc => {
-                return {
+            await this.#broadcast(collection.collection_ref, 'query', {
+                changes: data.documents.map(doc => ({
                     collection_ref: collection.collection_ref,
                     id: doc.id,
                     type: 'added',
                     data: doc
-                }
-            }))
+                }))
+            })
         }
     }
 
@@ -308,8 +317,8 @@ export class LivequeryClient {
         return changes
     }
 
-    async #broadcast(collection_ref: string, from: RealtimeChangeSource, events: Array<DataChangeEvent>) {
-        if (events.length === 0) return
+    async #broadcast(collection_ref: string, from: RealtimeChangeSource, e: Partial<LivequeryQueryResult>) {
+        const changes = e.changes || [] 
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         const docs = new Map<string, Promise<Doc | null>>()
         for (const collection_id of collections) {
@@ -318,8 +327,9 @@ export class LivequeryClient {
 
             if (collection.document_id) {
                 // Is document
-                const change = events.find(c => c.id == collection.document_id)
+                const change = changes.find(c => c.id == collection.document_id)
                 change && collection.data$.next({
+                    ...e,
                     changes: [change],
                     from,
                     loading: null
@@ -329,10 +339,11 @@ export class LivequeryClient {
 
             // If local collection 
             if (collection.mode == 'local-first' || collection.mode == 'local-only') {
-                const changes = await this.#filterLocalEvents(collection, events, docs)
+                const list = await this.#filterLocalEvents(collection, changes, docs)
                 // Is collection
                 collection.data$.next({
-                    changes,
+                    ...e,
+                    changes: list,
                     from,
                     ...from == 'query' ? { loading: null } : {}
                 })
@@ -340,7 +351,7 @@ export class LivequeryClient {
             }
 
             collection.data$.next({
-                changes: events,
+                ...e,
                 from,
                 ...from == 'query' ? { loading: null } : {}
             })
@@ -373,12 +384,14 @@ export class LivequeryClient {
                             ...e ? { _adding_error: e } : {}
                         }
                         await this.config.storage.update<T>(collection_ref, id, fnd)
-                        await this.#broadcast(collection_ref, 'action', [{
-                            collection_ref,
-                            type: 'modified',
-                            id,
-                            data: fnd
-                        }])
+                        await this.#broadcast(collection_ref, 'action', {
+                            changes: [{
+                                collection_ref,
+                                type: 'modified',
+                                id,
+                                data: fnd
+                            }]
+                        })
                         return data as DocState<T>
                     }
 
@@ -392,19 +405,23 @@ export class LivequeryClient {
                                 _deleting_error: e
                             }
                             await this.config.storage.update<T>(collection_ref, id, fnd)
-                            await this.#broadcast(collection_ref, 'action', [{
-                                collection_ref,
-                                type: 'modified',
-                                id,
-                                data: fnd
-                            }])
+                            await this.#broadcast(collection_ref, 'action', {
+                                changes: [{
+                                    collection_ref,
+                                    type: 'modified',
+                                    id,
+                                    data: fnd
+                                }]
+                            })
                         } else {
                             await this.config.storage.delete<T>(collection_ref, id)
-                            await this.#broadcast(collection_ref, 'action', [{
-                                collection_ref,
-                                type: 'removed',
-                                id
-                            }])
+                            await this.#broadcast(collection_ref, 'action', {
+                                changes: [{
+                                    collection_ref,
+                                    type: 'removed',
+                                    id
+                                }]
+                            })
                         }
                         return data as DocState<T>
                     }
@@ -415,7 +432,7 @@ export class LivequeryClient {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid) 
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid)
                         if (e && server_first) throw e
                         const fnd = {
                             _prev: undefined,
@@ -423,12 +440,14 @@ export class LivequeryClient {
                             _updating_error: e
                         }
                         await this.config.storage.update<T>(collection_ref, id, fnd)
-                        await this.#broadcast(collection_ref, 'action', [{
-                            collection_ref,
-                            type: 'modified',
-                            id,
-                            data: fnd
-                        }])
+                        await this.#broadcast(collection_ref, 'action', {
+                            changes: [{
+                                collection_ref,
+                                type: 'modified',
+                                id,
+                                data: fnd
+                            }]
+                        })
                         return data as DocState<T>
                     }
                 })
@@ -453,12 +472,14 @@ export class LivequeryClient {
         await this.#broadcast(
             collection_ref,
             'action',
-            docs.map(data => ({
-                collection_ref,
-                id: data.id,
-                type: 'added',
-                data
-            } as DataChangeEvent))
+            {
+                changes: docs.map(data => ({
+                    collection_ref,
+                    id: data.id,
+                    type: 'added',
+                    data
+                } as DataChangeEvent))
+            }
         )
         if (mode === 'local-only') return docs
         return await this.#push<T>(collection_ref, docs, false)
@@ -481,12 +502,14 @@ export class LivequeryClient {
         await this.#broadcast(
             collection_ref,
             'action',
-            merged.map(data => ({
-                collection_ref,
-                id: data.id,
-                type: 'modified',
-                data
-            } as DataChangeEvent))
+            {
+                changes: merged.map(data => ({
+                    collection_ref,
+                    id: data.id,
+                    type: 'modified',
+                    data
+                } as DataChangeEvent))
+            }
         )
         if (mode === 'local-only') return merged
         return await this.#push<T>(collection_ref, merged, false)
@@ -511,24 +534,28 @@ export class LivequeryClient {
         await this.#broadcast(
             collection_ref,
             'action',
-            deleting_list.map(({ id }) => ({
-                collection_ref,
-                id,
-                type: 'modified',
-                data: {
-                    _deleting: true
-                }
-            }))
+            {
+                changes: deleting_list.map(({ id }) => ({
+                    collection_ref,
+                    id,
+                    type: 'modified',
+                    data: {
+                        _deleting: true
+                    }
+                }))
+            }
         )
 
         await this.#broadcast(
             collection_ref,
             'action',
-            deleted_list.map(({ id }) => ({
-                collection_ref,
-                id,
-                type: 'removed',
-            }))
+            {
+                changes: deleted_list.map(({ id }) => ({
+                    collection_ref,
+                    id,
+                    type: 'removed',
+                }))
+            }
         )
 
 
@@ -548,7 +575,7 @@ export class LivequeryClient {
     }
 
     async flush(collection_ref: string) {
-        await this.#broadcast(collection_ref, 'realtime', [{ collection_ref, id: '*', type: 'removed' }])
+        await this.#broadcast(collection_ref, 'realtime', { changes: [{ collection_ref, id: '*', type: 'removed' }] })
         return this.config.storage.flush()
     }
 

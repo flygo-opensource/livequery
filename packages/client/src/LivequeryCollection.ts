@@ -110,10 +110,16 @@ export class LivequeryCollection<T extends Doc> {
                     this.#timer = undefined
                 }),
                 tap(event => {
-                    event.loading !== undefined && event.loading !== this.loading.value && this.loading.next(event.loading)
                     event.summary && this.summary.next(event.summary)
                     event.paging && this.paging.next(event.paging)
-                    event.error && this.error.next(event.error)
+                    if (event.error) {
+                        this.loading.next(null)
+                        this.error.next(event.error)
+                    } else {
+                        if (event.loading !== undefined && event.loading !== this.loading.value) {
+                            this.loading.next(event.loading)
+                        }
+                    }
 
                     const first = event.changes?.[0]
                     if (first && first.type == 'removed' && first.id == '*') {
@@ -241,26 +247,28 @@ export class LivequeryCollection<T extends Doc> {
             return p
         }, new Map<keyof T, number>())
         this.filters.next(filters)
-        const cache = await this.client.query<T>({
-            ref: this.ref,
-            filters,
-            collection_id: this.id
-        })
-        if (cache && cache.documents && flush) {
-            this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
-        }
-    }
-
-    async query(filters: Partial<LivequeryFilters<T>>) {
         try {
-            await this.#query(filters, true)
+            const cache = await this.client.query<T>({
+                ref: this.ref,
+                filters,
+                collection_id: this.id
+            })
+            if (cache && cache.documents && flush) {
+                this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
+            }
         } catch (e) {
+            // Centralised here so every caller (query/loadMore/loadPrev/loadAround) is covered:
+            // clear loading and surface the error instead of leaving the collection stuck loading.
             this.loading.next(null)
             this.error.next({
                 code: (e as any)?.code ?? 'QUERY_ERROR',
                 message: (e as any)?.message ?? String(e)
             })
         }
+    }
+
+    async query(filters: Partial<LivequeryFilters<T>>) {
+        await this.#query(filters, true)
     }
 
     async sort(field: keyof T | 'reset', order: 1 | -1 | 'asc' | 'desc') {
