@@ -22,8 +22,8 @@ export class HonoApiGatewayLinker {
 
     constructor(options: HonoApiGatewayOptions = {}) {
         this.#handler = new ApiGatewayHandler({
-            ws: options.websocketGateway,
-            discovery: options.discovery,
+            ...(options.websocketGateway ? { ws: options.websocketGateway } : {}),
+            ...(options.discovery ? { discovery: options.discovery } : {}),
         })
     }
 

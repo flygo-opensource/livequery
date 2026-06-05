@@ -15,7 +15,7 @@ export class HonoApiServiceLinker {
         const linkerOptions: ConstructorParameters<typeof CoreApiServiceLinker>[0] = {
             paths: Array.isArray(options.routes) ? options.routes : options.routes.routes,
         }
-        if (options.websocketGateway) linkerOptions.websocketGateway = options.websocketGateway
+        if (options.websocketGateway) linkerOptions.ws = options.websocketGateway
         if (options.discovery) linkerOptions.discovery = options.discovery
         this.#linker = new CoreApiServiceLinker(linkerOptions)
     }

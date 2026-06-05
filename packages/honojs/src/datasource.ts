@@ -44,10 +44,10 @@ export async function createDatasourceMapper<Config, RouteOptions>(
         config: undefined as RouteOptions,
     }))
 
-    await options.datasource.init(config, datasourceRoutes)
+    await options.datasource.init(config, datasourceRoutes as any)
 
     if (options.watcher && options.websocketGateway) {
-        options.watcher.watch(config, datasourceRoutes, options.datasource).subscribe({
+        options.watcher.watch(config, datasourceRoutes as any, options.datasource).subscribe({
             next: value => options.websocketGateway?.next(value),
         })
     }
@@ -55,7 +55,7 @@ export async function createDatasourceMapper<Config, RouteOptions>(
     return function useDatasource(routeOptions: RouteOptions, mapper?: DatasourceMapper): Handler {
         return async c => {
             const livequeryRequest = getLivequeryRequest(c)
-            const result = await options.datasource.query(livequeryRequest, routeOptions)
+            const result = await options.datasource.query(livequeryRequest as any, routeOptions)
             return livequeryJson(c, mapDatasourceResult(c, result, mapper))
         }
     }
