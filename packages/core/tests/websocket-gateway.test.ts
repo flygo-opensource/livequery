@@ -182,6 +182,57 @@ describe('WebsocketGateway', () => {
         await closeServer(server)
     })
 
+    test('detach removes a client subscription for a ref', async () => {
+        const { server, gateway, port } = await startGateway()
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        ws.send(JSON.stringify({
+            event: 'subscribe',
+            ref: 'posts',
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        ws.send(JSON.stringify({
+            event: 'subscribe',
+            ref: 'comments',
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        await sleep(10)
+
+        gateway.detach('client-1', 'posts')
+        gateway.next({
+            ref: 'posts',
+            type: 'added',
+            data: { id: 'p1' },
+        } as any)
+        gateway.next({
+            ref: 'comments',
+            type: 'added',
+            data: { id: 'c1' },
+        } as any)
+
+        const sync = await nextJson(ws)
+
+        ws.close()
+        gateway.close()
+        await closeServer(server)
+        expect(sync).toEqual({
+            event: 'sync',
+            cids: ['client-1'],
+            data: {
+                changes: [{
+                    ref: 'comments',
+                    type: 'added',
+                    data: { id: 'c1' },
+                }],
+            },
+        })
+    })
+
     test('handle registers a livequery context as a realtime subscription', async () => {
         const { server, gateway, port } = await startGateway()
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)

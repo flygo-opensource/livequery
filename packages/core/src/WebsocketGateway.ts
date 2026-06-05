@@ -84,10 +84,12 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
      * @param server  http.Server  — Node.js mode (uses `ws` package)
      *                number       — Bun mode: port for Bun.serve() (requires Bun runtime)
      */
-    constructor(server: http.Server | number) {
+    constructor(server: http.Server | number | 'external') {
         super()
 
-        if (typeof server === 'number') {
+        if (server === 'external') {
+            // Caller will drive connections manually via attachBunSocket()
+        } else if (typeof server === 'number') {
             if (!isBun) throw new Error('Passing a port number requires Bun runtime')
             this.#startBun(server)
         } else {
@@ -185,6 +187,55 @@ export class WebsocketGateway extends Subject<UpdatedData> implements LivequeryH
                 close(ws: any) { ws.data._on.close?.() },
                 error(ws: any) { ws.data._on.close?.() },
             },
+        })
+    }
+
+    /** Build the Bun websocket handler object to spread into Bun.serve({ websocket }).
+     *  Use together with attachBunUpgrade() in the fetch handler. */
+    getBunWebsocketHandlers() {
+        const self = this
+        return {
+            open(ws: any) {
+                if (!ws.data?._livequery) return
+                const socket: SocketMeta = {
+                    send: (d) => ws.send(d),
+                    close: () => ws.close(),
+                    on(event: string, h: any) {
+                        if (event === 'message') ws.data._on.msg = h
+                        else ws.data._on.close = h
+                    },
+                    get id() { return ws.data.id },
+                    set id(v) { ws.data.id = v },
+                    get gateway() { return ws.data.gateway },
+                    set gateway(v) { ws.data.gateway = v },
+                    get refs() { return ws.data.refs },
+                    set refs(v) { ws.data.refs = v },
+                }
+                self.#onConnection(socket)
+            },
+            message(ws: any, data: string | Buffer) {
+                if (ws.data?._livequery) ws.data._on.msg?.(data)
+            },
+            close(ws: any) {
+                if (ws.data?._livequery) ws.data._on.close?.()
+            },
+            error(ws: any) {
+                if (ws.data?._livequery) ws.data._on.close?.()
+            },
+        }
+    }
+
+    /** Call this in Bun.serve fetch() to upgrade a livequery WS request.
+     *  Returns true if upgrade succeeded. */
+    attachBunUpgrade(req: Request, server: any): boolean {
+        return server.upgrade(req, {
+            data: {
+                _livequery: true,
+                id: '',
+                gateway: false,
+                refs: new Set<string>(),
+                _on: {},
+            } satisfies BunSocketData & { _livequery: boolean },
         })
     }
 

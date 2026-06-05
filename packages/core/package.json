@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/core.git"
     },
-    "version": "2.0.108",
+    "version": "2.0.145",
     "description": "Framework-agnostic core utilities for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",

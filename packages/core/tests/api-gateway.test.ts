@@ -69,7 +69,7 @@ describe('ApiGatewayHandler', () => {
 
         gateway.close()
         expect(response.status).toBe(404)
-        expect(await response.json()).toEqual({ error: { status: 404, code: 'API_NOT_FOUND' } })
+        expect(await response.json()).toMatchObject({ error: { status: 404, code: 'API_NOT_FOUND' } })
     })
 
     test('returns 503 after every host for a route is deregistered', async () => {
@@ -87,7 +87,11 @@ describe('ApiGatewayHandler', () => {
 
         gateway.close()
         expect(response.status).toBe(503)
-        expect(await response.json()).toEqual({ error: { status: 503, code: 'API_OFFLINE' } })
+        const body = await response.json()
+        expect(body).toMatchObject({ error: { status: 503, code: 'API_OFFLINE' } })
+        // A9: error responses carry a human-readable message for debugging.
+        expect(typeof body.error.message).toBe('string')
+        expect(body.error.message.length).toBeGreaterThan(0)
     })
 
     test('round-robins between registered hosts for the same route', async () => {
@@ -210,7 +214,7 @@ describe('ApiGatewayHandler', () => {
         gateway.close()
         await closeServer(service.server)
         expect(response.status).toBe(404)
-        expect(await response.json()).toEqual({ error: { status: 404, code: 'API_NOT_FOUND' } })
+        expect(await response.json()).toMatchObject({ error: { status: 404, code: 'API_NOT_FOUND' } })
     })
 
     test('forwards realtime headers when a websocket gateway is attached', async () => {
@@ -272,9 +276,9 @@ describe('ApiGatewayHandler', () => {
 
         gateway.close()
         expect(first.status).toBe(502)
-        expect(await first.json()).toEqual({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } })
+        expect(await first.json()).toMatchObject({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } })
         expect(second.status).toBe(503)
-        expect(await second.json()).toEqual({ error: { status: 503, code: 'API_OFFLINE' } })
+        expect(await second.json()).toMatchObject({ error: { status: 503, code: 'API_OFFLINE' } })
     })
 
     test('forwards non-GET request body and query string to the target service', async () => {

@@ -202,6 +202,7 @@ Public API:
 - `handle(ctx)`
 - `listen(events)`
 - `unsubscribe_client(socket, body)`
+- `detach(clientId, refs)`
 - `link(ref, handler)`
 - `connect(url, auth, ondisconnect?)`
 - `close()`
@@ -215,6 +216,7 @@ Behavior:
 - Duplicate socket ids are closed.
 - `next(updatedData)` broadcasts `sync` to subscribers of `ref` and `${ref}/${data.id}`.
 - `handle(ctx)` reads `ctx.livequery.ref`, `x-lcid` or `socket_id`, and `x-lgid`.
+- `detach(clientId, refs)` removes a client from one ref or multiple refs without requiring the socket object.
 - `link(ref, handler)` creates an update stream only when the ref already has a subscription.
 
 ### Helpers

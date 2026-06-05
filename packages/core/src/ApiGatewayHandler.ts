@@ -202,11 +202,11 @@ export class ApiGatewayHandler {
         const target = this.#resolve(url.pathname, request.method)
 
         if (target === undefined) {
-            return Response.json({ error: { status: 404, code: 'API_NOT_FOUND' } }, { status: 404 })
+            return Response.json({ error: { status: 404, code: 'API_NOT_FOUND', message: `No service registered for ${request.method} ${url.pathname}` } }, { status: 404 })
         }
 
         if (target === null) {
-            return Response.json({ error: { status: 503, code: 'API_OFFLINE' } }, { status: 503 })
+            return Response.json({ error: { status: 503, code: 'API_OFFLINE', message: `All hosts for ${request.method} ${url.pathname} are offline` } }, { status: 503 })
         }
 
         const headers = new Headers(request.headers)
@@ -227,7 +227,7 @@ export class ApiGatewayHandler {
             } as RequestInit)
         } catch {
             target.offlineAt = Date.now()
-            return Response.json({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } }, { status: 502 })
+            return Response.json({ error: { status: 502, code: 'SERVICE_API_OFFLINE', message: `Failed to reach upstream service at ${target.uri}` } }, { status: 502 })
         }
     }
 

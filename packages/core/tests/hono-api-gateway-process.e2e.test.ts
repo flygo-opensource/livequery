@@ -169,11 +169,11 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
         )
 
         expect(first.status).toBe(502)
-        expect(await first.json()).toEqual({
+        expect(await first.json()).toMatchObject({
             error: { status: 502, code: 'SERVICE_API_OFFLINE' },
         })
         expect(second.status).toBe(503)
-        expect(await second.json()).toEqual({
+        expect(await second.json()).toMatchObject({
             error: { status: 503, code: 'API_OFFLINE' },
         })
         expect(orderJson).toMatchObject({

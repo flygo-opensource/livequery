@@ -26,6 +26,8 @@ export type LivequeryRequest<I> = {
     method: string
     body: I
     query: Record<string, any>
+    // Custom action verb parsed from a `~verb` suffix in the path (undefined when absent).
+    action?: string
 }
 
 export type RawRequest = {

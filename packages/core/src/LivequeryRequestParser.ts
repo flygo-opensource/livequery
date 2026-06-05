@@ -29,6 +29,7 @@ export class LivequeryRequestParser implements LivequeryHandler {
             collection_ref,
             schema_collection_ref,
             document_id,
+            action: this.#action(request.path),
             keys: request.params,
             body: request.body,
             method: request.method.toUpperCase(),
@@ -41,6 +42,15 @@ export class LivequeryRequestParser implements LivequeryHandler {
         const queryIndex = path.indexOf('?')
         const pathname = queryIndex === -1 ? path : path.slice(0, queryIndex)
         return pathname.split('~')[0]
+    }
+
+    // Extract the custom action verb that follows `~` in the path (e.g. `.../orders/o1~approve`
+    // → "approve"). Returns undefined when there is no `~` suffix. Query string is ignored.
+    #action(path: string): string | undefined {
+        const pathname = path.indexOf('?') === -1 ? path : path.slice(0, path.indexOf('?'))
+        const idx = pathname.indexOf('~')
+        if (idx === -1) return undefined
+        return pathname.slice(idx + 1).replace(/\/+$/, '') || undefined
     }
 
     handle(ctx: LivequeryContext) {

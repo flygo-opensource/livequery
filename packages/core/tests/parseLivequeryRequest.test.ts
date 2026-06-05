@@ -238,6 +238,47 @@ describe('LivequeryRequestParser', () => {
         expect(ctx.livequery?.method).toBe('PATCH')
     })
 
+    it('extracts the custom action verb from a ~suffix', () => {
+        const ctx = createContext({
+            ref: '/livequery/orders/:id~approve',
+            path: '/livequery/orders/o1~approve',
+            params: { id: 'o1' },
+            method: 'POST'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('orders/o1')
+        expect(ctx.livequery?.document_id).toBe('o1')
+        expect(ctx.livequery?.action).toBe('approve')
+    })
+
+    it('extracts the action verb from a separate ~segment and ignores the query string', () => {
+        const ctx = createContext({
+            ref: '/livequery/orders/:id/~approve',
+            path: '/livequery/orders/o1/~approve?note=ok',
+            params: { id: 'o1' },
+            query: { note: 'ok' },
+            method: 'POST'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.action).toBe('approve')
+    })
+
+    it('leaves action undefined when there is no ~suffix', () => {
+        const ctx = createContext({
+            path: '/livequery/posts',
+            ref: '/livequery/posts',
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.action).toBeUndefined()
+    })
+
     it('leaves livequery undefined for an empty path', () => {
         const ctx = createContext({
             path: '',

@@ -527,6 +527,15 @@ wsGateway.listen([{
 
 Removes subscriptions for a client by `ref` or `refs`.
 
+### `detach(clientId, refs)`
+
+Removes subscriptions for a client id by one ref or multiple refs without requiring the client socket object.
+
+```ts
+wsGateway.detach('client-1', 'posts')
+wsGateway.detach('client-1', ['posts', 'comments'])
+```
+
 ### `link(ref, handler)`
 
 Attaches an observable update stream for a ref that already has subscribers.
