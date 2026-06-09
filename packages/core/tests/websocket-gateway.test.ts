@@ -103,6 +103,7 @@ describe('WebsocketGateway', () => {
                     ref: 'posts',
                     type: 'added',
                     data: { id: 'p1', title: 'Hello' },
+                    id: 'p1',
                 }],
             },
         })
@@ -140,6 +141,7 @@ describe('WebsocketGateway', () => {
                     ref: 'posts',
                     type: 'modified',
                     data: { id: 'p1', title: 'Updated' },
+                    id: 'p1',
                 }],
             },
         })
@@ -228,6 +230,7 @@ describe('WebsocketGateway', () => {
                     ref: 'comments',
                     type: 'added',
                     data: { id: 'c1' },
+                    id: 'c1',
                 }],
             },
         })
@@ -390,6 +393,7 @@ describe('WebsocketGateway', () => {
                     ref: 'posts',
                     type: 'added',
                     data: { id: 'p1', title: 'Linked' },
+                    id: 'p1',
                 }],
             },
         })
@@ -494,6 +498,7 @@ describe('WebsocketGateway', () => {
                     ref: 'posts',
                     type: 'added',
                     data: { id: 'p1', title: 'Remote' },
+                    id: 'p1',
                 }],
             },
         })

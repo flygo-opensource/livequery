@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/core.git"
     },
-    "version": "2.0.146",
+    "version": "2.1.0",
     "description": "Framework-agnostic core utilities for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -23,6 +23,24 @@
             "import": {
                 "types": "./build/src/index.d.ts",
                 "default": "./build/src/index.js"
+            }
+        },
+        "./node": {
+            "import": {
+                "types": "./build/src/node.d.ts",
+                "default": "./build/src/node.js"
+            }
+        },
+        "./bun": {
+            "import": {
+                "types": "./build/src/bun.d.ts",
+                "default": "./build/src/bun.js"
+            }
+        },
+        "./workers": {
+            "import": {
+                "types": "./build/src/workers.d.ts",
+                "default": "./build/src/workers.js"
             }
         }
     },
