@@ -399,8 +399,9 @@ describe('WebsocketGateway', () => {
         })
     })
 
-    test('disconnecting a client removes its subscriptions', async () => {
-        const { server, gateway, port } = await startGateway()
+    test('reconnecting within the grace window resumes a subscription without re-subscribing', async () => {
+        // generous grace so the reconnect lands inside the window
+        const { server, gateway, port } = await startGateway({ disconnectGraceMs: 5000 })
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
@@ -417,16 +418,70 @@ describe('WebsocketGateway', () => {
         await closed
         await sleep(10)
 
+        // same client_id reconnects WITHOUT re-subscribing — realtime must resume
         const replacement = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
         await startClient(replacement, 'client-1')
-        gateway.next({
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+
+        const sync = await nextJson(replacement, 2_000)
+        expect(sync.data.changes[0].data.id).toBe('p1')
+
+        replacement.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
+    test('subscriptions are removed after the grace window elapses with no reconnect', async () => {
+        const { server, gateway, port } = await startGateway({ disconnectGraceMs: 50 })
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        ws.send(JSON.stringify({
+            event: 'subscribe',
             ref: 'posts',
-            type: 'added',
-            data: { id: 'p1' },
-        } as any)
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        await sleep(10)
+        const closed = once(ws, 'close')
+        ws.close()
+        await closed
+        await sleep(150) // wait past the 50ms grace — subscription is now gone
+
+        // a fresh reconnect (after grace) that does NOT re-subscribe gets nothing
+        const replacement = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(replacement, 'client-1')
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
 
         await expectNoMessage(replacement)
         replacement.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
+    test('a dropped socket inside its grace window does not receive events', async () => {
+        const { server, gateway, port } = await startGateway({ disconnectGraceMs: 5000 })
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        ws.send(JSON.stringify({
+            event: 'subscribe',
+            ref: 'posts',
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        await sleep(10)
+        const closed = once(ws, 'close')
+        ws.close()
+        await closed
+        await sleep(10)
+
+        // subscription is still held (grace), but the dead socket must be skipped:
+        // emitting must not throw and there is no live socket to deliver to.
+        expect(() => gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)).not.toThrow()
+
         gateway.close()
         await closeServer(server)
     })
@@ -505,9 +560,9 @@ describe('WebsocketGateway', () => {
     })
 })
 
-async function startGateway(): Promise<{ server: http.Server; gateway: WebsocketGateway; port: number }> {
+async function startGateway(options?: { disconnectGraceMs?: number }): Promise<{ server: http.Server; gateway: WebsocketGateway; port: number }> {
     const server = http.createServer()
-    const gateway = new WebsocketGateway(server)
+    const gateway = new WebsocketGateway(server, options)
     await listen(server)
     return { server, gateway, port: (server.address() as AddressInfo).port }
 }

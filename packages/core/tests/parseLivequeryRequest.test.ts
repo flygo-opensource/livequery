@@ -34,6 +34,22 @@ describe('LivequeryRequestParser', () => {
         expect(ctx.livequery?.keys).toEqual({ id: 'abc' })
     })
 
+    it('exposes the parser as a reusable static method', () => {
+        const ctx = createContext({
+            path: '/livequery/posts/abc',
+            ref: '/livequery/posts/:id',
+            params: { id: 'abc' },
+            method: 'GET'
+        })
+
+        const parsed = LivequeryRequestParser.parse(ctx.request)
+
+        expect(parsed?.ref).toBe('posts/abc')
+        expect(parsed?.collection_ref).toBe('posts')
+        expect(parsed?.document_id).toBe('abc')
+        expect(parsed?.keys).toEqual({ id: 'abc' })
+    })
+
     it('computes schema_collection_ref from route pattern', () => {
         const ctx = createContext({
             path: '/livequery/users/u1/posts',
@@ -45,7 +61,108 @@ describe('LivequeryRequestParser', () => {
         new LivequeryRequestParser().handle(ctx)
 
         expect(ctx.livequery?.schema_collection_ref).toBe('users/uid/posts')
+        expect(ctx.livequery?.schema).toBe('users/:uid/posts')
+        expect(ctx.livequery?.collection).toBe('posts')
         expect(ctx.livequery?.ref).toBe('users/u1/posts')
+    })
+
+    it('keeps static route segments out of keys and preserves them in schema', () => {
+        const ctx = createContext({
+            path: '/livequery/spaces/s1/tools/livestream-product-manager/lists',
+            ref: '/livequery/spaces/:space_id/tools/livestream-product-manager/lists',
+            params: {
+                space_id: 's1',
+                tool: 'should-not-leak',
+            },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/s1/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/s1/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.collection).toBe('lists')
+        expect(ctx.livequery?.schema).toBe('spaces/:space_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.keys).toEqual({ space_id: 's1' })
+    })
+
+    it('parses document routes under static aliases without treating static segments as keys', () => {
+        const ctx = createContext({
+            path: '/livequery/spaces/s1/tools/livestream-product-manager/lists/list-1',
+            ref: '/livequery/spaces/:space_id/tools/livestream-product-manager/lists/:id',
+            params: {
+                space_id: 's1',
+                id: 'list-1',
+                tools: 'should-not-leak',
+                'livestream-product-manager': 'should-not-leak',
+            },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/s1/tools/livestream-product-manager/lists/list-1')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/s1/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.collection).toBe('lists')
+        expect(ctx.livequery?.schema).toBe('spaces/:space_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.document_id).toBe('list-1')
+        expect(ctx.livequery?.keys).toEqual({ space_id: 's1', id: 'list-1' })
+    })
+
+    it('parses nested static alias document actions with query strings', () => {
+        const ctx = createContext({
+            path: '/livequery/spaces/s1/tools/livestream-product-manager/lists/list-1/products/product-9~pin?source=ui',
+            ref: '/livequery/spaces/:space_id/tools/livestream-product-manager/lists/:list_id/products/:product_id~pin',
+            params: {
+                space_id: 's1',
+                list_id: 'list-1',
+                product_id: 'product-9',
+                source: 'should-not-leak',
+            },
+            query: { source: 'ui' },
+            method: 'POST'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/s1/tools/livestream-product-manager/lists/list-1/products/product-9')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/s1/tools/livestream-product-manager/lists/list-1/products')
+        expect(ctx.livequery?.collection).toBe('products')
+        expect(ctx.livequery?.schema).toBe('spaces/:space_id/tools/livestream-product-manager/lists/:list_id/products')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/tools/livestream-product-manager/lists/list_id/products')
+        expect(ctx.livequery?.document_id).toBe('product-9')
+        expect(ctx.livequery?.action).toBe('pin')
+        expect(ctx.livequery?.query).toEqual({ source: 'ui' })
+        expect(ctx.livequery?.keys).toEqual({
+            space_id: 's1',
+            list_id: 'list-1',
+            product_id: 'product-9',
+        })
+    })
+
+    it('preserves static collection names after multiple dynamic route segments', () => {
+        const ctx = createContext({
+            path: '/livequery/spaces/s1/accounts/a1/tools/livestream-product-manager/lists',
+            ref: '/livequery/spaces/:space_id/accounts/:account_id/tools/livestream-product-manager/lists',
+            params: {
+                space_id: 's1',
+                account_id: 'a1',
+                list_id: 'should-not-leak',
+            },
+            method: 'GET'
+        })
+
+        new LivequeryRequestParser().handle(ctx)
+
+        expect(ctx.livequery?.ref).toBe('spaces/s1/accounts/a1/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.collection_ref).toBe('spaces/s1/accounts/a1/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.collection).toBe('lists')
+        expect(ctx.livequery?.schema).toBe('spaces/:space_id/accounts/:account_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.schema_collection_ref).toBe('spaces/space_id/accounts/account_id/tools/livestream-product-manager/lists')
+        expect(ctx.livequery?.document_id).toBeUndefined()
+        expect(ctx.livequery?.keys).toEqual({ space_id: 's1', account_id: 'a1' })
     })
 
     it('uppercases the method', () => {
@@ -155,7 +272,7 @@ describe('LivequeryRequestParser', () => {
 
         new LivequeryRequestParser().handle(ctx)
 
-        expect(ctx.livequery?.keys).toBe(params)
+        expect(ctx.livequery?.keys).toEqual(params)
         expect(ctx.livequery?.body).toBe(body)
         expect(ctx.livequery?.query).toBe(query)
     })
@@ -221,7 +338,7 @@ describe('LivequeryRequestParser', () => {
         expect(ctx.livequery?.method).toBe('PATCH')
     })
 
-    it('parses paths without the livequery prefix', () => {
+    it('rejects paths without the livequery prefix', () => {
         const ctx = createContext({
             path: '/users/u1/posts/p1',
             ref: '/users/:uid/posts/:pid',
@@ -229,13 +346,7 @@ describe('LivequeryRequestParser', () => {
             method: 'patch'
         })
 
-        new LivequeryRequestParser().handle(ctx)
-
-        expect(ctx.livequery?.ref).toBe('users/u1/posts/p1')
-        expect(ctx.livequery?.collection_ref).toBe('users/u1/posts')
-        expect(ctx.livequery?.schema_collection_ref).toBe('users/uid/posts')
-        expect(ctx.livequery?.document_id).toBe('p1')
-        expect(ctx.livequery?.method).toBe('PATCH')
+        expect(() => new LivequeryRequestParser().handle(ctx)).toThrow('Livequery path must start with "livequery"')
     })
 
     it('extracts the custom action verb from a ~suffix', () => {
@@ -279,16 +390,14 @@ describe('LivequeryRequestParser', () => {
         expect(ctx.livequery?.action).toBeUndefined()
     })
 
-    it('leaves livequery undefined for an empty path', () => {
+    it('rejects an empty path', () => {
         const ctx = createContext({
             path: '',
             ref: '',
             method: 'GET'
         })
 
-        new LivequeryRequestParser().handle(ctx)
-
-        expect(ctx.livequery).toBeUndefined()
+        expect(() => new LivequeryRequestParser().handle(ctx)).toThrow('Livequery path must start with "livequery"')
     })
 })
 

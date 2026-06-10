@@ -17,7 +17,7 @@ Livequery treats an HTTP path as a structured data reference.
 | `/livequery/users/u1/posts` | `users/u1/posts` | Nested `posts` collection for user `u1` |
 | `/livequery/users/u1/posts/p1` | `users/u1/posts/p1` | Nested document `p1` |
 
-The `/livequery` prefix is only a framework route prefix. It is not part of the normalized data reference.
+Every Livequery API path must start with `/livequery`. That prefix is only a framework route prefix and is not part of the normalized data reference.
 
 ## Responsibilities
 
@@ -163,7 +163,9 @@ type LivequeryRequest<I> = {
   keys: Record<string, any>
   path: string
   document_id?: string
+  collection: string
   collection_ref: string
+  schema: string
   schema_collection_ref: string
   ref: string
   method: string
@@ -174,7 +176,9 @@ type LivequeryRequest<I> = {
 ```
 
 - `ref`: concrete data reference, for example `posts/p1`.
+- `collection`: last segment of `collection_ref`, for example `posts`.
 - `collection_ref`: collection that contains the item, for example `posts`.
+- `schema`: collection ref using route parameter names and preserving `:`, for example `users/:uid/posts`.
 - `schema_collection_ref`: collection ref using route parameter names, for example `users/uid/posts`.
 - `document_id`: document id when the route pattern ends with a parameter.
 - `action`: custom action parsed from a `~` suffix, for example `/posts/p1~publish` creates `action: 'publish'`.
@@ -244,10 +248,11 @@ type LivequeryErrorResponse = {
 ## `LivequeryRequestParser`
 
 `LivequeryRequestParser` reads `ctx.request` and writes `ctx.livequery`.
+Use `LivequeryRequestParser.parse(request)` to reuse the same parser without creating a handler context.
 
 The parser:
 
-- Removes the route prefix before the data ref, such as `livequery`.
+- Requires the first path segment to be `livequery` and parses the data ref from the next segment.
 - Removes query strings before parsing path segments.
 - Removes the `~` suffix from the pathname and exposes it as `action`.
 - Preserves `~` inside query string values.
@@ -269,6 +274,8 @@ const ctx: LivequeryContext = {
 }
 
 new LivequeryRequestParser().handle(ctx)
+
+const livequery = LivequeryRequestParser.parse(ctx.request)
 
 // ctx.livequery.action === 'publish'
 // ctx.livequery.ref === 'posts/p1'

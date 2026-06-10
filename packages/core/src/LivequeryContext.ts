@@ -1,4 +1,3 @@
-
 export type CollectionResponse<T> = {
     items: T[]
     paging: {
@@ -16,18 +15,23 @@ export type DocumentResponse<T> = {
     item: T
 }
 
-export type LivequeryRequest<I> = {
-    keys: Record<string, any>
-    path: string
-    document_id?: string
-    collection_ref: string
-    schema_collection_ref: string
+export type LivequeryRequest<T = any> = {
     ref: string
+    keys: Record<string, any>
+    collection_ref?: string
+    schema_collection_ref?: string
     method: string
-    body: I
-    query: Record<string, any>
+    body?: T
+    // Raw fields produced by LivequeryRequestParser.
+    path?: string
+    collection?: string
+    schema?: string
+    document_id?: string
+    query?: Record<string, any>
     // Custom action verb parsed from a `~verb` suffix in the path (undefined when absent).
     action?: string
+    // Set during request normalization by datasource adapters.
+    is_collection?: boolean
 }
 
 export type RawRequest = {

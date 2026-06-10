@@ -17,7 +17,7 @@ Examples:
 | `/livequery/users/u1/posts` | nested `posts` collection for user `u1` | `users/u1/posts` |
 | `/livequery/users/u1/posts/p1` | nested post document `p1` for user `u1` | `users/u1/posts/p1` |
 
-The `livequery` prefix is a route prefix. It is not part of the normalized data ref.
+Every Livequery API path MUST start with the `livequery` route prefix. The prefix is not part of the normalized data ref.
 
 ## Request Model
 
@@ -31,7 +31,9 @@ type LivequeryRequest<I = any> = {
   path: string
   action?: string
   document_id?: string
+  collection: string
   collection_ref: string
+  schema: string
   schema_collection_ref: string
   ref: string
   method: string
@@ -47,10 +49,12 @@ Field meanings:
 | `path` | Original request path, including any query string or custom action suffix supplied by the adapter. |
 | `action` | Custom action verb from a `~verb` pathname suffix, when present. Undefined for normal collection/document actions. |
 | `ref` | Concrete data reference for this request, such as `posts` or `posts/p1`. |
+| `collection` | Last segment of `collection_ref`, such as `posts`. |
 | `collection_ref` | Concrete collection containing the item, such as `posts` or `users/u1/posts`. |
+| `schema` | Route-pattern collection ref preserving dynamic `:` segments, such as `users/:uid/posts`. |
 | `schema_collection_ref` | Route-pattern collection ref using parameter names instead of values, such as `users/uid/posts`. |
 | `document_id` | Document id when the request targets a document. Undefined for collection requests. |
-| `keys` | Route parameters supplied by the framework adapter. |
+| `keys` | Route parameters whose route-pattern segments begin with `:`. |
 | `method` | Uppercased HTTP method. |
 | `body` | Request body. The format is application-defined. |
 | `query` | Parsed query parameters. Query values are not part of the path grammar. |
@@ -66,7 +70,7 @@ The parser works from two paths supplied by a framework adapter:
 
 Path normalization rules:
 
-- The route prefix before the data ref, such as `livequery`, is removed.
+- The first path segment must be `livequery`; parsing starts at the next segment.
 - Leading, trailing, and repeated `/` separators are ignored while parsing.
 - Query strings are removed before parsing path segments.
 - A `~` suffix in the pathname is removed from the data ref and may be exposed as `action`.
@@ -80,7 +84,7 @@ Route pattern rules:
 - A route pattern ending with a parameter segment is document-shaped.
 - The final actual segment in a document-shaped route is `document_id`.
 - Intermediate parameter segments are part of the collection path, not document ids.
-- `schema_collection_ref` uses parameter names without `:`, while `collection_ref` uses actual values.
+- `schema` preserves parameter names with `:`, while `schema_collection_ref` uses parameter names without `:` and `collection_ref` uses actual values.
 - If a document-shaped route is matched without a final document id, `document_id` is undefined and the parsed ref is the available collection path. Controllers or adapters may reject that request according to their routing rules.
 
 A collection route does not end with a document parameter:

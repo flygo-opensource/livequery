@@ -129,7 +129,9 @@ type LivequeryRequest<I> = {
   keys: Record<string, any>
   path: string
   document_id?: string
+  collection: string
   collection_ref: string
+  schema: string
   schema_collection_ref: string
   ref: string
   method: string
@@ -165,10 +167,12 @@ Use this interface for parsers, middleware, datasource adapters, auth handlers, 
 ## `LivequeryRequestParser`
 
 `LivequeryRequestParser` is the first handler in a typical request pipeline. It reads `ctx.request` and writes `ctx.livequery`.
+Use `LivequeryRequestParser.parse(request)` when you need the normalized request object without a handler context.
 
 ### When To Use It
 
 Use it inside HTTP framework adapters before invoking datasource or business logic handlers. Downstream handlers should rely on `ctx.livequery` instead of reparsing paths.
+Both `request.path` and `request.ref` must start with the `livequery` segment; parsing starts from the segment after it.
 
 ### Constructor
 
@@ -176,24 +180,43 @@ Use it inside HTTP framework adapters before invoking datasource or business log
 new LivequeryRequestParser()
 ```
 
+### `parse(request)`
+
+```ts
+const livequery = LivequeryRequestParser.parse(rawRequest)
+```
+
 ### `handle(ctx)`
 
 Parses a raw request into:
 
 - `ref`: actual data reference, for example `posts/p1`.
+- `collection`: last segment of `collection_ref`, for example `posts`.
 - `collection_ref`: collection reference, for example `posts`.
+- `schema`: route-pattern-based collection reference preserving `:`, for example `users/:uid/posts`.
 - `schema_collection_ref`: route-pattern-based collection reference, for example `users/uid/posts`.
 - `document_id`: document id when the request targets a document.
 - `method`: uppercased request method.
-- `keys`, `body`, `query`, and original `path`.
+- `keys`: route params whose pattern segments begin with `:`.
+- `body`, `query`, and original `path`.
 
 It also removes:
 
-- The route prefix before the data ref, such as `livequery`.
+- The required first path segment `livequery`.
 - Query strings before parsing path segments.
 - Realtime suffixes after `~` in the pathname.
 
 Query values are preserved in `query`. A `~` inside the query string is not treated as a realtime suffix.
+
+For Mongo-style datasource adapters, this normalized shape is intentionally enough:
+
+- Use `collection` as the target collection name.
+- Use `keys` as the route-derived query filter.
+- Use `document_id` for document-shaped routes.
+- Use `action` for custom command routes.
+- Use `body` and `query` for write payloads and read options.
+
+Adapters should prefer these parsed fields instead of reparsing `collection_ref` or `schema_collection_ref`. `schema` preserves `:` boundaries for cases that still need the route pattern.
 
 ### Example
 

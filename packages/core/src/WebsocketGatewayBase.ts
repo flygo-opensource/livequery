@@ -22,7 +22,7 @@ import {
 import {
     tap, map, switchMap, filter, finalize, mergeAll, retry, takeWhile,
 } from 'rxjs/operators'
-import { UpdatedData, LivequeryBaseEntity } from '@livequery/types'
+import { UpdatedData, LivequeryBaseEntity } from './LivequeryBaseEntity.js'
 import { LIVEQUERY_API_GATEWAY_DEBUG } from './const.js'
 import { LivequeryContext, LivequeryHandler } from './LivequeryContext.js'
 
@@ -62,6 +62,17 @@ export interface SocketLike {
     id: string
     gateway: boolean
     refs: Set<string>
+    /** Optional liveness probe; when present, the gateway skips dead sockets before sending. */
+    isAlive?(): boolean
+}
+
+export type WebsocketGatewayOptions = {
+    /**
+     * Grace period (ms) to keep a disconnected client's subscriptions before
+     * removing them. A reconnect with the same client_id within this window
+     * resumes realtime without re-querying. Default 5000.
+     */
+    disconnectGraceMs?: number
 }
 
 function randomId(): string {
@@ -80,14 +91,17 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     protected readonly _sockets = new Set<SocketLike>()
     protected readonly _subscriptions = new Map<Ref, Map<ClientId, SubscriptionMeta>>()
     protected readonly _pipes = new Map<Ref, { o: Observable<any>; s: Subscription }>()
+    protected readonly _pendingDisconnects = new Map<ClientId, ReturnType<typeof setTimeout>>()
     protected readonly _updatesSubscription: Subscription
+    protected readonly _disconnectGraceMs: number
     protected _closed = false
 
     public readonly id = randomId()
     public readonly auth = randomId()
 
-    constructor() {
+    constructor(options: WebsocketGatewayOptions = {}) {
         super()
+        this._disconnectGraceMs = options.disconnectGraceMs ?? 5000
 
         // Broadcast UpdatedData to all subscribed sockets
         this._updatesSubscription = this.subscribe(({ ref, data, type }) => {
@@ -103,6 +117,9 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                     const prev = targets.get(conn_id)
                     const socket = prev?.socket ?? this._connections.get(conn_id)
                     if (!socket) continue
+                    // Skip sockets the adapter reports as no longer open (e.g. a client
+                    // that dropped but is still inside its disconnect grace window).
+                    if (socket.isAlive && !socket.isAlive()) continue
                     if (prev) {
                         prev.cids.push(client_id)
                     } else {
@@ -117,7 +134,9 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                 // `data`, but consumers commonly want it at the change level.
                 const change = { ref, data, type, id: data?.id } as UpdatedData & { id?: string }
                 const event: SyncEvent = { event: 'sync', cids, data: { changes: [change] } }
-                socket.send(JSON.stringify(event))
+                // A socket may close between the liveness check and the write; never
+                // let one dead peer break the fan-out to the others.
+                try { socket.send(JSON.stringify(event)) } catch { /* dead socket */ }
             }
         })
     }
@@ -164,6 +183,18 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
         socket.refs = new Set()
         this._connections.set(id, socket)
 
+        // Reconnect within the grace window: cancel the pending cleanup and rebuild
+        // this socket's ref set from the subscriptions we kept alive, so a later
+        // disconnect detaches correctly and realtime resumes with no re-query.
+        const pending = this._pendingDisconnects.get(id)
+        if (pending) {
+            clearTimeout(pending)
+            this._pendingDisconnects.delete(id)
+            for (const [ref, map] of this._subscriptions) {
+                if (map.has(id)) socket.refs.add(ref)
+            }
+        }
+
         const hello: HelloEvent = { event: 'hello', gid: this.id, binary: true }
         socket.send(JSON.stringify(hello))
     }
@@ -177,6 +208,8 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
         }
 
         if (socket.gateway) {
+            // A remote gateway dropping means all clients behind it are gone now —
+            // clean immediately (it reconnects under a fresh id anyway).
             for (const [ref, map] of this._subscriptions) {
                 for (const [client_id, { gateway_id }] of map) {
                     if (gateway_id === socket.id) map.delete(client_id)
@@ -186,12 +219,33 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                     this._subscriptions.delete(ref)
                 }
             }
-        } else {
-            const refs = [...socket.refs ?? []]
-            if (refs.length > 0) this.unsubscribe_client(socket, { refs, client_id: socket.id })
+            this._connections.delete(socket.id)
+            return
         }
 
-        this._connections.delete(socket.id)
+        // Client socket: drop the dead connection now but KEEP its subscriptions for
+        // `_disconnectGraceMs`, so a quick reconnect (same client_id) resumes realtime
+        // without re-querying. Only detach if no reconnect arrives in time.
+        const clientId = socket.id
+        const refs = [...socket.refs ?? []]
+        if (this._connections.get(clientId) === socket) this._connections.delete(clientId)
+        if (refs.length === 0) return
+
+        const existing = this._pendingDisconnects.get(clientId)
+        if (existing) clearTimeout(existing)
+
+        if (this._disconnectGraceMs <= 0) {
+            this.detach(clientId, refs)
+            return
+        }
+
+        const timer = setTimeout(() => {
+            this._pendingDisconnects.delete(clientId)
+            if (this._connections.has(clientId)) return // reconnected in time — keep subs
+            this.detach(clientId, refs)
+        }, this._disconnectGraceMs)
+        ;(timer as { unref?: () => void }).unref?.()
+        this._pendingDisconnects.set(clientId, timer)
     }
 
     // ── Public protocol API ────────────────────────────────────────────────────
@@ -348,6 +402,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                             const socket: SocketLike = {
                                 send: (d) => ws.send(d),
                                 close: () => ws.close(),
+                                isAlive: () => ws.readyState === ws.OPEN,
                                 id: parsed.gid,
                                 gateway: true,
                                 refs: new Set<string>(),
@@ -397,6 +452,11 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
         if (this._closed) return
         this._closed = true
         this._updatesSubscription.unsubscribe()
+
+        for (const timer of this._pendingDisconnects.values()) {
+            clearTimeout(timer)
+        }
+        this._pendingDisconnects.clear()
 
         for (const pipe of this._pipes.values()) {
             pipe.s.unsubscribe()

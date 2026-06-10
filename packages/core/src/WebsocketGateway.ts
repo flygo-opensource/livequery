@@ -13,7 +13,7 @@
  */
 import { WebSocket, WebSocketServer } from 'ws'
 import type { Server as HttpServer } from 'http'
-import { WebsocketGatewayBase, SocketLike } from './WebsocketGatewayBase.js'
+import { WebsocketGatewayBase, SocketLike, type WebsocketGatewayOptions } from './WebsocketGatewayBase.js'
 import { WEBSOCKET_PATH } from './const.js'
 
 const HTTP_SERVER_GATEWAYS = Symbol.for('livequery.websocket_gateways')
@@ -28,8 +28,8 @@ export class WebsocketGateway extends WebsocketGatewayBase {
     #wss?: WebSocketServer
     #httpServer?: HttpServer
 
-    constructor(server?: HttpServer) {
-        super()
+    constructor(server?: HttpServer, options?: WebsocketGatewayOptions) {
+        super(options)
         if (server) this.attach(server)
     }
 
@@ -47,6 +47,7 @@ export class WebsocketGateway extends WebsocketGatewayBase {
             const socket: SocketLike = {
                 send: (d) => ws.send(d),
                 close: () => ws.close(),
+                isAlive: () => ws.readyState === ws.OPEN,
                 id: '',
                 gateway: false,
                 refs: new Set<string>(),

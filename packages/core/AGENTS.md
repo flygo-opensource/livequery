@@ -92,7 +92,7 @@ First handler in a typical request pipeline.
 
 - Input: `ctx.request`.
 - Output: `ctx.livequery`.
-- Removes the route prefix before the data ref, such as `livequery`.
+- Requires the first path segment to be `livequery` and parses the data ref from the next segment.
 - Removes query strings before parsing path segments.
 - Removes suffixes after `~` in the pathname while preserving `~` inside query values.
 - Detects document requests when the route pattern ends with a param segment.
@@ -106,7 +106,7 @@ Important test cases:
 - Query string and `~` suffix handling.
 - Query strings that contain `~`.
 - Missing document ids for document-shaped route patterns.
-- Paths without the Livequery prefix.
+- Paths missing the required Livequery prefix.
 - Empty path.
 
 ### `src/LivequeryDatasource.ts`

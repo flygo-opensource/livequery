@@ -14,6 +14,7 @@ describe('package entrypoint', () => {
         expect(typeof ApiGatewayHandler).toBe('function')
         expect(typeof ApiServiceLinker).toBe('function')
         expect(typeof LivequeryRequestParser).toBe('function')
+        expect(typeof LivequeryRequestParser.parse).toBe('function')
         expect(typeof UdpDiscovery).toBe('function')
         expect(typeof WebsocketGateway).toBe('function')
         expect(typeof hidePrivateFields).toBe('function')
