@@ -35,11 +35,13 @@ export LIVEQUERY_E2E_MONGO_URL='mongodb://127.0.0.1:27017'  # default
 export LIVEQUERY_E2E_DB_NAME='livequery'                                      # default
 
 cd tests
-bun test .                      # full suite
-bun test hono-mongodb-crud.e2e.test.ts   # single file
+bun test --timeout 20000 .                       # full suite (or: bun run test)
+bun test --timeout 20000 hono-mongodb-crud.e2e.test.ts   # single file
 ```
 
-`bunfig.toml` raises the per-test timeout to 20s (real Mongo over LAN + websockets).
+Always pass `--timeout 20000` (real Mongo over LAN + websockets exceed bun's 5s
+default; bunfig's `[test] timeout` is not honoured by bun, so the flag is required).
+`bun run test` already includes it.
 
 ## Suites
 
@@ -57,7 +59,7 @@ bun test hono-mongodb-crud.e2e.test.ts   # single file
 | `gateway-rotation` | Client WS@A, HTTP rotate qua 2 ApiGatewayHandler → service node: sub luôn trỏ đúng gateway của client (x-lgid), mutations qua proxy nhận realtime đúng 1 lần |
 | `ws-reconnect` | WS rớt → reconnect trong grace window (5s) → realtime hồi phục không cần re-query; quá grace thì sub bị xoá; dead peer không chặn fan-out |
 | `gateway-security` | WS subscribe-bypass (documented), không subscribe hộ client_id khác, realtime ẩn private field, gateway-to-gateway auth (sai token bị từ chối, đúng token relay được) |
-| `malformed-requests` | Hành vi với input lỗi: limit clamp, oid-filter ignore, doc-not-found 200, + 🐞 2 case 500 (malformed cursor, bad oid trong path) |
+| `malformed-requests` | Input lỗi trả 4xx (không 500): malformed cursor → 400 INVALID_CURSOR, bad oid → 400 INVALID_OBJECT_ID (ghi rõ field); limit clamp, doc-not-found 200 |
 | `subscription-lifecycle` | subscribe/unsubscribe 100 lần, connect/disconnect 25 lần → không rò `_subscriptions`/`_connections`/`_pendingDisconnects`; ref sống tới subscriber cuối |
 | `react-fullstack` | useCollection/useDocument/useObservable/useAction với backend thật (react-test-renderer) |
 | `rpc-livequery-bridge` | Collection sống ở "worker", stream qua WorkerManager/ServiceLinker về UI |

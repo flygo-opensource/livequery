@@ -1,9 +1,8 @@
 /**
  * E2E: how the stack responds to malformed / edge-case requests (#4).
  *
- * Documents the CURRENT behaviour against a real Hono + MongoDatasource backend.
- * Two cases are flagged 🐞 as bugs (user input → HTTP 500); the assertions pin the
- * present behaviour so a fix to 4xx is a deliberate, visible change.
+ * Runs against a real Hono + MongoDatasource backend. Malformed input is validated
+ * and returns 4xx with a structured error code (never a 500).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
@@ -61,19 +60,31 @@ describe('Malformed / edge-case requests e2e', () => {
         expect(res.status).toBeGreaterThanOrEqual(400)
     })
 
-    // ── 🐞 Bugs: user input causes HTTP 500 (should be 400/404) ──────────────────
+    // ── Input validation: malformed values return 400, not 500 ──────────────────
 
-    test('🐞 malformed :after cursor currently returns 500 (should be 400)', async () => {
+    test('malformed :after cursor returns 400 INVALID_CURSOR', async () => {
         const { status, body } = await fetchJson(`${app.apiUrl}/tasks?:after=garbage`)
-        // BUG: Cursor.parse JSON.parses hex-decoded junk and throws → 500.
-        // Pinned here; flip to 400 + a CURSOR_INVALID code when fixed.
-        expect(status).toBe(500)
-        expect(body?.error ?? body).toBeDefined()
+        expect(status).toBe(400)
+        expect(body.error.code).toBe('INVALID_CURSOR')
     })
 
-    test('🐞 invalid ObjectId in a document path currently returns 500 (should be 404/400)', async () => {
-        const { status } = await fetchJson(`${app.apiUrl}/tasks/not-an-objectid`)
-        // BUG: ObjectId.createFromHexString throws on invalid hex → 500.
-        expect(status).toBe(500)
+    test('invalid ObjectId in a document path returns 400 and names the field', async () => {
+        const { status, body } = await fetchJson(`${app.apiUrl}/tasks/not-an-objectid`)
+        expect(status).toBe(400)
+        expect(body.error.code).toBe('INVALID_OBJECT_ID')
+        // the error message pinpoints which field is invalid
+        expect(body.error.message).toContain('"id"')
+        expect(body.error.message).toContain('not-an-objectid')
+    })
+
+    test('invalid ObjectId on a write (PATCH by id) also returns 400 naming the field', async () => {
+        const { status, body } = await fetchJson(`${app.apiUrl}/tasks/xyz`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title: 'nope' }),
+        })
+        expect(status).toBe(400)
+        expect(body.error.code).toBe('INVALID_OBJECT_ID')
+        expect(body.error.message).toContain('"id"')
     })
 })
