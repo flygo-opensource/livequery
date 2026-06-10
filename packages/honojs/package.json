@@ -5,7 +5,7 @@
     "repository": {
         "url": "git@github.com:livequery/honojs.git"
     },
-    "version": "2.0.145",
+    "version": "2.0.149",
     "description": "Hono adapter for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -35,8 +35,7 @@
         "ws": ">=8"
     },
     "dependencies": {
-        "@livequery/core": "^2.0.145",
-        "@livequery/types": "2.0.7",
+        "@livequery/core": "^2.0.149",
         "rxjs": "x"
     }
 }
