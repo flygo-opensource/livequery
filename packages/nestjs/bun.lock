@@ -5,10 +5,10 @@
     "": {
       "name": "@livequery/nestjs",
       "dependencies": {
-        "@livequery/core": "file:../core",
         "msgpackr": "^1.11.9",
       },
       "devDependencies": {
+        "@livequery/core": "file:../core",
         "@livequery/types": "2.0.7",
         "@nestjs/platform-express": "^11.1.19",
         "@types/express": "x",
@@ -19,6 +19,7 @@
         "typescript": "^5.1.6",
       },
       "peerDependencies": {
+        "@livequery/core": "^2.0.148",
         "@nestjs/common": "*",
         "@nestjs/core": "*",
         "@nestjs/platform-ws": "^11.0.10",
@@ -31,7 +32,7 @@
   "packages": {
     "@borewit/text-codec": ["@borewit/text-codec@0.2.2", "", {}, "sha512-DDaRehssg1aNrH4+2hnj1B7vnUGEjU6OIlyRdkMd0aUdIUvKXrJfXsy8LVtXAy7DRvYVluWbMspsRhz2lcW0mQ=="],
 
-    "@livequery/core": ["@livequery/core@file:../core", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x" }, "devDependencies": { "@livequery/types": "2.0.7", "@types/bun": "latest", "@types/node": "x", "@types/ws": "^8", "typescript": "^5.1.6" }, "peerDependencies": { "ws": ">=8" }, "optionalPeers": ["ws"] }],
+    "@livequery/core": ["@livequery/core@file:../core", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" }, "devDependencies": { "@livequery/types": "2.0.7", "@types/bun": "latest", "@types/node": "x", "@types/ws": "^8", "hono": "^4.12.21", "typescript": "^5.1.6" } }],
 
     "@livequery/types": ["@livequery/types@2.0.7", "", {}, "sha512-KGAxAnzpfhXrnfGl/EgUom1eI2cmJU8OTYj44xdI9I+nI8Cw2ZO5gg+U7H5zVT+o9sVHXjbqx0yN8Ndg0Axa3A=="],
 
@@ -170,6 +171,8 @@
     "has-symbols": ["has-symbols@1.1.0", "", {}, "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ=="],
 
     "hasown": ["hasown@2.0.2", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ=="],
+
+    "hono": ["hono@4.12.25", "", {}, "sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ=="],
 
     "http-errors": ["http-errors@2.0.1", "", { "dependencies": { "depd": "~2.0.0", "inherits": "~2.0.4", "setprototypeof": "~1.2.0", "statuses": "~2.0.2", "toidentifier": "~1.0.1" } }, "sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ=="],
 

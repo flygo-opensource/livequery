@@ -1,7 +1,7 @@
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
 import { hidePrivateFields, LivequeryRequestParser, WebsocketGateway, type LivequeryContext } from "@livequery/core";
-import type { LivequeryRequest } from "@livequery/types";
+import type { LivequeryRequest } from "@livequery/core";
 
 
 
@@ -50,17 +50,30 @@ export class LivequeryInterceptor implements NestInterceptor {
         }
 
         return next.handle().pipe(
-            map(response => {
-                if (response.item) {
-                    return {
-                        ...response,
-                        item: hidePrivateFields(response.item.toJSON ? response.item.toJSON() : response.item),
-                    }
-                }
-                return response
-            })
+            map(response => maskLivequeryResponse(response))
         )
     }
+}
+
+function toPlain(item: any) {
+    return item && typeof item.toJSON === 'function' ? item.toJSON() : item
+}
+
+// Hide private (underscore-prefixed) fields on every livequery payload shape:
+// bare `{ item }`, bare `{ items }`, and either of those inside the `{ data }` envelope.
+function maskLivequeryResponse(response: any): any {
+    if (!response || typeof response !== 'object') return response
+    let masked = response
+    if (masked.item) {
+        masked = { ...masked, item: hidePrivateFields(toPlain(masked.item)) }
+    }
+    if (Array.isArray(masked.items)) {
+        masked = { ...masked, items: masked.items.map((item: any) => hidePrivateFields(toPlain(item))) }
+    }
+    if (masked.data && typeof masked.data === 'object') {
+        masked = { ...masked, data: maskLivequeryResponse(masked.data) }
+    }
+    return masked
 }
 
 

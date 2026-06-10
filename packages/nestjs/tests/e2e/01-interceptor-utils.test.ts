@@ -1,5 +1,9 @@
+import 'reflect-metadata'
 import { describe, test, expect } from 'bun:test'
+import { Controller, Get } from '@nestjs/common'
+import { Reflector } from '@nestjs/core'
 import { LivequeryRequestParser, hidePrivateFields, type LivequeryContext } from '@livequery/core'
+import { LivequeryDatasourceInterceptors } from '../../src/LivequeryDatasourceInterceptors.js'
 
 // ─── LivequeryRequestParser ───────────────────────────────────────────────────
 
@@ -40,6 +44,49 @@ describe('LivequeryRequestParser', () => {
     test('schema_collection_ref contains collection schema segments', () => {
         const r = parse('/livequery/users/123/posts/456', '/livequery/users/:uid/posts/:pid', { uid: '123', pid: '456' })
         expect(r?.schema_collection_ref).toBe('users/uid/posts')
+    })
+})
+
+// ─── LivequeryDatasourceInterceptors route metadata ───────────────────────────
+
+describe('LivequeryDatasourceInterceptors', () => {
+    test('uses core parser schema for datasource routes with static aliases', () => {
+        const datasource = Symbol('datasource')
+
+        @Controller([
+            'livequery/spaces/:space_id/tools/livestream-product-manager/lists',
+            'livequery/tool-livestream-products/:space_id/product-lists',
+        ])
+        class ProductListsController {
+            @Get(['', ':id', ':id/~pull-products'])
+            list() { }
+        }
+
+        Reflect.defineMetadata(
+            LivequeryDatasourceInterceptors,
+            { datasource, options: { realtime: true } },
+            ProductListsController.prototype.list
+        )
+
+        const interceptor = new LivequeryDatasourceInterceptors(
+            new Reflector(),
+            { getControllers: () => [{ metatype: ProductListsController }] } as any,
+            {} as any
+        )
+
+        const routes = interceptor.getRoutes(datasource)
+
+        const staticAliasRoutes = routes.filter(route => route.path === 'spaces/:space_id/tools/livestream-product-manager/lists')
+        const legacyAliasRoutes = routes.filter(route => route.path === 'tool-livestream-products/:space_id/product-lists')
+
+        expect(staticAliasRoutes).toHaveLength(3)
+        expect(legacyAliasRoutes).toHaveLength(3)
+        // getRoutes maps NestJS's RequestMethod enum number to its verb string so
+        // datasource route tables (keyed "GET <schema>") and watchers get real verbs.
+        expect(staticAliasRoutes.every(route => route.method === 'GET' && route.options.realtime === true)).toBe(true)
+        expect(legacyAliasRoutes.every(route => route.method === 'GET' && route.options.realtime === true)).toBe(true)
+        expect(routes.some(route => route.path.includes('livestream-product-manager'))).toBe(true)
+        expect(routes.some(route => route.path.includes('spaces/space_id/tools'))).toBe(false)
     })
 })
 
