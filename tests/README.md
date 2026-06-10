@@ -55,6 +55,7 @@ parameter decorators — DI then constructs interceptors with undefined deps.
 | `hono-mongodb-realtime` | WS subscription qua middleware (x-lcid) + MongodbRealtime change streams → sync |
 | `nestjs-mongodb-crud` | HTTP → NestJS LivequeryInterceptor → MongoDatasource: `{data}` envelope contract |
 | `nestjs-datasource-mapper` | Full `createDatasourceMapper` pipeline (decorator → `LivequeryDatasourceInterceptors` → `MongoDatasource.handle()`), realtime qua `watcher: MongodbRealtime` — đường wiring production của @livequery/nestjs |
+| `rest-nestjs-mapper-fullstack` | App NestJS hoàn chỉnh (createDatasourceMapper + MongoDatasource + MongodbRealtime) exercised qua `RestTransporter` (@livequery/rest): full CRUD + realtime added/modified/removed + out-of-band writes |
 | `client-nestjs-fullstack` | LivequeryClient + RestTransporter + MemoryStorage → NestJS, realtime vào `collection.items` |
 | `client-hono-fullstack` | Same matrix trên Hono (shared suite — chứng minh client adapter-agnostic) |
 | `multi-client-sync` | 2 client độc lập: A mutate → B nhận realtime, unsubscribe isolation |
