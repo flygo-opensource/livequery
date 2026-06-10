@@ -55,6 +55,10 @@ bun test hono-mongodb-crud.e2e.test.ts   # single file
 | `realtime-nested-ref` | Fan-out `users/:userId/posts`, array membership added/removed với Mongo thật |
 | `gateway-multinode` | 2 gateway bridge nhau: sync route xuyên node về client |
 | `gateway-rotation` | Client WS@A, HTTP rotate qua 2 ApiGatewayHandler → service node: sub luôn trỏ đúng gateway của client (x-lgid), mutations qua proxy nhận realtime đúng 1 lần |
+| `ws-reconnect` | WS rớt → reconnect trong grace window (5s) → realtime hồi phục không cần re-query; quá grace thì sub bị xoá; dead peer không chặn fan-out |
+| `gateway-security` | WS subscribe-bypass (documented), không subscribe hộ client_id khác, realtime ẩn private field, gateway-to-gateway auth (sai token bị từ chối, đúng token relay được) |
+| `malformed-requests` | Hành vi với input lỗi: limit clamp, oid-filter ignore, doc-not-found 200, + 🐞 2 case 500 (malformed cursor, bad oid trong path) |
+| `subscription-lifecycle` | subscribe/unsubscribe 100 lần, connect/disconnect 25 lần → không rò `_subscriptions`/`_connections`/`_pendingDisconnects`; ref sống tới subscriber cuối |
 | `react-fullstack` | useCollection/useDocument/useObservable/useAction với backend thật (react-test-renderer) |
 | `rpc-livequery-bridge` | Collection sống ở "worker", stream qua WorkerManager/ServiceLinker về UI |
 | `rest-mongodb-nestjs-realtime` | REST client → NestJS → MongoDatasource + MongodbRealtime (legacy suite) |
