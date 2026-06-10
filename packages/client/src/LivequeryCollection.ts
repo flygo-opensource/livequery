@@ -14,6 +14,14 @@ export type LivequeryCollectionOptions<T extends Doc> = {
         data: T[]
         persist: boolean
     }
+    /**
+     * Skip initialize() during server-side rendering.
+     * - `true`: always skip (caller knows it is rendering on the server)
+     * - `false`: never skip — required for window-less runtimes that are NOT SSR
+     *   (web/shared workers, Node/Bun scripts, tests)
+     * - default: skip when `typeof window == 'undefined'` (legacy SSR detection)
+     */
+    ssr: boolean
 }
 
 
@@ -73,7 +81,7 @@ export class LivequeryCollection<T extends Doc> {
     #timer: ReturnType<typeof setTimeout> | undefined
     initialize(ref: string) {
         if (!ref) return
-        if (typeof window == 'undefined') return
+        if (this.options.ssr ?? (typeof window == 'undefined')) return
         // Fix #1: clear pending timer from previous initialize before starting new one
         this.#timer && clearTimeout(this.#timer)
         this.#timer = undefined
