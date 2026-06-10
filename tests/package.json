@@ -1,0 +1,9 @@
+{
+    "name": "@livequery/tests",
+    "private": true,
+    "type": "module",
+    "description": "Cross-package end-to-end tests for the livequery ecosystem (frontend client/rest/react/rpc → backend core/honojs/nestjs/mongodb → real MongoDB).",
+    "scripts": {
+        "test": "bun test ."
+    }
+}

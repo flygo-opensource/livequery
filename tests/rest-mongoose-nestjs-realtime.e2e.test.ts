@@ -1,0 +1,323 @@
+import '../nestjs/node_modules/reflect-metadata/Reflect.js'
+
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import * as http from 'http'
+import type { AddressInfo } from 'net'
+import express from '../nestjs/node_modules/express/index.js'
+import mongoose, { Schema, type Connection, type Model } from '../mongoose/node_modules/mongoose/index.js'
+import { Controller, Get, Module, Patch, Req } from '../nestjs/node_modules/@nestjs/common/index.js'
+import { NestFactory } from '../nestjs/node_modules/@nestjs/core/index.js'
+import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/index.js'
+import { LivequeryInterceptor, UseLivequeryInterceptor } from '../nestjs/src/LivequeryInterceptor.js'
+import { MongooseDatasource } from '../mongoose/src/MongooseDatasource.js'
+import { RestTransporter } from '../rest/src/RestTransporter.js'
+
+type Task = {
+    id: string
+    taskId: string
+    title: string
+    done: boolean
+    version: number
+}
+
+const MONGO_URL = process.env.LIVEQUERY_E2E_MONGO_URL
+    ?? 'mongodb://127.0.0.1:27017'
+const DB_NAME = process.env.LIVEQUERY_E2E_DB_NAME ?? 'livequery'
+const COLLECTION = `rest_mongoose_nestjs_realtime_${Date.now()}`
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+function applyMethodDecorator(
+    decorator: MethodDecorator,
+    target: object,
+    key: string,
+) {
+    const descriptor = Object.getOwnPropertyDescriptor(target, key)
+    if (!descriptor) throw new Error(`Missing method descriptor for ${key}`)
+    decorator(target, key, descriptor)
+}
+
+function closeServer(server: http.Server): Promise<void> {
+    return new Promise(resolve => {
+        try { server.closeAllConnections?.() } catch { }
+        server.close(() => resolve())
+    })
+}
+
+function normalizeMongoDoc(doc: any): Task {
+    return {
+        ...doc,
+        _id: undefined,
+        id: doc._id?.toString?.() ?? doc.id,
+    }
+}
+
+function waitForQueryEvent<T>(
+    events: Array<Partial<T>>,
+    predicate: (event: Partial<T>) => boolean,
+    timeout = 8000,
+): Promise<Partial<T>> {
+    const existing = events.find(predicate)
+    if (existing) return Promise.resolve(existing)
+
+    return new Promise((resolve, reject) => {
+        const started = Date.now()
+        const timer = setInterval(() => {
+            const event = events.find(predicate)
+            if (event) {
+                clearInterval(timer)
+                resolve(event)
+                return
+            }
+            if (Date.now() - started > timeout) {
+                clearInterval(timer)
+                reject(new Error('Timed out waiting for query event'))
+            }
+        }, 25)
+    })
+}
+
+describe('REST + Mongoose + core + NestJS realtime e2e', () => {
+    let connection: Connection
+    let taskSchema: Schema<Task>
+    let taskModel: Model<Task>
+    let datasource: MongooseDatasource
+    let changeStream: any
+    let app: any
+    let server: http.Server
+    let gateway: WebsocketGateway
+    let transporter: RestTransporter
+    let seedId: string
+    let seedTaskId: string
+    const emittedUpdates: any[] = []
+    const registeredSubscriptions: any[] = []
+    const seenHeaders: any[] = []
+
+    beforeAll(async () => {
+        connection = await mongoose.createConnection(MONGO_URL, {
+            dbName: DB_NAME,
+            authSource: process.env.LIVEQUERY_E2E_AUTH_SOURCE ?? 'admin',
+            serverSelectionTimeoutMS: 15000,
+        }).asPromise()
+
+        taskSchema = new Schema<Task>(
+            {
+                taskId: { type: String, required: true, unique: true },
+                title: { type: String, required: true },
+                done: { type: Boolean, default: false },
+                version: { type: Number, default: 1 },
+            },
+            { collection: COLLECTION },
+        )
+
+        taskModel = connection.model<Task>(COLLECTION, taskSchema, COLLECTION)
+        await taskModel.createCollection()
+        await taskModel.deleteMany({})
+
+        seedTaskId = `task-${Date.now()}`
+        const seed = await taskModel.create({
+            taskId: seedTaskId,
+            title: 'before-change',
+            done: false,
+            version: 1,
+        })
+        seedId = seed._id.toString()
+
+        datasource = new MongooseDatasource({
+            connections: { default: connection },
+            databases: [DB_NAME],
+        })
+        await datasource.init([
+            {
+                method: 'GET',
+                path: '/livequery/tasks',
+                schema: taskSchema,
+                db: DB_NAME,
+            },
+            {
+                method: 'GET',
+                path: '/livequery/tasks/:taskId',
+                schema: taskSchema,
+                db: DB_NAME,
+            },
+            {
+                method: 'PATCH',
+                path: '/livequery/tasks/:taskId',
+                schema: taskSchema,
+                db: DB_NAME,
+            },
+        ])
+
+        server = http.createServer()
+        gateway = new WebsocketGateway(server)
+        const listen = gateway.listen.bind(gateway)
+        gateway.listen = ((events: any[]) => {
+            registeredSubscriptions.push(...events)
+            return listen(events)
+        }) as typeof gateway.listen
+        changeStream = taskModel.watch([], { fullDocument: 'updateLookup' })
+        changeStream.on('change', (change: any) => {
+            if (change.operationType !== 'update' && change.operationType !== 'replace') return
+            if (!change.fullDocument) return
+            const data = normalizeMongoDoc(change.fullDocument)
+            const update = {
+                ref: `tasks/${data.taskId}`,
+                id: data.id,
+                type: 'modified',
+                data,
+            }
+            emittedUpdates.push(update)
+            gateway.next(update as any)
+        })
+        await sleep(1000)
+
+        const runDatasource = async (req: any, routeRef: string) => {
+            seenHeaders.push(req.headers)
+            const ctx = {
+                request: {
+                    path: req.originalUrl ?? req.url ?? '',
+                    ref: routeRef,
+                    params: req.params ?? {},
+                    query: req.query ?? {},
+                    body: req.body,
+                    method: req.method,
+                    headers: new Headers(req.headers as HeadersInit) as any,
+                },
+                livequery: req.livequery,
+            }
+            // The NestJS interceptor parses req.livequery; this explicit core call
+            // registers the REST client's socket subscription in this manual test app.
+            if (req.method === 'GET') gateway.handle(ctx as any)
+            return await datasource.handle(ctx as any)
+        }
+
+        class TaskController {
+            async list(req: any) {
+                return { data: await runDatasource(req, '/livequery/tasks') }
+            }
+
+            async get(req: any) {
+                return { data: await runDatasource(req, '/livequery/tasks/:taskId') }
+            }
+
+            async patch(req: any) {
+                return { data: await runDatasource(req, '/livequery/tasks/:taskId') }
+            }
+        }
+
+        Controller('livequery/tasks')(TaskController)
+        Req()(TaskController.prototype, 'list', 0)
+        applyMethodDecorator(Get(), TaskController.prototype, 'list')
+        applyMethodDecorator(UseLivequeryInterceptor(), TaskController.prototype, 'list')
+        Req()(TaskController.prototype, 'get', 0)
+        applyMethodDecorator(Get(':taskId'), TaskController.prototype, 'get')
+        applyMethodDecorator(UseLivequeryInterceptor(), TaskController.prototype, 'get')
+        Req()(TaskController.prototype, 'patch', 0)
+        applyMethodDecorator(Patch(':taskId'), TaskController.prototype, 'patch')
+        applyMethodDecorator(UseLivequeryInterceptor(), TaskController.prototype, 'patch')
+
+        class TestModule { }
+        Module({
+            controllers: [TaskController],
+            providers: [
+                { provide: LivequeryInterceptor, useFactory: () => new LivequeryInterceptor(gateway) },
+                { provide: WebsocketGateway, useValue: gateway },
+            ],
+        })(TestModule)
+
+        const expressApp = express()
+        app = await NestFactory.create(TestModule, new ExpressAdapter(expressApp), {
+            bodyParser: false,
+            logger: false,
+        })
+        await app.init()
+        server.on('request', expressApp)
+        await new Promise<void>(resolve => server.listen(0, resolve))
+
+        const port = (server.address() as AddressInfo).port
+        transporter = new RestTransporter({
+            api: `http://127.0.0.1:${port}/livequery`,
+            ws: `ws://127.0.0.1:${port}${WEBSOCKET_PATH}`,
+        })
+    }, 60000)
+
+    afterAll(async () => {
+        ; (transporter as any)?.socket?.stop?.()
+        await changeStream?.close?.().catch(() => undefined)
+        await app?.close?.()
+        gateway?.close()
+        if (server) await closeServer(server)
+        await taskModel?.deleteMany({}).catch(() => undefined)
+        await connection?.close().catch(() => undefined)
+    }, 60000)
+
+    test('emits a Mongoose field update to a REST realtime client', async () => {
+        const ref = `tasks/${seedTaskId}`
+        const events: any[] = []
+        const subscription = transporter.query<Task>({
+            ref,
+            filters: { ':limit': 10 },
+        }).subscribe(event => {
+            events.push(event)
+        })
+
+        try {
+            const initial = await waitForQueryEvent(events, event => event.source === 'query')
+            expect(Array.isArray(initial.changes), JSON.stringify(initial)).toBe(true)
+            expect(initial.changes).toContainEqual(expect.objectContaining({
+                id: seedId,
+                type: 'added',
+                data: expect.objectContaining({
+                    id: seedId,
+                    taskId: seedTaskId,
+                    title: 'before-change',
+                }),
+            }))
+            expect(registeredSubscriptions, JSON.stringify(seenHeaders)).toContainEqual(expect.objectContaining({
+                ref,
+                gateway_id: gateway.id,
+            }))
+
+            await sleep(500)
+            await taskModel.findOneAndUpdate(
+                { taskId: seedTaskId },
+                { $set: { title: 'after-change', version: 2 } },
+                { new: true },
+            )
+            await waitForQueryEvent(emittedUpdates, update => (
+                update.ref === ref
+                && update.id === seedId
+                && update.type === 'modified'
+                && update.data?.id === seedId
+                && update.data?.title === 'after-change'
+            ))
+
+            const realtime = await waitForQueryEvent(events, event => (
+                event.source === 'realtime'
+                && event.changes?.some((change: any) => (
+                    change.id === seedId
+                    && change.type === 'modified'
+                    && change.ref === ref
+                    && change.data?.title === 'after-change'
+                    && change.data?.version === 2
+                ))
+            ))
+
+            expect(realtime.changes?.[0]).toMatchObject({
+                id: seedId,
+                ref,
+                type: 'modified',
+                collection_ref: 'tasks',
+                data: {
+                    id: seedId,
+                    taskId: seedTaskId,
+                    title: 'after-change',
+                    version: 2,
+                },
+            })
+        } finally {
+            subscription.unsubscribe()
+        }
+    }, 20000)
+})
