@@ -128,6 +128,40 @@ describe('HTTP rotation across API gateways keeps realtime routing correct', () 
         await service?.close()
     }, 30000)
 
+    test('manual service emissions: subscribe via gateway 1, then call via gateway 2 — events keep reaching the client', async () => {
+        const clientId = 'rotate-manual'
+        // client holds ONE websocket, connected to gateway 1 (A)
+        const { ws, gatewayId } = await wsStart(gwA.wsUrl, clientId)
+        const headers = { 'x-lcid': clientId, 'x-lgid': gatewayId }
+        try {
+            // Step 1 — request through gateway 1 registers the subscription at the service
+            const viaA = await fetchJson(`${gwA.apiUrl}/tasks`, { headers })
+            expect(viaA.status).toBe(200)
+            await sleep(150)
+
+            // the SERVICE emits a realtime event manually (no mongo involved)
+            const p1 = waitForWsMessage<any>(ws, m =>
+                m.event === 'sync' && m.data.changes.some((c: any) => c.data?.id === 'manual-after-a'))
+            service.gateway.next({ ref: 'tasks', type: 'added', data: { id: 'manual-after-a', title: 'emitted-by-service' } } as any)
+            const sync1 = await p1
+            expect(sync1.data.changes[0].data.title).toBe('emitted-by-service')
+
+            // Step 2 — the same client now calls through gateway 2 (B)
+            const viaB = await fetchJson(`${gwB.apiUrl}/tasks`, { headers })
+            expect(viaB.status).toBe(200)
+            await sleep(150)
+
+            // service emits again — the event must still arrive over the gateway-1 socket
+            const p2 = waitForWsMessage<any>(ws, m =>
+                m.event === 'sync' && m.data.changes.some((c: any) => c.data?.id === 'manual-after-b'))
+            service.gateway.next({ ref: 'tasks', type: 'modified', data: { id: 'manual-after-b', done: true } } as any)
+            const sync2 = await p2
+            expect(sync2.data.changes[0].data.done).toBe(true)
+        } finally {
+            ws.close()
+        }
+    })
+
     test('subscription via gateway A, then requests via gateway B — client (WS@A) keeps receiving', async () => {
         const clientId = 'rotate-client-1'
         const { ws, gatewayId } = await wsStart(gwA.wsUrl, clientId)
