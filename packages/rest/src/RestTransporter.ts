@@ -152,7 +152,10 @@ export class RestTransporter implements LivequeryTransporter {
         })();
         this.config.onResponse && await this.config.onResponse(request, response)
         if (response.error) throw response.error
-        return response.data
+        // Servers normally wrap payloads in the `{ data }` envelope; fall back to the raw
+        // body for backends that return the payload bare (e.g. hono useDatasource).
+        if (typeof response === 'object' && response !== null && 'data' in response) return response.data
+        return response as any as T
     }
 
     query<T extends Doc>({ ref, filters, headers }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: Record<string, string> }) {
