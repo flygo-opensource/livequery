@@ -7,8 +7,6 @@
  * No DOM: react-test-renderer with act(), the same harness the react package uses.
  */
 
-// LivequeryCollection.initialize() bails out under SSR; bun has no window.
-;(globalThis as any).window ??= {}
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
@@ -94,7 +92,7 @@ describe('React hooks → NestJS → MongoDatasource fullstack e2e', () => {
 
     test('useCollection loads items from the real backend', async () => {
         const state = renderHook(() => {
-            const collection = useCollection<Task>('tasks')
+            const collection = useCollection<Task>('tasks', { ssr: false })
             const items = useObservable(collection.items)
             const loading = useObservable(collection.loading)
             return { collection, items, loading }
@@ -108,7 +106,7 @@ describe('React hooks → NestJS → MongoDatasource fullstack e2e', () => {
 
     test('realtime mongo change updates hook-held documents', async () => {
         const state = renderHook(() => {
-            const collection = useCollection<Task>('tasks')
+            const collection = useCollection<Task>('tasks', { ssr: false })
             const items = useObservable(collection.items)
             return { items }
         })
@@ -134,7 +132,7 @@ describe('React hooks → NestJS → MongoDatasource fullstack e2e', () => {
         const id = inserted.insertedId.toString()
 
         const state = renderHook(() => {
-            const [item, loading, error] = useDocument<Task>(`tasks/${id}`)
+            const [item, loading, error] = useDocument<Task>(`tasks/${id}`, { ssr: false })
             return { item, loading, error }
         })
 
@@ -144,7 +142,7 @@ describe('React hooks → NestJS → MongoDatasource fullstack e2e', () => {
 
     test('useAction wraps a mutation with loading/data state and persists to mongo', async () => {
         const state = renderHook(() => {
-            const collection = useCollection<Task>('tasks')
+            const collection = useCollection<Task>('tasks', { ssr: false })
             const addTask = useAction(async (title: string) =>
                 await collection.add({ title, done: false, seq: 50 } as any))
             return { collection, addTask }

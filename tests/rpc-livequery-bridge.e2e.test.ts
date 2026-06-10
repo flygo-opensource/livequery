@@ -8,9 +8,6 @@
  * stream through RPC into the UI-side observable.
  */
 
-// LivequeryCollection.initialize() guards on `window`
-;(globalThis as any).window ??= {}
-
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../client/src/index.js'
 import { RestTransporter } from '../rest/src/RestTransporter.js'
@@ -56,7 +53,9 @@ describe('RPC bridge: livequery collection across a worker boundary e2e', () => 
             storage: new LivequeryMemoryStorage(),
             transporters: { rest: transporter },
         })
-        col = new LivequeryCollection<Task>(client, {})
+        // ssr: false — worker scopes have no `window`; this is the exact use-case the
+        // explicit option exists for (SharedWorker-hosted collections).
+        col = new LivequeryCollection<Task>(client, { ssr: false })
         col.initialize('tasks')
         await waitFor(() => col.items.value.length >= 1, { label: 'worker-side collection load' })
 

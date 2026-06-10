@@ -5,9 +5,6 @@
  * adapter-agnostic.
  */
 
-// LivequeryCollection.initialize() guards on `window` — expose it for bun tests
-;(globalThis as any).window ??= {}
-
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../../client/src/index.js'
 import { RestTransporter } from '../../rest/src/RestTransporter.js'
@@ -50,7 +47,8 @@ export function defineClientFullstackSuite(
                 transporters: { rest: transporter },
             })
 
-            col = new LivequeryCollection<Task>(client, { filters: { 'seq:sort': 'asc' } })
+            // ssr: false — bun has no `window`; collections must initialize anyway
+            col = new LivequeryCollection<Task>(client, { ssr: false, filters: { 'seq:sort': 'asc' } })
             col.initialize('tasks')
             await waitFor(() => col.items.value.length >= 3, { label: 'initial collection load' })
         }, 60000)
@@ -130,6 +128,7 @@ export function defineClientFullstackSuite(
 
         test('server-side filters via collection query', async () => {
             const filtered = new LivequeryCollection<Task>(client, {
+                ssr: false,
                 filters: { 'done:eq-boolean': true } as any,
             })
             filtered.initialize('tasks')
@@ -150,6 +149,7 @@ export function defineClientFullstackSuite(
             await sleep(500)
 
             const paged = new LivequeryCollection<Task>(client, {
+                ssr: false,
                 filters: { ':limit': 10, 'seq:sort': 'asc' } as any,
             })
             paged.initialize('tasks')

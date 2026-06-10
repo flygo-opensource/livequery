@@ -4,9 +4,6 @@
  * client B without B re-querying.
  */
 
-// LivequeryCollection.initialize() guards on `window` — expose it for bun tests
-;(globalThis as any).window ??= {}
-
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../client/src/index.js'
 import { RestTransporter } from '../rest/src/RestTransporter.js'
@@ -35,7 +32,7 @@ describe('Multi-client realtime sync e2e', () => {
             storage: new LivequeryMemoryStorage(),
             transporters: { rest: transporter },
         })
-        const col = new LivequeryCollection<Task>(client, {})
+        const col = new LivequeryCollection<Task>(client, { ssr: false })
         return { transporter, client, col }
     }
 
