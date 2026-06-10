@@ -43,6 +43,10 @@ Always pass `--timeout 20000` (real Mongo over LAN + websockets exceed bun's 5s
 default; bunfig's `[test] timeout` is not honoured by bun, so the flag is required).
 `bun run test` already includes it.
 
+`tsconfig.json` in this repo is REQUIRED: bun reads compiler flags from the cwd's
+tsconfig, and without `experimentalDecorators` it silently drops NestJS `@Inject`
+parameter decorators — DI then constructs interceptors with undefined deps.
+
 ## Suites
 
 | File | Stack under test |
@@ -50,6 +54,7 @@ default; bunfig's `[test] timeout` is not honoured by bun, so the flag is requir
 | `hono-mongodb-crud` | HTTP → Hono `useDatasource` → MongoDatasource: CRUD, filters, cursor/offset paging, summary |
 | `hono-mongodb-realtime` | WS subscription qua middleware (x-lcid) + MongodbRealtime change streams → sync |
 | `nestjs-mongodb-crud` | HTTP → NestJS LivequeryInterceptor → MongoDatasource: `{data}` envelope contract |
+| `nestjs-datasource-mapper` | Full `createDatasourceMapper` pipeline (decorator → `LivequeryDatasourceInterceptors` → `MongoDatasource.handle()`), realtime qua `watcher: MongodbRealtime` — đường wiring production của @livequery/nestjs |
 | `client-nestjs-fullstack` | LivequeryClient + RestTransporter + MemoryStorage → NestJS, realtime vào `collection.items` |
 | `client-hono-fullstack` | Same matrix trên Hono (shared suite — chứng minh client adapter-agnostic) |
 | `multi-client-sync` | 2 client độc lập: A mutate → B nhận realtime, unsubscribe isolation |
