@@ -1,8 +1,6 @@
-import type { LivequeryBaseEntity, QueryOption } from "./types.js"
-
 export class Cursor {
 
-    static caculate<T extends LivequeryBaseEntity>(item: T, options: QueryOption<T>) {
+    static caculate(item: Record<string, any>, options: Record<string, any>) {
         if (!item) return null
         const map = (
             Object
@@ -29,7 +27,7 @@ export class Cursor {
         return Buffer.from(JSON.stringify(map), 'utf8').toString('hex')
     }
 
-    static parse<T extends LivequeryBaseEntity>(cursor: string) {
+    static parse(cursor: string) {
         if (!cursor) return null
         return JSON.parse(Buffer.from(cursor, 'hex').toString('utf8'))
     }

@@ -314,33 +314,46 @@ MongoDB change stream watcher for realtime Livequery updates. This replaces the 
 import { WebsocketGateway } from '@livequery/core'
 import { MongoDatasource, MongodbRealtime } from '@livequery/mongodb'
 
-const routes = [
+const datasource = new MongoDatasource({
+  connections: { default: client },
+  databases: ['main'],
+})
+
+await datasource.init([
   {
     method: 'GET',
     path: '/products',
     collection: 'products',
     realtime: true,
   },
-]
-
-const datasource = new MongoDatasource({
-  connections: { default: client },
-  databases: ['main'],
-})
-
-await datasource.init(routes)
+])
 
 const websocketGateway = new WebsocketGateway(server)
 
 new MongodbRealtime()
-  .watch(datasource.config, routes)
+  .watch(datasource.config, [
+    {
+      // LivequeryRequestParser.parse(...).schema — document-id segment already stripped
+      schema: 'products',
+      options: { collection: 'products', realtime: true },
+    },
+  ])
   .subscribe(websocketGateway)
+```
+
+`MongoRealtimeRoute`:
+
+```ts
+type MongoRealtimeRoute = {
+  schema: string        // parsed route path from @livequery/core, e.g. 'users/:userId/posts'
+  options: RouteOptions
+}
 ```
 
 Realtime route requirements:
 
-- `method` must be `GET` or legacy method `0`.
 - `realtime` must be `true`.
+- `schema` is the parsed route path (`LivequeryRequestParser.parse(...).schema`), so the document-id segment is already stripped and each `:param` names the document field holding the parent value.
 - `collection` must be a static string. Dynamic collection, database, or connection resolver functions are skipped because database watchers must be known up front.
 - When watching a `MongoClient`, `db` or `config.databases` decides which database names to watch. When watching a `Db`, that database is used directly.
 
@@ -352,19 +365,16 @@ Disable the `collMod` call when your deployment manages pre/post images separate
 new MongodbRealtime({ enablePreAndPostImages: false })
 ```
 
-For nested collection refs, use `refFields` to map route params to document fields:
+For nested collection refs, name the route param after the document field that holds the parent value:
 
 ```ts
 {
-  method: 'GET',
-  path: '/users/:id/posts',
-  collection: 'posts',
-  realtime: true,
-  refFields: {
-    id: 'userId',
-  },
+  schema: 'users/:userId/posts',
+  options: { collection: 'posts', realtime: true },
 }
 ```
+
+If the document field is an array (one document belongs to many parents), the change is fanned out to one ref per array element, and array membership changes emit `added`/`removed` per ref.
 
 An inserted `{ _id: 'post1', userId: 'user1', title: 'Hello' }` emits:
 
@@ -425,7 +435,6 @@ type RouteOptions = {
   collection: string | ((req: LivequeryRequest) => Promise<string> | string)
   db?: string | ((req: LivequeryRequest) => Promise<string> | string)
   connection?: string | ((req: LivequeryRequest) => Promise<string> | string)
-  refFields?: Record<string, string | { field: string, array?: boolean }>
   objectIdFields?: string[]
 }
 ```
@@ -436,7 +445,6 @@ Fields:
 - `collection`: required collection name or resolver function.
 - `db`: optional database name or resolver function.
 - `connection`: optional connection name or resolver function.
-- `refFields`: optional mapping from nested route params to document fields for realtime ref formatting.
 - `objectIdFields`: top-level request fields that should be converted from valid string ids to `ObjectId`.
 
 Use function values when tenant, database, or collection depends on request keys.

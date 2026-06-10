@@ -1,4 +1,4 @@
-import { ObjectId } from 'bson'
+import { ObjectId } from 'mongodb'
 
 type AggregateResponse = any[]
 
@@ -85,7 +85,7 @@ export function baseRequest(overrides: Record<string, any> = {}) {
         ref: 'items',
         is_collection: true,
         keys: {},
-        options: {},
+        query: {},
         ...overrides,
     }
 }

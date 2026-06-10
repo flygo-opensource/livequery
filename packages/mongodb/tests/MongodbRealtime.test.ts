@@ -66,7 +66,7 @@ describe('MongodbRealtime', () => {
 
         const result = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
-            [{ method: 'GET', path: '/products', collection: 'products', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ))
 
         await waitFor(() => products.watchCalls.length > 0)
@@ -98,7 +98,7 @@ describe('MongodbRealtime', () => {
 
         const result = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
-            [{ method: 0, path: '/products', options: { collection: 'products', realtime: true } }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ))
 
         await waitFor(() => products.watchCalls.length > 0)
@@ -121,7 +121,7 @@ describe('MongodbRealtime', () => {
         expect(products.db.commandCalls).toEqual([])
     })
 
-    test('formats nested refs through route refFields', async () => {
+    test('formats nested refs from path param fields', async () => {
         const posts = createWatchableCollection('posts')
         const db = createDb({ posts })
         const realtime = new MongodbRealtime({ enablePreAndPostImages: false })
@@ -129,11 +129,8 @@ describe('MongodbRealtime', () => {
         const results = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
             [{
-                method: 'GET',
-                path: '/users/:id/posts',
-                collection: 'posts',
-                realtime: true,
-                refFields: { id: 'userId' },
+                schema: 'users/:userId/posts',
+                options: { collection: 'posts', realtime: true },
             }]
         ).pipe(take(1), toArray()))
 
@@ -158,7 +155,7 @@ describe('MongodbRealtime', () => {
 
         const result = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
-            [{ method: 'GET', path: '/products', collection: 'products', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ))
 
         await waitFor(() => products.watchCalls.length > 0)
@@ -175,6 +172,32 @@ describe('MongodbRealtime', () => {
         })
     })
 
+    test('delete without pre-image falls back to documentKey for the removed id', async () => {
+        const products = createWatchableCollection('products')
+        const db = createDb({ products })
+        const realtime = new MongodbRealtime({ enablePreAndPostImages: false })
+
+        const result = firstValueFrom(realtime.watch(
+            { connections: { default: db as any } },
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
+        ))
+
+        await waitFor(() => products.watchCalls.length > 0)
+        // No fullDocumentBeforeChange: collections without changeStreamPreAndPostImages
+        // only get documentKey on delete events.
+        products.stream.emit('change', {
+            operationType: 'delete',
+            ns: { db: 'main', coll: 'products' },
+            documentKey: { _id: 'p9' },
+        })
+
+        expect(await result).toEqual({
+            ref: 'products',
+            type: 'removed',
+            data: { id: 'p9' },
+        })
+    })
+
     test('maps replace events to modified changes', async () => {
         const products = createWatchableCollection('products')
         const db = createDb({ products })
@@ -182,7 +205,7 @@ describe('MongodbRealtime', () => {
 
         const result = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
-            [{ method: 'GET', path: '/products', collection: 'products', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ))
 
         await waitFor(() => products.watchCalls.length > 0)
@@ -209,11 +232,10 @@ describe('MongodbRealtime', () => {
         realtime.watch(
             { connections: { default: db as any } },
             [
-                { method: 'POST', path: '/products', collection: 'products', realtime: true },
-                { method: 'GET', path: '/drafts', collection: 'products', realtime: false },
-                { method: 'GET', path: '/dynamic-collection', collection: (() => 'products') as any, realtime: true },
-                { method: 'GET', path: '/dynamic-db', collection: 'products', db: (() => 'main') as any, realtime: true },
-                { method: 'GET', path: '/dynamic-connection', collection: 'products', connection: (() => 'default') as any, realtime: true },
+                { schema: 'drafts', options: { collection: 'products', realtime: false } },
+                { schema: 'dynamic-collection', options: { collection: (() => 'products') as any, realtime: true } },
+                { schema: 'dynamic-db', options: { collection: 'products', db: (() => 'main') as any, realtime: true } },
+                { schema: 'dynamic-connection', options: { collection: 'products', connection: (() => 'default') as any, realtime: true } },
             ]
         ).subscribe(value => emissions.push(value))
 
@@ -234,7 +256,7 @@ describe('MongodbRealtime', () => {
 
         const sub = realtime.watch(
             { connections: { default: client as any }, databases: ['main', 'archive'] },
-            [{ method: 'GET', path: '/products', collection: 'products', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ).subscribe()
 
         await waitFor(() => mainProducts.watchCalls.length > 0 && archiveProducts.watchCalls.length > 0)
@@ -253,7 +275,7 @@ describe('MongodbRealtime', () => {
 
         const sub = realtime.watch(
             { connections: { default: client as any }, databases: ['main', 'archive'] },
-            [{ method: 'GET', path: '/products', collection: 'products', db: 'tenant', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', db: 'tenant', realtime: true } }]
         ).subscribe()
 
         await waitFor(() => tenantProducts.watchCalls.length > 0)
@@ -271,11 +293,8 @@ describe('MongodbRealtime', () => {
         const results = firstValueFrom(realtime.watch(
             { connections: { default: db as any } },
             [{
-                method: 'GET',
-                path: '/users/:id/posts',
-                collection: 'posts',
-                realtime: true,
-                refFields: { id: { field: 'userIds', array: true } },
+                schema: 'users/:userIds/posts',
+                options: { collection: 'posts', realtime: true },
             }]
         ).pipe(take(3), toArray()))
 
@@ -317,7 +336,7 @@ describe('MongodbRealtime', () => {
 
         const sub = realtime.watch(
             { connections: { default: db as any } },
-            [{ method: 'GET', path: '/products', collection: 'products', realtime: true }]
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
         ).subscribe()
 
         await waitFor(() => products.watchCalls.length > 0)

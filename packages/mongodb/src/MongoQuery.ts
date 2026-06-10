@@ -1,6 +1,6 @@
-import type { LivequeryBaseEntity, LivequeryRequest, FilterConditions } from "./types.js"
+import type { LivequeryBaseEntity, LivequeryRequest, FilterConditions } from "@livequery/core"
 import { Cursor } from "./Cursor.js"
-import { ObjectId } from "bson";
+import { ObjectId } from "mongodb";
 import type { Collection } from "mongodb";
 
 export class MongoQuery {
@@ -96,6 +96,23 @@ export class MongoQuery {
         return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     }
 
+    // Convert a hex string to an ObjectId, throwing a 400 (not a 500) that names the
+    // offending field when the value is not a valid ObjectId.
+    static #objectId(field: string, value: unknown): ObjectId {
+        if (typeof value != 'string' || !ObjectId.isValid(value)) {
+            throw { status: 400, code: 'INVALID_OBJECT_ID', message: `Invalid ObjectId for field "${field}": ${JSON.stringify(value)}` }
+        }
+        return ObjectId.createFromHexString(value)
+    }
+
+    static #parse_cursor(token: string) {
+        try {
+            return Cursor.parse(token)
+        } catch {
+            throw { status: 400, code: 'INVALID_CURSOR', message: 'Invalid pagination cursor' }
+        }
+    }
+
     static #parse_array(value: unknown) {
         if (Array.isArray(value)) return value
         if (typeof value != 'string') return []
@@ -111,7 +128,7 @@ export class MongoQuery {
 
 
         const parsed = Object
-            .entries(req.options)
+            .entries(req.query)
             .map(([key, v], index) => {
                 if (!key.startsWith('::')) return []
 
@@ -270,7 +287,7 @@ export class MongoQuery {
                     'eq-oid': () => ({ $eq: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
                     'neq-oid': () => ({ $ne: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
                 }
-                const fn = map[expression || 'eq']
+                const fn = map[expression as keyof typeof map || 'eq' as keyof typeof map]
                 if (!fn) return p
                 return {
                     ...p,
@@ -306,12 +323,12 @@ export class MongoQuery {
     }
 
     static #build_search_query<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
-        const search = req.options[":search"]
+        const search = req.query[":search"]
         return search ? [{ $match: { $text: { $search: `${search}` } } }] : []
     }
 
     static #get_limit<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
-        const l = Number(req.options[':limit'])
+        const l = Number(req.query[':limit'])
         if (isNaN(l)) return 10
         if (l < 1) return 1
         if (l > 100) return 100
@@ -328,15 +345,22 @@ export class MongoQuery {
         ]
     }
 
+    static #topn_sorter($sort: { [key: string]: number }) {
+        return Object.entries($sort).reduce((p, [key, order]) => ({
+            ...p,
+            [key == '_id' ? 'id' : key]: order
+        }), {} as { [key: string]: number })
+    }
+
     static #build_cursor_query<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: LivequeryRequest<T>, reverse: boolean = false) {
         const limit = this.#get_limit(req)
-        const after = req.options[':after']
-        const before = req.options[':before']
-        const around = req.options[':around']
+        const after = req.query[':after']
+        const before = req.query[':before']
+        const around = req.query[':around']
 
 
         const pagination_token = around || before || after
-        const cursor = pagination_token ? Cursor.parse(pagination_token) : (reverse ? null : {})
+        const cursor = pagination_token ? this.#parse_cursor(pagination_token) : (reverse ? null : {})
 
         if (!cursor) return [{ $limit: 1 }, { $match: { _id: 0 } }]
 
@@ -377,7 +401,7 @@ export class MongoQuery {
                         items: {
                             [reverse ? '$bottomN' : '$topN']: {
                                 n: limit,
-                                sortBy: {},
+                                sortBy: this.#topn_sorter($sort),
                                 output: "$$ROOT"
                             }
                         }
@@ -398,7 +422,7 @@ export class MongoQuery {
 
     static #build_cursor_paging<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: LivequeryRequest<T>) {
 
-        if (req.options[':after'] || req.options[':before'] || req.options[':around']) {
+        if (req.query[':after'] || req.query[':before'] || req.query[':around']) {
             // Is cursor request, get items only
 
 
@@ -456,7 +480,7 @@ export class MongoQuery {
 
     static #build_offset_paging<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
         const limit = this.#get_limit(req)
-        const page = Math.max(1, Math.floor(Number(req.options[':page'])) || 1)
+        const page = Math.max(1, Math.floor(Number(req.query[':page'])) || 1)
         const skip = (page - 1) * limit
         const { pipelines, summary } = this.#parse_summary(req)
 
@@ -501,13 +525,13 @@ export class MongoQuery {
             ":page": _page,
             ":search": search,
             ...rest
-        } = req.options
+        } = req.query
         return this.#parse_conditions({ ...rest, ...req.keys })
     }
 
     static #get_sorter<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
         let default_sort = -1
-        const $sort = Object.entries(req.options).reduce((p, [k, order]) => {
+        const $sort = Object.entries(req.query).reduce((p, [k, order]) => {
             if (!k.endsWith(':sort')) return p
             const by = k.split(':sort')[0]
             const key = by == 'id' ? '_id' : by
@@ -536,7 +560,7 @@ export class MongoQuery {
                 {
                     $match: {
                         ...req.keys,
-                        ...req.keys.id ? { id: undefined, _id: ObjectId.createFromHexString(req.keys.id) } : {}
+                        ...req.keys.id ? { id: undefined, _id: this.#objectId('id', req.keys.id) } : {}
                     }
                 },
                 ...this.#rename_id(),
@@ -558,7 +582,7 @@ export class MongoQuery {
             }
         }
 
-        const is_cursor_paging = req.options[':after'] || req.options[':before'] || req.options[':around'] || !req.options[':page']
+        const is_cursor_paging = req.query[':after'] || req.query[':before'] || req.query[':around'] || !req.query[':page']
 
         const $sort = this.#get_sorter(req)
 

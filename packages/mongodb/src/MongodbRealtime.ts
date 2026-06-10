@@ -1,29 +1,25 @@
 import type { ChangeStream, Collection, Db, MongoClient } from 'mongodb'
 import { EMPTY, Observable, from, map, mergeAll, mergeMap, retry } from 'rxjs'
-import type { LivequeryBaseEntity, WebsocketSyncPayload } from './types.js'
+import type { UpdatedData } from '@livequery/core'
 import type { MongoDatasourceConfig, RouteOptions } from './MongoDatasource.js'
 
 export type MongoRealtimeChangeType = 'added' | 'modified' | 'removed'
-
-export type MongoRealtimeRefField = string | {
-    field: string
-    array?: boolean
-}
 
 export type MongoRealtimeOptions = {
     enablePreAndPostImages?: boolean
 }
 
 export type MongoRealtimeRoute = {
-    path: string
-    method: string | number
-    options?: RouteOptions
-    config?: RouteOptions
-} & Partial<RouteOptions>
+    // Route path parsed by @livequery/core's LivequeryRequestParser (`parse(...).schema`):
+    // document-id segment already stripped, e.g. 'users/:userId/posts'.
+    schema: string
+    options: RouteOptions
+}
 
 type MongoDocumentChange = {
     operationType: string
     ns: { db: string, coll: string }
+    documentKey?: { _id: unknown }
     fullDocumentBeforeChange?: Record<string, any>
     fullDocument?: Record<string, any>
     updateDescription?: {
@@ -32,18 +28,17 @@ type MongoDocumentChange = {
     }
 }
 
-type DatabaseEvent<T extends LivequeryBaseEntity = LivequeryBaseEntity> = {
+type DatabaseEvent = {
     table: string
     type: MongoRealtimeChangeType
-    new_data?: T
-    old_data?: T
+    new_data?: Record<string, any>
+    old_data?: Record<string, any>
     fields: Set<string>
 }
 
 type RefMetadata = {
     collection: string
     field?: string
-    array?: boolean
 }
 
 type WatchSource = {
@@ -62,7 +57,7 @@ const changeTypes: Record<string, MongoRealtimeChangeType | undefined> = {
 export class MongodbRealtime {
     constructor(private options: MongoRealtimeOptions = {}) { }
 
-    #reformatId<T extends LivequeryBaseEntity>(obj: Record<string, any> | undefined): T | undefined {
+    #reformatId(obj: Record<string, any> | undefined): Record<string, any> | undefined {
         if (!obj) return undefined
         const { _id, __v, id, ...rest } = obj
         return {
@@ -71,18 +66,7 @@ export class MongodbRealtime {
                 if (key.startsWith('_')) return acc
                 return { ...acc, [key]: value }
             }, {}),
-        } as T
-    }
-
-    #isGetRoute(method: string | number) {
-        return method === 0 || String(method).toUpperCase() === 'GET'
-    }
-
-    #getRouteOptions(route: MongoRealtimeRoute): RouteOptions | undefined {
-        if (route.options) return route.options
-        if (route.config) return route.config
-        const { method: _method, path: _path, options: _options, config: _config, ...options } = route
-        return options.collection ? options as RouteOptions : undefined
+        }
     }
 
     #isDb(connection: MongoClient | Db): connection is Db {
@@ -98,8 +82,8 @@ export class MongodbRealtime {
         const sources = new Map<string, WatchSource>()
 
         for (const route of routes) {
-            const options = this.#getRouteOptions(route)
-            if (!options?.realtime || !this.#isGetRoute(route.method)) continue
+            const options = route.options
+            if (!options?.realtime) continue
             if (typeof options.collection != 'string') continue
             if (typeof options.connection == 'function' || typeof options.db == 'function') continue
 
@@ -120,7 +104,7 @@ export class MongodbRealtime {
         return [...sources.values()]
     }
 
-    #listenRawChanges<T extends LivequeryBaseEntity>(
+    #listenRawChanges(
         config: MongoDatasourceConfig,
         routes: MongoRealtimeRoute[]
     ) {
@@ -136,7 +120,7 @@ export class MongodbRealtime {
                         changeStreamPreAndPostImages: { enabled: true },
                     })
                 }
-                return new Observable<DatabaseEvent<T>>(observer => {
+                return new Observable<DatabaseEvent>(observer => {
                     const stream = collection.watch([], {
                         fullDocument: 'updateLookup',
                         fullDocumentBeforeChange: 'whenAvailable',
@@ -157,8 +141,11 @@ export class MongodbRealtime {
                             observer.next({
                                 table: change.ns.coll,
                                 type,
-                                new_data: this.#reformatId<T>(change.fullDocument),
-                                old_data: this.#reformatId<T>(change.fullDocumentBeforeChange),
+                                new_data: this.#reformatId(change.fullDocument),
+                                // Delete events carry no fullDocumentBeforeChange unless the
+                                // collection has pre/post images enabled (collMod privilege).
+                                // Fall back to documentKey so `removed` always carries an id.
+                                old_data: this.#reformatId(change.fullDocumentBeforeChange ?? change.documentKey),
                                 fields,
                             })
                         })
@@ -174,26 +161,22 @@ export class MongodbRealtime {
     }
 
     #routeRefMetadata(route: MongoRealtimeRoute): [string, RefMetadata[]] | undefined {
-        const options = this.#getRouteOptions(route)
-        if (!options?.realtime || !this.#isGetRoute(route.method)) return
+        const options = route.options
+        if (!options?.realtime) return
         if (typeof options.collection != 'string') return
 
-        const segments = route.path.split('/').filter(Boolean)
-        const collectionSegments = segments.length % 2 === 0 ? segments.slice(0, -1) : segments
-        const ref = collectionSegments.map(segment => segment.startsWith(':') ? '' : segment).filter(Boolean).join('/')
+        const segments = route.schema.split('/').filter(Boolean)
+        const ref = segments.filter(segment => !segment.startsWith(':')).join('/')
         if (!ref) return
 
-        const metadata = collectionSegments
+        const metadata = segments
             .map((collection, index): RefMetadata[] => {
                 if (index % 2 === 1) return []
-                const param = collectionSegments[index + 1]
+                const param = segments[index + 1]
                 if (!param?.startsWith(':')) return [{ collection }]
 
-                const paramName = param.slice(1)
-                const mapped = options.refFields?.[paramName] || paramName
-                const field = typeof mapped == 'string' ? mapped : mapped.field
-                const array = typeof mapped == 'string' ? undefined : mapped.array
-                return [{ collection, field: field == 'id' ? '_id' : field, array }]
+                const field = param.slice(1)
+                return [{ collection, field: field == 'id' ? '_id' : field }]
             })
             .flat()
 
@@ -202,7 +185,7 @@ export class MongodbRealtime {
 
     #paths(routes: MongoRealtimeRoute[]) {
         return routes.reduce((paths, route) => {
-            const options = this.#getRouteOptions(route)
+            const options = route.options
             const entry = this.#routeRefMetadata(route)
             if (!options || !entry || typeof options.collection != 'string') return paths
 
@@ -214,7 +197,7 @@ export class MongodbRealtime {
         }, new Map<string, Map<string, RefMetadata[]>>())
     }
 
-    #format(paths: Map<string, Map<string, RefMetadata[]>>, event: DatabaseEvent): WebsocketSyncPayload[] {
+    #format(paths: Map<string, Map<string, RefMetadata[]>>, event: DatabaseEvent): UpdatedData<any>[] {
         const refs = paths.get(event.table)
         if (!refs) return []
 
@@ -243,15 +226,15 @@ export class MongodbRealtime {
             return 'modified'
         }
 
-        const buildRefs = ([{ array, collection, field }, ...fields]: RefMetadata[]): Array<{ refs: string[], type: MongoRealtimeChangeType }> => {
+        const buildRefs = ([{ collection, field }, ...fields]: RefMetadata[]): Array<{ refs: string[], type: MongoRealtimeChangeType }> => {
             if (fields.length === 0 || !field) return [{ refs: [collection], type: event.type }]
-            const values: string[] = array
-                ? Array.isArray(merged[field])
-                    ? [...new Set([
-                        ...(event.old_data?.[field]?.map((item: any) => String(item)) || []),
-                        ...(event.new_data?.[field]?.map((item: any) => String(item)) || []),
-                    ])]
-                    : ['-']
+            const oldValues = event.old_data?.[field]
+            const newValues = event.new_data?.[field]
+            const values: string[] = Array.isArray(oldValues) || Array.isArray(newValues)
+                ? [...new Set([
+                    ...(Array.isArray(oldValues) ? oldValues : []).map((item: any) => String(item)),
+                    ...(Array.isArray(newValues) ? newValues : []).map((item: any) => String(item)),
+                ])]
                 : [merged[field] ?? '-']
 
             return values.flatMap(value => {
@@ -278,7 +261,7 @@ export class MongodbRealtime {
         })
     }
 
-    watch(config: MongoDatasourceConfig, routes: MongoRealtimeRoute[]): Observable<WebsocketSyncPayload> {
+    watch(config: MongoDatasourceConfig, routes: MongoRealtimeRoute[]): Observable<UpdatedData<any>> {
         const paths = this.#paths(routes)
         if (paths.size === 0) return EMPTY
         return this.#listenRawChanges(config, routes).pipe(

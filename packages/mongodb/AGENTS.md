@@ -294,14 +294,23 @@ Fields:
 
 MongoDB change stream watcher for static realtime routes.
 
+`watch(config, routes)` takes `MongoRealtimeRoute` entries:
+
+```ts
+type MongoRealtimeRoute = {
+  schema: string        // LivequeryRequestParser.parse(...).schema, e.g. 'users/:userId/posts'
+  options: RouteOptions
+}
+```
+
 Responsibilities:
 
-- Watch GET routes with `realtime: true` and a static string `collection`.
+- Watch routes with `realtime: true` and a static string `collection`.
 - Skip routes with dynamic collection, database, or connection resolver functions.
 - Enable MongoDB pre/post images by default before opening a change stream.
 - Convert MongoDB change stream events to Livequery websocket sync payloads.
-- Format nested refs from route path params using `refFields`.
-- Support array membership refs with `{ field, array: true }`.
+- Format nested refs from `schema` params: each `:param` reads the document field of the same name (`id` maps to `_id`). The schema comes pre-parsed from `@livequery/core`, so the document-id segment is already stripped.
+- Support array membership refs automatically when the document field is an array.
 
 ## Configuration Types
 
@@ -330,7 +339,6 @@ type RouteOptions = {
   collection: string | ((req: LivequeryRequest) => Promise<string> | string)
   db?: string | ((req: LivequeryRequest) => Promise<string> | string)
   connection?: string | ((req: LivequeryRequest) => Promise<string> | string)
-  refFields?: Record<string, string | { field: string, array?: boolean }>
   objectIdFields?: string[]
 }
 ```
@@ -340,7 +348,7 @@ Rules:
 - `collection` is required.
 - `collection`, `db`, and `connection` may be strings or resolver functions.
 - Resolver functions receive the normalized adapter request.
-- `refFields` maps nested route params to document fields for realtime ref formatting.
+- Nested route params read the document field of the same name (`id` maps to `_id`); array fields fan out per element.
 - `objectIdFields` converts top-level matching fields in `req.keys` and `req.body`.
 - Nested ObjectId conversion is not implemented.
 

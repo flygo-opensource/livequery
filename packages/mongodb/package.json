@@ -6,7 +6,7 @@
     "repository": {
         "url": "git@github.com:livequery/mongodb.git"
     },
-    "version": "2.0.145",
+    "version": "2.0.149",
     "description": "MongoDB datasource mapping for @livequery ecosystem",
     "main": "./build/src/index.js",
     "types": "./build/src/index.d.ts",
@@ -26,7 +26,7 @@
         "@types/node": "^18.11.9",
         "mongodb": "^6.20.0",
         "rxjs": "*",
-        "typescript": "*" 
+        "typescript": "*"
     },
     "scripts": {
         "test": "bun test",
@@ -34,7 +34,6 @@
         "deploy": "rm -rf build && yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
     },
     "peerDependencies": {
-        "bson": "*",
         "mongodb": "^6.20.0"
     }
 }

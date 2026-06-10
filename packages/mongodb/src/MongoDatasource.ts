@@ -4,18 +4,13 @@ import type {
     LivequeryDatasource as CoreLivequeryDatasource,
     LivequeryDatasourceInitConfig
 } from '@livequery/core'
-import type { LivequeryRequest, LivequeryBaseEntity, Paging, WebsocketSyncPayload } from './types.js'
+import type { LivequeryRequest, LivequeryBaseEntity, Paging, UpdatedData } from '@livequery/core'
 import { MongoQuery } from "./MongoQuery.js";
 import type { Collection, Db, MongoClient } from 'mongodb';
-import { ObjectId } from 'bson';
+import { ObjectId } from 'mongodb';
 import { SmartCache } from './SmartCache.js';
 import { Subject } from 'rxjs';
 
-
-export type LivequeryDatasource<Config, RouteOptions> = Subject<WebsocketSyncPayload<LivequeryBaseEntity>> & {
-    init(config: Config, routes: Array<{ path: string, method: number, options: RouteOptions }>): Promise<void>
-    query: (query: LivequeryRequest, options: RouteOptions) => Promise<any>
-}
 
 export type MongoConnection = MongoClient | Db
 
@@ -24,24 +19,16 @@ export type MongoDatasourceConfig = {
     databases?: string[]
 }
 
-type LegacyRouteConfig<RouteOptions> = {
-    path: string
-    method: number | string
-    options?: RouteOptions
-    config?: RouteOptions
-}
-
 export type RouteOptions = {
     realtime?: boolean
     collection: string | ((req: LivequeryRequest) => Promise<string> | string),
     db?: string | ((req: LivequeryRequest) => Promise<string> | string),
     connection?: string | ((req: LivequeryRequest) => Promise<string> | string),
-    refFields?: Record<string, string | { field: string, array?: boolean }>
     objectIdFields?: string[]
 }
 
 
-export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseEntity>> implements LivequeryDatasource<MongoDatasourceConfig, RouteOptions>, CoreLivequeryDatasource<RouteOptions> {
+export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> implements CoreLivequeryDatasource<RouteOptions> {
 
     #collections = new SmartCache()
     public readonly refs = new Map<string, Set<string>>()
@@ -54,29 +41,17 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
         this.routes = new Map()
     }
 
-    async init(routes: Array<LivequeryDatasourceInitConfig<RouteOptions>>): Promise<void>
-    async init(config: MongoDatasourceConfig, routes: Array<LegacyRouteConfig<RouteOptions>>): Promise<void>
-    async init(
-        configOrRoutes: MongoDatasourceConfig | Array<LivequeryDatasourceInitConfig<RouteOptions>>,
-        maybeRoutes?: Array<LegacyRouteConfig<RouteOptions>>
-    ): Promise<void> {
-        const routes = Array.isArray(configOrRoutes)
-            ? configOrRoutes
-            : maybeRoutes || []
-
-        if (!Array.isArray(configOrRoutes)) {
-            this.config = configOrRoutes
-        }
-
+    async init(routes: Array<LivequeryDatasourceInitConfig<RouteOptions>>): Promise<void> {
         this.routes = routes.reduce((p, c) => {
-            const options = this.#getRouteOptions(c)
-            if (!options.collection) return p
+            const { method, path, ...options } = c
+            const routeOptions = options as RouteOptions
+            if (!routeOptions.collection) return p
 
             const key = this.#routeKey(c.method, c.path)
             const set = p.get(key) || p.get(c.path)
-            if (set && set.collection != options.collection) throw new Error('Collection mismatch for route path "' + c.path + '"')
-            p.set(key, options)
-            p.set(c.path, options)
+            if (set && set.collection != routeOptions.collection) throw new Error('Collection mismatch for route path "' + c.path + '"')
+            p.set(key, routeOptions)
+            p.set(c.path, routeOptions)
             return p
         }, new Map<string, RouteOptions>())
     }
@@ -103,15 +78,6 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
         throw { status: 500, code: 'INVAILD_METHOD', message: 'Invaild method' }
     }
 
-    #getRouteOptions(route: LegacyRouteConfig<RouteOptions> | LivequeryDatasourceInitConfig<RouteOptions>) {
-        const legacy = route as LegacyRouteConfig<RouteOptions>
-        if (legacy.options) return legacy.options
-        if (legacy.config) return legacy.config
-
-        const { method, path, ...options } = route as LivequeryDatasourceInitConfig<RouteOptions>
-        return options as RouteOptions
-    }
-
     #getOptions(ctx: LivequeryContext) {
         const routePath = ctx.request.ref || ctx.request.path
         const options = this.routes.get(this.#routeKey(ctx.request.method, routePath)) || this.routes.get(routePath)
@@ -132,24 +98,21 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
             is_collection: !livequery.document_id,
             collection_ref: livequery.collection_ref,
             schema_collection_ref: livequery.schema_collection_ref,
-            doc_id: livequery.document_id,
+            document_id: livequery.document_id,
             keys: livequery.keys || {},
             query: livequery.query || {},
-            options: livequery.query || {},
             method: livequery.method?.toLowerCase(),
             body: livequery.body,
         }
     }
 
     #normalizeRequest(req: LivequeryRequest): LivequeryRequest {
-        const options = req.options || req.query || {}
+        const query = req.query || {}
         return {
             ...req,
             keys: req.keys || {},
-            query: req.query || options,
-            options,
+            query,
             is_collection: typeof req.is_collection == 'boolean' ? req.is_collection : !req.document_id,
-            doc_id: req.doc_id || req.document_id,
             method: req.method?.toLowerCase(),
         }
     }
@@ -187,8 +150,8 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
         const paging: Paging = {
 
             cursor: {
-                last: Cursor.caculate(items[items.length - 1] as T, req.options),
-                first: Cursor.caculate(items[0] as T, req.options)
+                last: Cursor.caculate(items[items.length - 1] as T, req.query),
+                first: Cursor.caculate(items[0] as T, req.query)
             },
             has,
             count: {
@@ -271,7 +234,7 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
         const keys = req.keys || {}
         const isPlainBody = req.body && typeof req.body === 'object'
             && !Object.keys(req.body).some(k => k.startsWith('$'))
-        const id = keys.id ?? req.doc_id
+        const id = keys.id ?? req.document_id
         return {
             ...keys,
             ...isPlainBody ? req.body : {},
@@ -284,12 +247,21 @@ export class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseE
             return {
                 ...p,
                 ...k == 'id' ? {
-                    _id: ObjectId.createFromHexString(req.keys.id)
+                    _id: this.#objectId('id', req.keys.id)
                 } : {
                     [k]: c
                 }
             }
         }, {} as { [key: string]: any })
+    }
+
+    // Validate + convert a hex string to an ObjectId, reporting which field is bad as
+    // a 400 instead of letting bson throw an opaque 500.
+    #objectId(field: string, value: unknown): ObjectId {
+        if (typeof value != 'string' || !ObjectId.isValid(value)) {
+            throw { status: 400, code: 'INVALID_OBJECT_ID', message: `Invalid ObjectId for field "${field}": ${JSON.stringify(value)}` }
+        }
+        return ObjectId.createFromHexString(value)
     }
 
     #update(body: any) {

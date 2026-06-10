@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ObjectId } from 'bson'
+import { ObjectId } from 'mongodb'
 import { MongoQuery } from '../src/MongoQuery.js'
 import { baseRequest, collectionReadResponse, createMockCollection } from './helpers.js'
 
@@ -10,7 +10,7 @@ describe('MongoQuery.query', () => {
 
         const response = await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     status: 'active',
                     'price:gte': '10',
                     'ownerId:eq-oid': ownerId,
@@ -38,12 +38,22 @@ describe('MongoQuery.query', () => {
         expect(pipeline[4].$facet).toBeDefined()
     })
 
+    test('cursor paging uses a non-empty topN sortBy after _id is projected to id', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(baseRequest(), collection as any)
+
+        const facetStage = collection.aggregateCalls[0].find((s: any) => s.$facet)
+        const groupStage = facetStage.$facet.next.find((s: any) => s.$group)
+        expect(groupStage.$group.items.$topN.sortBy).toEqual({ id: -1 })
+    })
+
     test('clamps limit to the supported range', async () => {
         const collection = createMockCollection('products', collectionReadResponse())
 
-        expect((await MongoQuery.query(baseRequest({ options: { ':limit': '0' } }), collection as any)).limit).toBe(1)
-        expect((await MongoQuery.query(baseRequest({ options: { ':limit': '101' } }), collection as any)).limit).toBe(100)
-        expect((await MongoQuery.query(baseRequest({ options: { ':limit': 'x' } }), collection as any)).limit).toBe(10)
+        expect((await MongoQuery.query(baseRequest({ query: { ':limit': '0' } }), collection as any)).limit).toBe(1)
+        expect((await MongoQuery.query(baseRequest({ query: { ':limit': '101' } }), collection as any)).limit).toBe(100)
+        expect((await MongoQuery.query(baseRequest({ query: { ':limit': 'x' } }), collection as any)).limit).toBe(10)
     })
 
     test('builds in and nin filters from JSON strings or arrays', async () => {
@@ -52,7 +62,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     'status:in': '["active","pending"]',
                     'category:nin': '["archived"]',
                 },
@@ -62,7 +72,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     'status:in': ['active', 'pending'],
                     'category:nin': ['archived'],
                 },
@@ -107,7 +117,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     ':or': { status: 'active', 'role:eq': 'admin' },
                 },
             }),
@@ -129,7 +139,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     ':not': { status: 'archived' },
                 },
             }),
@@ -150,7 +160,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     ':and': { 'price:gte': '10', status: 'active' },
                 },
             }),
@@ -170,7 +180,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     status: 'active',
                     ':or': { 'role:eq': 'admin', 'level:gte': '5' },
                 },
@@ -192,7 +202,7 @@ describe('MongoQuery.query', () => {
         const collection = createMockCollection('products', collectionReadResponse())
 
         await MongoQuery.query(
-            baseRequest({ options: { 'name:like': 'a.b+c' } }),
+            baseRequest({ query: { 'name:like': 'a.b+c' } }),
             collection as any
         )
 
@@ -210,7 +220,7 @@ describe('MongoQuery.query', () => {
         }])
 
         await MongoQuery.query(
-            baseRequest({ options: { ':page': '2', ':limit': '10' } }),
+            baseRequest({ query: { ':page': '2', ':limit': '10' } }),
             collection as any
         )
 
@@ -224,7 +234,7 @@ describe('MongoQuery.query', () => {
 
         await MongoQuery.query(
             baseRequest({
-                options: {
+                query: {
                     '::totals': 'category|sum(price)|avg(price)|count()',
                 },
             }),

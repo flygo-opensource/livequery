@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { LivequeryRequestParser } from '@livequery/core'
-import { ObjectId } from 'bson'
+import { ObjectId } from 'mongodb'
 import { MongoDatasource } from '../src/MongoDatasource.js'
 import { baseRequest, collectionReadResponse, createMockClient, createMockCollection, createMockDb } from './helpers.js'
 
@@ -11,14 +11,14 @@ describe('MongoDatasource core integration', () => {
         const datasource = new MongoDatasource({ connections: { default: db as any } })
 
         await datasource.init([
-            { method: 'GET', path: '/products', collection: 'products' },
+            { method: 'GET', path: '/livequery/products', collection: 'products' },
         ])
 
         const ctx: any = {
             request: {
                 method: 'GET',
-                path: '/products',
-                ref: '/products',
+                path: '/livequery/products',
+                ref: '/livequery/products',
                 params: {},
                 query: { ':limit': 10 },
                 headers: new Map(),
@@ -42,14 +42,14 @@ describe('MongoDatasource core integration', () => {
         })
 
         await datasource.init([
-            { method: 'GET', path: '/products/:id', collection: 'products' },
+            { method: 'GET', path: '/livequery/products/:id', collection: 'products' },
         ])
 
         const ctx: any = {
             request: {
                 method: 'GET',
-                path: `/products/${id}`,
-                ref: '/products/:id',
+                path: `/livequery/products/${id}`,
+                ref: '/livequery/products/:id',
                 params: { id },
                 query: {},
                 headers: new Map(),
@@ -139,18 +139,17 @@ describe('MongoDatasource core integration', () => {
     })
 })
 
-describe('MongoDatasource legacy query and writes', () => {
-    test('legacy init(config, routes) supports direct query reads', async () => {
+describe('MongoDatasource query and writes', () => {
+    test('init(routes) supports direct query reads', async () => {
         const products = createMockCollection('products', collectionReadResponse([{ id: '1', name: 'phone' }]))
-        const datasource = new MongoDatasource()
+        const datasource = new MongoDatasource({ connections: { default: createMockDb({ products }) as any } })
 
-        await datasource.init(
-            { connections: { default: createMockDb({ products }) as any } },
-            [{ method: 'GET', path: '/products', options: { collection: 'products' } }]
-        )
+        await datasource.init([
+            { method: 'GET', path: '/products', collection: 'products' },
+        ])
 
         const response = await datasource.query(
-            baseRequest({ options: { ':limit': 5 } }) as any,
+            baseRequest({ query: { ':limit': 5 } }) as any,
             { collection: 'products' }
         )
 
