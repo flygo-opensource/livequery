@@ -54,6 +54,7 @@ bun test hono-mongodb-crud.e2e.test.ts   # single file
 | `realtime-self-emit` | `gateway.next()` thủ công, `gateway.link()` pipe, doc-level subscription, unsubscribe |
 | `realtime-nested-ref` | Fan-out `users/:userId/posts`, array membership added/removed với Mongo thật |
 | `gateway-multinode` | 2 gateway bridge nhau: sync route xuyên node về client |
+| `gateway-rotation` | Client WS@A, HTTP rotate qua 2 ApiGatewayHandler → service node: sub luôn trỏ đúng gateway của client (x-lgid), mutations qua proxy nhận realtime đúng 1 lần |
 | `react-fullstack` | useCollection/useDocument/useObservable/useAction với backend thật (react-test-renderer) |
 | `rpc-livequery-bridge` | Collection sống ở "worker", stream qua WorkerManager/ServiceLinker về UI |
 | `rest-mongodb-nestjs-realtime` | REST client → NestJS → MongoDatasource + MongodbRealtime (legacy suite) |
