@@ -10,7 +10,7 @@ import { Controller, Delete, Get, Module, Patch, Post, Req } from '../../nestjs/
 import { NestFactory } from '../../nestjs/node_modules/@nestjs/core/index.js'
 import { ExpressAdapter } from '../../nestjs/node_modules/@nestjs/platform-express/index.js'
 
-import { WebsocketGateway, WEBSOCKET_PATH, hidePrivateFields } from '../../core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../../core/build/src/index.js'
 import { nodeRequestToWebRequest } from '../../core/build/src/helpers/nodeRequestToWebRequest.js'
 import { writeWebResponse } from '../../core/build/src/helpers/writeWebResponse.js'
 import { createLivequery, createDatasourceMapper, getLivequeryRequest, livequeryJson, mapLivequeryResponse } from '../../honojs/src/index.js'
@@ -200,12 +200,8 @@ export async function buildNestMongoApp(options: BuildAppOptions): Promise<AppHa
             livequery: req.livequery,
         }
         if (req.method === 'GET') gateway.handle(ctx as any)
-        const result: any = await datasource.handle(ctx as any)
-        // Private-field hiding is the responsibility of user code in this convention
-        // (the interceptor only covers bare `response.item`).
-        if (result?.items) return { ...result, items: result.items.map((item: any) => hidePrivateFields(item)) }
-        if (result?.item) return { ...result, item: hidePrivateFields(result.item) }
-        return result
+        // Private-field hiding is handled by LivequeryInterceptor (item/items/data shapes).
+        return await datasource.handle(ctx as any)
     }
 
     class TaskController {
