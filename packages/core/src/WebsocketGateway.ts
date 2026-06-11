@@ -39,7 +39,7 @@ export class WebsocketGateway extends WebsocketGatewayBase {
      */
     attach(server: HttpServer): this {
         this.#detachServer()
-        this.#wss = new WebSocketServer({ server, path: WEBSOCKET_PATH })
+        this.#wss = new WebSocketServer({ server, path: WEBSOCKET_PATH, perMessageDeflate: false })
         this.#httpServer = server
         this.#patchHttpServerClose(server)
 

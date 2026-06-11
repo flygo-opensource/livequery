@@ -1,60 +1,60 @@
 {
-    "name": "@livequery/core",
-    "author": "Duong Van Ba",
-    "license": "MIT",
-    "repository": {
-        "url": "git@github.com:livequery/core.git"
+  "name": "@livequery/core",
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "repository": {
+    "url": "git@github.com:livequery/core.git"
+  },
+  "version": "2.0.150",
+  "description": "Framework-agnostic core utilities for @livequery ecosystem",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/**/*",
+    "LIVEQUERY_SPEC.md"
+  ],
+  "scripts": {
+    "test": "bun test tests/",
+    "build": "tsc -b .",
+    "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
     },
-    "version": "2.0.149",
-    "description": "Framework-agnostic core utilities for @livequery ecosystem",
-    "main": "./build/src/index.js",
-    "types": "./build/src/index.d.ts",
-    "files": [
-        "build/**/*",
-        "LIVEQUERY_SPEC.md"
-    ],
-    "scripts": {
-        "test": "bun test tests/",
-        "build": "tsc -b .",
-        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    "./node": {
+      "import": {
+        "types": "./build/src/node.d.ts",
+        "default": "./build/src/node.js"
+      }
     },
-    "exports": {
-        ".": {
-            "import": {
-                "types": "./build/src/index.d.ts",
-                "default": "./build/src/index.js"
-            }
-        },
-        "./node": {
-            "import": {
-                "types": "./build/src/node.d.ts",
-                "default": "./build/src/node.js"
-            }
-        },
-        "./bun": {
-            "import": {
-                "types": "./build/src/bun.d.ts",
-                "default": "./build/src/bun.js"
-            }
-        },
-        "./workers": {
-            "import": {
-                "types": "./build/src/workers.d.ts",
-                "default": "./build/src/workers.js"
-            }
-        }
+    "./bun": {
+      "import": {
+        "types": "./build/src/bun.d.ts",
+        "default": "./build/src/bun.js"
+      }
     },
-    "type": "module",
-    "devDependencies": {
-        "@types/bun": "latest",
-        "@types/node": "x",
-        "@types/ws": "^8",
-        "hono": "^4.12.21",
-        "typescript": "^5.1.6"
-    },
-    "dependencies": {
-        "rxjs": "x",
-        "msgpackr": "^1.11.9",
-        "ws": "^8.18.0"
+    "./workers": {
+      "import": {
+        "types": "./build/src/workers.d.ts",
+        "default": "./build/src/workers.js"
+      }
     }
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "x",
+    "@types/ws": "^8",
+    "hono": "^4.12.21",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "rxjs": "x",
+    "msgpackr": "^1.11.9",
+    "ws": "^8.18.0"
+  }
 }
