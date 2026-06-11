@@ -1,51 +1,51 @@
 {
-    "name": "@livequery/nestjs",
-    "author": "Duong Van Ba",
-    "license": "MIT",
-    "repository": {
-        "url": "git@github.com:livequery/nestjs.git"
-    },
-    "version": "2.0.149",
-    "description": "Nestjs decorators for @livequery ecosystem",
-    "main": "./build/src/index.js",
-    "types": "./build/src/index.d.ts",
-    "files": [
-        "build/**/*"
-    ],
-    "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1",
-        "build": "tsc -b .",
-        "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
-    },
-    "exports": {
-        ".": {
-            "import": {
-                "types": "./build/src/index.d.ts",
-                "default": "./build/src/index.js"
-            }
-        }
-    },
-    "type": "module",
-    "devDependencies": {
-        "@livequery/core": "file:../core",
-        "@nestjs/platform-express": "^11.1.19",
-        "@types/express": "x",
-        "@types/node": "x",
-        "@types/ws": "^8.5.10",
-        "rxjs": "x",
-        "tslib": "^2.6.1",
-        "typescript": "^5.1.6"
-    },
-    "peerDependencies": {
-        "reflect-metadata": "x",
-        "@livequery/core": "^2.0.149",
-        "@nestjs/core": "*",
-        "@nestjs/common": "*",
-        "@nestjs/platform-ws": "^11.0.10",
-        "@nestjs/websockets": "^10.3.7",
-        "express": "^4.21.2"
-    },
-    "dependencies": {
-        "msgpackr": "^1.11.9"
+  "name": "@livequery/nestjs",
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "repository": {
+    "url": "git@github.com:livequery/nestjs.git"
+  },
+  "version": "2.0.150",
+  "description": "Nestjs decorators for @livequery ecosystem",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/**/*"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc -b .",
+    "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
     }
+  },
+  "type": "module",
+  "devDependencies": {
+    "@livequery/core": "^2.0.150",
+    "@nestjs/platform-express": "^11.1.19",
+    "@types/express": "x",
+    "@types/node": "x",
+    "@types/ws": "^8.5.10",
+    "rxjs": "x",
+    "tslib": "^2.6.1",
+    "typescript": "^5.1.6"
+  },
+  "peerDependencies": {
+    "reflect-metadata": "x",
+    "@livequery/core": "^2.0.150",
+    "@nestjs/core": "*",
+    "@nestjs/common": "*",
+    "@nestjs/platform-ws": "^11.0.10",
+    "@nestjs/websockets": "^10.3.7",
+    "express": "^4.21.2"
+  },
+  "dependencies": {
+    "msgpackr": "^1.11.9"
+  }
 }
