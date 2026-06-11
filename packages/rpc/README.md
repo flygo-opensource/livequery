@@ -30,6 +30,22 @@ ServiceLinker -- RpcMessage -------> WorkerManager -> service instance
 - `ExtensionChannel` transports messages over `chrome.runtime`.
 - `WorkerService<T>` maps a worker-side service type into the client-side type.
 
+## Error Handling
+
+When a worker-side service method throws (or rejects), `WorkerManager` converts the thrown value into a structured-clone-safe `{ code, message, stack? }` before it crosses the worker boundary — `postMessage` cannot transfer a class `Error`, and a raw object would otherwise surface as `"[object Object]"`. The client rejects with that shape.
+
+The helper is exported for reuse and testing:
+
+```ts
+import { serializeError } from "@livequery/rpc"
+
+serializeError(new Error("boom"))          // → { code: "Error", message: "boom", stack: "…" }
+serializeError({ code: "E_CONN" })          // → { code: "E_CONN", message: '{"code":"E_CONN"}' }
+serializeError("nope")                      // → { code: "InternalError", message: "nope" }
+```
+
+It never throws and always returns string `code`/`message`. `code` is taken from `err.code ?? err.name ?? "InternalError"`; `message` from `err.message`, falling back to a JSON of the error's own fields (or `code` when the value is empty / circular / not serializable).
+
 ## SharedWorker Example
 
 ### 1. Define a service

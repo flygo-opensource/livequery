@@ -5,6 +5,33 @@ function isObservableLike(value: unknown): value is { pipe: (...args: any[]) => 
     return !!value && typeof value === 'object' && typeof (value as any).pipe === 'function'
 }
 
+/**
+ * Convert any thrown value into the wire-safe `{ code, message, stack }` shape.
+ *
+ * Fixes the "[object Object]" bug: the old code did `err?.message || String(err)`,
+ * so an error with an EMPTY message (e.g. a backend error `{ code, message: '' }`)
+ * fell through to `String(obj)` → "[object Object]". We now never stringify the
+ * object blindly — we surface its real fields (code/name, JSON of own props) so
+ * the main thread receives something legible. Always returns a structured-clone
+ * safe plain object, so postMessage can't throw DataCloneError on a class error.
+ */
+export function serializeError(err: any): { code: string, message: string, stack?: string } {
+    if (typeof err === 'string') return { code: 'InternalError', message: err }
+    if (err && typeof err === 'object') {
+        const code = String(err.code ?? err.name ?? 'InternalError')
+        const message = (typeof err.message === 'string' && err.message) || (() => {
+            try {
+                const json = JSON.stringify(err)
+                return json && json !== '{}' && json !== '[]' ? json : code
+            } catch {
+                return code
+            }
+        })()
+        return { code, message, stack: typeof err.stack === 'string' ? err.stack : undefined }
+    }
+    return { code: 'InternalError', message: String(err) }
+}
+
 // Prototype-chain props that must never be reachable via a client-supplied method
 // path — blocks `['constructor','constructor']` (Function constructor) and friends.
 const FORBIDDEN_PROPS = new Set(['constructor', 'prototype', '__proto__'])
@@ -82,7 +109,7 @@ export class WorkerManager {
                         ).subscribe(
                             (data: any) => respond({ data }),
                             (error: any) => respond({
-                                error,
+                                error: serializeError(error),
                                 completed: true
                             }),
                             () => respond({ completed: true })
@@ -94,11 +121,7 @@ export class WorkerManager {
                     }
                 } catch (err: any) {
                     respond({
-                        error: {
-                            code: err.code || err.name || 'InternalError',
-                            message: err?.message ||  String(err),
-                            stack: err?.stack
-                        },
+                        error: serializeError(err),
                         completed: true
                     })
                 }
