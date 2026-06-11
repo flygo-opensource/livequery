@@ -5,7 +5,7 @@
     "": {
       "name": "@livequery/mongodb",
       "devDependencies": {
-        "@livequery/core": "^2.0.150",
+        "@livequery/core": "^2.0.151",
         "@types/node": "^18.11.9",
         "mongodb": "^6.20.0",
         "rxjs": "*",
@@ -17,7 +17,7 @@
     },
   },
   "packages": {
-    "@livequery/core": ["@livequery/core@2.0.150", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-iU65k+1JLDBhh7U3DPKxv3jW2LPY7BrtVFqTWZ7lbUG7fl803IRfvaGu4ACTSd0M5UlPUHznfjLKhcrw0ZOEQg=="],
+    "@livequery/core": ["@livequery/core@2.0.151", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-K/7rBGlBr7bVtdJNqJcp8UxLQrXZcFqYWOr2RPU5HIPxnW6nG19GEXpA0yytsWUlo1YzVQzsi8O71OdaFj2CCw=="],
 
     "@mongodb-js/saslprep": ["@mongodb-js/saslprep@1.4.4", "", { "dependencies": { "sparse-bitfield": "^3.0.3" } }, "sha512-p7X/ytJDIdwUfFL/CLOhKgdfJe1Fa8uw9seJYvdOmnP9JBWGWHW69HkOixXS6Wy9yvGf1MbhcS6lVmrhy4jm2g=="],
 
