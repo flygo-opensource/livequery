@@ -5,7 +5,7 @@
     "": {
       "name": "@livequery/honojs",
       "dependencies": {
-        "@livequery/core": "^2.0.150",
+        "@livequery/core": "^2.0.151",
         "rxjs": "x",
       },
       "devDependencies": {
@@ -20,7 +20,7 @@
     },
   },
   "packages": {
-    "@livequery/core": ["@livequery/core@2.0.150", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-iU65k+1JLDBhh7U3DPKxv3jW2LPY7BrtVFqTWZ7lbUG7fl803IRfvaGu4ACTSd0M5UlPUHznfjLKhcrw0ZOEQg=="],
+    "@livequery/core": ["@livequery/core@2.0.151", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-K/7rBGlBr7bVtdJNqJcp8UxLQrXZcFqYWOr2RPU5HIPxnW6nG19GEXpA0yytsWUlo1YzVQzsi8O71OdaFj2CCw=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw=="],
 
