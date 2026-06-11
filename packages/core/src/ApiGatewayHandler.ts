@@ -4,6 +4,7 @@ import { Subscription } from 'rxjs'
 import {
     API_GATEWAY_NAMESPACE,
     LIVEQUERY_API_GATEWAY_DEBUG,
+    LIVEQUERY_GATEWAY_TIMEOUT_MS,
     LIVEQUERY_MAGIC_KEY,
     WEBSOCKET_PATH,
 } from './const.js'
@@ -16,6 +17,9 @@ type RouteHost = {
     uri: string
     node_id: string
     offlineAt?: number
+    // Why the host was isolated. 'ws' outranks 'http': it must persist until a WS
+    // reconnect, whereas 'http' isolation clears on the next proof-of-life heartbeat.
+    offlineReason?: 'ws' | 'http'
 }
 
 type RouteEntry = {
@@ -56,6 +60,9 @@ export type ApiGatewayOptions = {
     ws?: WebsocketGateway
     discovery?: UdpDiscovery<ServiceApiMetadata>
     node_id?: string
+    // Upstream-request timeout in ms. Defaults to LIVEQUERY_GATEWAY_TIMEOUT_MS
+    // (env LIVEQUERY_GATEWAY_TIMEOUT in seconds, default 30s).
+    timeoutMs?: number
 }
 
 function createNode(): RoutingNode {
@@ -77,6 +84,7 @@ export class ApiGatewayHandler {
     readonly restGateway: this = this
     readonly #root: RoutingNode = createNode()
     readonly #nodeId: string
+    readonly #timeoutMs: number
     readonly #lws?: WebsocketGateway
     readonly #discovery: UdpDiscovery<ServiceApiMetadata>
     readonly #discoverySubscription: Subscription
@@ -89,6 +97,7 @@ export class ApiGatewayHandler {
 
     constructor(private options: ApiGatewayOptions) {
         this.#nodeId = options.node_id ?? randomUUID()
+        this.#timeoutMs = options.timeoutMs ?? LIVEQUERY_GATEWAY_TIMEOUT_MS
         this.#lws = options.ws
         this.#discovery = options.discovery ?? new UdpDiscovery<ServiceApiMetadata>({ key: LIVEQUERY_MAGIC_KEY })
 
@@ -102,6 +111,9 @@ export class ApiGatewayHandler {
                 if (metadata.version <= existing.metadata.version) return
                 if (isSameServiceDefinition(existing.metadata, metadata)) {
                     existing.metadata = { ...metadata, host: existing.host }
+                    // A fresh heartbeat proves the process is alive → lift any
+                    // HTTP-triggered isolation. WS isolation stays until reconnect.
+                    this.#clearHttpOffline(metadata.node_id)
                     return
                 }
                 this.#removeService(metadata.node_id, false)
@@ -134,6 +146,7 @@ export class ApiGatewayHandler {
             const existing = node.methods[METHOD].hosts.find(h => h.node_id === node_id && h.uri === uri)
             if (existing) {
                 existing.offlineAt = undefined  // host re-announced — back online
+                existing.offlineReason = undefined
             } else {
                 node.methods[METHOD].hosts.push({ node_id, uri })
             }
@@ -219,14 +232,28 @@ export class ApiGatewayHandler {
         const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body
 
         try {
-            return await globalThis.fetch(`http://${target.uri}${url.pathname}${url.search}`, {
+            const response = await globalThis.fetch(`http://${target.uri}${url.pathname}${url.search}`, {
                 method: request.method,
                 headers,
                 body,
                 duplex: 'half',
+                signal: AbortSignal.timeout(this.#timeoutMs),
             } as RequestInit)
-        } catch {
-            target.offlineAt = Date.now()
+            // The upstream answered → it is reachable. If we were still dialing it
+            // while marked offline (e.g. a lone node we never stop calling), lift
+            // the HTTP isolation now instead of waiting for the next heartbeat.
+            if (target.offlineAt) this.#clearHttpOffline(target.node_id)
+            return response
+        } catch (err) {
+            // Either a refused/failed connection OR the request blew the timeout (a
+            // hung upstream that accepts the socket but never answers). Both mean the
+            // whole service process is effectively unreachable — isolate EVERY route
+            // it serves so subsequent requests to its other endpoints stop hitting it.
+            this.#markNodeOffline(target.node_id, 'http')
+            const name = (err as { name?: string } | undefined)?.name
+            if (name === 'TimeoutError' || name === 'AbortError') {
+                return Response.json({ error: { status: 504, code: 'SERVICE_API_TIMEOUT', message: `Upstream service at ${target.uri} did not respond within ${this.#timeoutMs}ms` } }, { status: 504 })
+            }
             return Response.json({ error: { status: 502, code: 'SERVICE_API_OFFLINE', message: `Failed to reach upstream service at ${target.uri}` } }, { status: 502 })
         }
     }
@@ -249,11 +276,19 @@ export class ApiGatewayHandler {
 
         const entry = node.methods[method.toUpperCase()]
         if (!entry) return undefined
+        if (entry.hosts.length === 0) return null
 
+        // Prefer healthy hosts. If NONE are healthy, fall back to round-robin across
+        // ALL registered hosts instead of hard-failing — an offline node is merely
+        // "registered but currently unreachable" (it may be flapping/restarting), not
+        // gone. There's no healthy alternative to protect anyway, so keep dialing them;
+        // the first that answers recovers (a successful response clears its isolation).
+        // A route only truly has nothing to serve it when its host list is empty (a node
+        // fully leaves rotation via deregister — WS retries exhausted / discovery timeout),
+        // which is the real 503 condition handled above.
         const online = entry.hosts.filter(h => !h.offlineAt)
-        if (online.length === 0) return null
-
-        const host = online[entry.rr_index % online.length]
+        const pool = online.length > 0 ? online : entry.hosts
+        const host = pool[entry.rr_index % pool.length]
         entry.rr_index++
         return host
     }
@@ -265,7 +300,7 @@ export class ApiGatewayHandler {
             ? this.#lws?.connect(
                 `ws://${host}:${port}${ws.path}`,
                 ws.auth,
-                () => this.#markNodeOffline(node_id),
+                () => this.#markNodeOffline(node_id, 'ws'),
                 () => this.#removeService(node_id, true),
                 () => this.#markNodeOnline(node_id)
             )
@@ -279,20 +314,24 @@ export class ApiGatewayHandler {
         )
     }
 
-    #markNodeOffline(node_id: string): void {
+    #markNodeOffline(node_id: string, reason: 'ws' | 'http'): void {
         const now = Date.now()
         const queue: RoutingNode[] = [this.#root]
         while (queue.length > 0) {
             const node = queue.shift()!
             for (const entry of Object.values(node.methods)) {
                 for (const host of entry.hosts) {
-                    if (host.node_id === node_id) host.offlineAt = now
+                    if (host.node_id !== node_id) continue
+                    host.offlineAt = now
+                    // 'ws' isolation outranks 'http': never let an http failure
+                    // downgrade a node that's offline because its WS link dropped.
+                    if (reason === 'ws' || host.offlineReason !== 'ws') host.offlineReason = reason
                 }
             }
             queue.push(...Object.values(node.children))
         }
         LIVEQUERY_API_GATEWAY_DEBUG && console.warn(
-            `[${new Date().toLocaleString()}] Service API offline (reconnecting): ${node_id}`
+            `[${new Date().toLocaleString()}] Service API offline (${reason}): ${node_id}`
         )
     }
 
@@ -302,7 +341,10 @@ export class ApiGatewayHandler {
             const node = queue.shift()!
             for (const entry of Object.values(node.methods)) {
                 for (const host of entry.hosts) {
-                    if (host.node_id === node_id) host.offlineAt = undefined
+                    if (host.node_id === node_id) {
+                        host.offlineAt = undefined
+                        host.offlineReason = undefined
+                    }
                 }
             }
             queue.push(...Object.values(node.children))
@@ -310,6 +352,25 @@ export class ApiGatewayHandler {
         LIVEQUERY_API_GATEWAY_DEBUG && console.info(
             `[${new Date().toLocaleString()}] Service API back online: ${node_id}`
         )
+    }
+
+    // Lift only HTTP-triggered isolation (called when a fresh heartbeat proves the
+    // process is alive). WS-triggered isolation is left untouched — only a real WS
+    // reconnect (#markNodeOnline) may clear that.
+    #clearHttpOffline(node_id: string): void {
+        const queue: RoutingNode[] = [this.#root]
+        while (queue.length > 0) {
+            const node = queue.shift()!
+            for (const entry of Object.values(node.methods)) {
+                for (const host of entry.hosts) {
+                    if (host.node_id === node_id && host.offlineReason === 'http') {
+                        host.offlineAt = undefined
+                        host.offlineReason = undefined
+                    }
+                }
+            }
+            queue.push(...Object.values(node.children))
+        }
     }
 
     #cleanupOfflineHosts(): void {

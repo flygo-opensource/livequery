@@ -312,6 +312,8 @@ It can:
 - Forward HTTP requests to online service nodes.
 - Round-robin between multiple hosts for the same route.
 - Connect to service WebSocket gateways when service metadata includes `ws`.
+- Isolate a node the instant it fails — an HTTP transport error/timeout or a dropped WS link takes the **whole node** out of rotation while a healthy node still exists — and bring it back automatically on recovery.
+- Bound a hung upstream with a configurable request timeout so one stuck service can't hold a request (and its sockets) open forever.
 
 ### When To Use It
 
@@ -324,12 +326,14 @@ new ApiGatewayHandler({
   node_id?: string
   discovery?: UdpDiscovery<ServiceApiMetadata>
   ws?: WebsocketGateway
+  timeoutMs?: number
 })
 ```
 
 - `node_id`: stable id for this gateway. A random id is used when omitted.
 - `discovery`: custom discovery instance, useful in tests or custom network setups.
 - `ws`: realtime gateway used for cross-gateway WebSocket forwarding.
+- `timeoutMs`: upstream request timeout in milliseconds. Defaults to `LIVEQUERY_GATEWAY_TIMEOUT` (in **seconds**, default `30`).
 
 ### `register(options)`
 
@@ -385,9 +389,35 @@ Unsubscribes from discovery, closes discovery sockets, disconnects service subsc
 
 ### Error Responses
 
-- Missing route: `404 { error: { status: 404, code: 'API_NOT_FOUND' } }`
-- Route exists but no host is online: `503 { error: { status: 503, code: 'API_OFFLINE' } }`
-- Forwarded service request fails: `502 { error: { status: 502, code: 'SERVICE_API_OFFLINE' } }`
+- Missing route (no method/path match): `404 { error: { status: 404, code: 'API_NOT_FOUND' } }`
+- Route is known but has **no registered host** (every node deregistered): `503 { error: { status: 503, code: 'API_OFFLINE' } }`
+- Forwarded request could not reach the upstream (connection refused/reset): `502 { error: { status: 502, code: 'SERVICE_API_OFFLINE' } }`
+- Upstream accepted the connection but did not respond within the timeout: `504 { error: { status: 504, code: 'SERVICE_API_TIMEOUT' } }`
+
+> A node that is merely *offline* (transiently unreachable but still registered) does **not** produce a `503` — the gateway keeps trying it. See **Offline Isolation & Failover**.
+
+### Offline Isolation & Failover
+
+The gateway distinguishes a node that is **offline** (registered but transiently unreachable — e.g. mid-restart) from one that is **removed** (deregistered and gone from rotation).
+
+**Detection** — a node is isolated the moment it fails:
+
+- **HTTP:** a forwarded `fetch` throws (connection refused/reset) or blows the timeout. The **whole node** is isolated — every route it serves, not only the one that failed.
+- **WebSocket:** its WS bridge drops → the node is isolated with WS precedence.
+
+**Routing** (`fetch`):
+
+- Route has **online** hosts → round-robin among them; isolated nodes are skipped.
+- **No** host online → round-robin across **all** registered hosts anyway (last resort). An offline node may just be flapping/restarting and there is no healthy alternative to protect, so the gateway keeps dialing it; the first that answers wins. A single-node route is therefore **never** hard-failed with `503`.
+- Route has **no registered host at all** → `503`.
+
+**Recovery** — isolation lifts automatically:
+
+- A successful upstream response immediately clears HTTP isolation.
+- A fresh discovery heartbeat clears HTTP isolation (proof the process is alive).
+- WS isolation clears only on a real WS **reconnect** — a heartbeat does **not** undo it. Once the WS bridge exhausts its retries the node is fully removed.
+
+**Timeout** — every forwarded request is bounded by `timeoutMs` (default 30s; env `LIVEQUERY_GATEWAY_TIMEOUT` in seconds). A hung upstream — one that accepts the socket but never answers — is aborted → `504` and isolated, instead of holding the request and its file descriptors open indefinitely.
 
 ## `ApiServiceLinker`
 
@@ -517,6 +547,8 @@ new WebsocketGateway(serverOrPort)
 
 - Pass an `http.Server` in Node.js.
 - Pass a port number in Bun runtime.
+
+> The WS server runs with `perMessageDeflate` **disabled**. Bun's native `WebSocket` client is incompatible with the `ws` server's permessage-deflate extension and closes such connections abnormally (code `1006`); disabling compression keeps gateway-to-gateway and Bun-client connections stable. Sync payloads are small JSON, so the bandwidth cost is negligible.
 
 ### Properties
 
@@ -663,6 +695,7 @@ Copies a Web `Response` into a Node.js `ServerResponse`.
 | `NODE_ID` | Runtime node id | random UUID |
 | `LIVEQUERY_API_GATEWAY_DEBUG` | Enables gateway logs | false |
 | `WEBSOCKET_PATH` | Realtime WebSocket path | `/livequery/realtime-updates` |
+| `LIVEQUERY_GATEWAY_TIMEOUT` | Gateway upstream-request timeout, in **seconds** (non-positive/invalid → default) | `30` |
 
 ## Example: Service Process
 
@@ -740,6 +773,7 @@ UDP_WHITELIST_ADDRESS=192.168.1
 REALTIME_UPDATE_SOCKET_PATH=/livequery/realtime-updates
 LIVEQUERY_API_GATEWAY_DEBUG=1
 LIVEQUERY_UDP_DEBUG=1
+LIVEQUERY_GATEWAY_TIMEOUT=30
 ```
 
 `UDP_WHITELIST_ADDRESS` accepts:

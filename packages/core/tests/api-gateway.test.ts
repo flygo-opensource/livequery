@@ -258,7 +258,7 @@ describe('ApiGatewayHandler', () => {
         })
     })
 
-    test('deregisters a host after fetch fails and reports the route offline', async () => {
+    test('keeps dialing a route served by a single node even after it fails (no hard 503)', async () => {
         const discovery = createDiscovery()
         const gateway = new ApiGatewayHandler({ discovery, node_id: 'gateway' })
         const service = await startService('offline')
@@ -275,10 +275,12 @@ describe('ApiGatewayHandler', () => {
         const second = await gateway.fetch(new Request('http://gateway/livequery/products'))
 
         gateway.close()
+        // A lone node has no healthy alternative — never hard-fail with 503; keep
+        // retrying it (502) so a flapping/restarting node recovers the instant it returns.
         expect(first.status).toBe(502)
         expect(await first.json()).toMatchObject({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } })
-        expect(second.status).toBe(503)
-        expect(await second.json()).toMatchObject({ error: { status: 503, code: 'API_OFFLINE' } })
+        expect(second.status).toBe(502)
+        expect(await second.json()).toMatchObject({ error: { status: 502, code: 'SERVICE_API_OFFLINE' } })
     })
 
     test('forwards non-GET request body and query string to the target service', async () => {

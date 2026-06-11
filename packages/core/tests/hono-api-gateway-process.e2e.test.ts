@@ -135,7 +135,7 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
         })
     }, 10_000)
 
-    test('a stopped service returns 502 once then 503 while other services keep working', async () => {
+    test('a stopped sole-node service keeps returning 502 while other services keep working', async () => {
         const sharedEnv = createSharedEnv()
         const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
         const catalog = spawnFixture('hono-service-process.ts', {
@@ -172,9 +172,11 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
         expect(await first.json()).toMatchObject({
             error: { status: 502, code: 'SERVICE_API_OFFLINE' },
         })
-        expect(second.status).toBe(503)
+        // catalog is the only node for its route → never hard-503'd; the gateway
+        // keeps dialing it (502) so it recovers the instant it is restarted.
+        expect(second.status).toBe(502)
         expect(await second.json()).toMatchObject({
-            error: { status: 503, code: 'API_OFFLINE' },
+            error: { status: 502, code: 'SERVICE_API_OFFLINE' },
         })
         expect(orderJson).toMatchObject({
             service: 'orders',
