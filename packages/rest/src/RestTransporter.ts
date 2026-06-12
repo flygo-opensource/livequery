@@ -19,7 +19,7 @@ export type Promiseable<T> = T | Promise<T>
 export type RestTransporterConfig = {
     api: string
     ws?: string
-    onRequest?: (options: RestTransporterRequest & { ref: string }) => Promiseable<Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>> | void
+    onRequest?: (options: RestTransporterRequest & { ref: string, context?: Record<string, any> }) => Promiseable<Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>> | void
     onResponse?: (request: RestTransporterRequest & { ref: string }, response: LivequeryResult<any>) => Promise<void> | void
 }
 
@@ -69,7 +69,7 @@ export class RestTransporter implements LivequeryTransporter {
         return `${base}/${ref}${action}${query ? `?${query}` : ''}`
     }
 
-    async #call<T>(req: Omit<RestTransporterRequest, 'url'> & { ref: string, action?: string }) {
+    async #call<T>(req: Omit<RestTransporterRequest, 'url'> & { ref: string, action?: string, context?: Record<string, any> }) {
         const url = this.#buildUrl(req)
         const gateway_id = this.socket
             ? await Promise.race([
@@ -91,13 +91,14 @@ export class RestTransporter implements LivequeryTransporter {
             ...base_headers,
             ...req.headers
         }
-        const original_request: RestTransporterRequest & { ref: string } = {
+        const original_request: RestTransporterRequest & { ref: string, context?: Record<string, any> } = {
             url,
             method: req.method,
             body: req.body,
             headers: request_headers,
             query: req.query,
-            ref: req.ref
+            ref: req.ref,
+            context: req.context
         }
         const { response: fake_response, headers, ...modified } = await this.config.onRequest?.(original_request) || {}
         if (fake_response) {
@@ -158,7 +159,7 @@ export class RestTransporter implements LivequeryTransporter {
         return response as any as T
     }
 
-    query<T extends Doc>({ ref, filters, headers }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: Record<string, string> }) {
+    query<T extends Doc>({ ref, filters, headers, context }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: Record<string, string>, context?: Record<string, any> }) {
         const ready$ = this.socket
             ? merge(
                 this.socket.pipe(filter(s => !!s.connected), map(() => Date.now())),
@@ -181,7 +182,8 @@ export class RestTransporter implements LivequeryTransporter {
                         ref,
                         method: 'GET',
                         query: filters,
-                        headers
+                        headers,
+                        context
                     })).pipe(
                         map(collection => {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
@@ -277,10 +279,10 @@ export class RestTransporter implements LivequeryTransporter {
         }, {} as Record<string, any>)
     }
 
-    async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>) {
+    async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>, context?: Record<string, any>) {
         type DT = { id: string, _id: string } & T
         const body = this.#stripPrivateFields(data)
-        const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body, query: {} })
+        const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body, query: {}, context })
         for (const [k, v] of [['', r], ...Object.entries(r)]) {
             const target = v as any as DT
             const id = target.id || target._id
@@ -292,16 +294,16 @@ export class RestTransporter implements LivequeryTransporter {
         throw { code: 'InvalidResponse', message: 'The server did not return a valid response containing the created document.' }
     }
 
-    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>) {
-        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: this.#stripPrivateFields(data), query: {} })
+    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>, context?: Record<string, any>) {
+        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: this.#stripPrivateFields(data), query: {}, context })
     }
 
-    delete<T extends Doc>(collection_ref: string, id: string) {
-        return this.#call<T>({ method: 'DELETE', ref: collection_ref + '/' + id, body: undefined, query: {} })
+    delete<T extends Doc>(collection_ref: string, id: string, context?: Record<string, any>) {
+        return this.#call<T>({ method: 'DELETE', ref: collection_ref + '/' + id, body: undefined, query: {}, context })
     }
 
 
-    trigger<T>({ ref, action, payload }: LivequeryAction) {
-        return this.#call<T>({ method: 'POST', ref, action, body: payload, query: {} })
+    trigger<T>({ ref, action, payload, context }: LivequeryAction) {
+        return this.#call<T>({ method: 'POST', ref, action, body: payload, query: {}, context })
     }
 }

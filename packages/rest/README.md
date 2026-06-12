@@ -80,7 +80,7 @@ type RestTransporterConfig = {
   api: string
   ws?: string
   onRequest?: (
-    request: RestTransporterRequest & { ref: string }
+    request: RestTransporterRequest & { ref: string, context?: Record<string, any> }
   ) =>
     | void
     | Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>
@@ -96,8 +96,28 @@ type RestTransporterConfig = {
 | --- | --- | --- |
 | `api` | Yes | Base HTTP URL used for all REST calls, for example `https://api.example.com`. Trailing slashes are normalized. |
 | `ws` | No | WebSocket endpoint for realtime sync. When omitted, the package works as a REST-only transporter. |
-| `onRequest` | No | Hook called before `fetch()`. Use it to add headers, override request fields, or return a fake `response` to skip the network. |
+| `onRequest` | No | Hook called before `fetch()`. Use it to add headers, override request fields, or return a fake `response` to skip the network. Receives the collection's `context` (see [Context](#context)) so per-collection routing data can become headers. |
 | `onResponse` | No | Hook called after a network or fake response is available. Use it for logging, metrics, error inspection, or tracing. |
+
+### Context
+
+Every `@livequery/client` collection can carry a `context: Record<string, any>` option. The client forwards it to the transporter on each operation, and `RestTransporter` passes it through to `onRequest` (as `request.context`) for `query`, `add`, `update`, `delete`, and `trigger`. The HTTP request itself does not include `context` unless `onRequest` puts it somewhere (header/query/body).
+
+Typical use is per-tab multi-account routing: turn `{ account_id }` into a request header.
+
+```ts
+const transporter = new RestTransporter({
+  api: 'https://api.example.com',
+  onRequest: ({ context }) => ({
+    headers: context?.account_id ? { 'x-account-id': String(context.account_id) } : {},
+  }),
+})
+
+// the collection that supplies the context:
+const orders = new LivequeryCollection(client, { context: { account_id: 'acc-42' } })
+orders.initialize('orders')
+// → every query/add/update/delete/trigger for `orders` calls onRequest with context.account_id
+```
 
 ## Request Model
 
@@ -131,9 +151,9 @@ Query values are serialized with `URLSearchParams`.
 
 ## Methods
 
-### `query({ ref, filters, headers })`
+### `query({ ref, filters, headers, context? })`
 
-Runs a collection or document read through HTTP `GET`.
+Runs a collection or document read through HTTP `GET`. An optional `context` is passed through to `onRequest` (see [Context](#context)).
 
 ```ts
 const result$ = transporter.query({
@@ -170,7 +190,7 @@ Realtime watching is skipped for cursor/around paging filters:
 - `:before`
 - `:around`
 
-### `add(ref, data)`
+### `add(ref, data, context?)`
 
 Creates a document through HTTP `POST`.
 
@@ -181,11 +201,11 @@ const user = await transporter.add('users', {
 })
 ```
 
-Private fields whose names start with `_` are not sent.
+Private fields whose names start with `_` are not sent. An optional trailing `context` is forwarded to `onRequest`.
 
-### `update(collectionRef, id, data)`
+### `update(collectionRef, id, data, context?)`
 
-Updates a document through HTTP `PATCH`. As with `add()`, fields whose names start with `_` are stripped before the request is sent.
+Updates a document through HTTP `PATCH`. As with `add()`, fields whose names start with `_` are stripped before the request is sent. An optional trailing `context` is forwarded to `onRequest`.
 
 ```ts
 const user = await transporter.update('users', 'u1', {
@@ -193,15 +213,15 @@ const user = await transporter.update('users', 'u1', {
 })
 ```
 
-### `delete(collectionRef, id)`
+### `delete(collectionRef, id, context?)`
 
-Deletes a document through HTTP `DELETE`.
+Deletes a document through HTTP `DELETE`. An optional trailing `context` is forwarded to `onRequest`.
 
 ```ts
 await transporter.delete('users', 'u1')
 ```
 
-### `trigger({ ref, action, payload })`
+### `trigger({ ref, action, payload, context? })`
 
 Calls a custom backend action through `POST /<ref>/~<action>`.
 

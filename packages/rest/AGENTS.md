@@ -37,7 +37,7 @@ When writing real consumer code with this package, prefer these patterns:
 - Create one `RestTransporter` per backend boundary and reuse it in a shared `LivequeryClient` instance.
 - Pass `api` for REST-only usage and add `ws` only when the backend supports realtime sync.
 - Install the transporter into `LivequeryClient` through the `transporters` map, for example `{ rest: transporter }`.
-- Use `onRequest` to inject auth headers, override requests, or short-circuit with cached responses.
+- Use `onRequest` to inject auth headers, override requests, or short-circuit with cached responses. It also receives the originating collection's `context` (e.g. `{ account_id }`), so per-collection routing data can be turned into headers.
 - Use `onResponse` for logging, metrics, or centralized error inspection.
 - Treat this package as transport-only. Local cache, optimistic state, query modes, and reactive collections belong to `@livequery/client`.
 - Use `headers` on `query()` for per-query request headers. Use `onRequest` for global or dynamic request handling.

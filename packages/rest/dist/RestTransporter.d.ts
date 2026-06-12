@@ -12,6 +12,7 @@ export type RestTransporterConfig = {
     ws?: string;
     onRequest?: (options: RestTransporterRequest & {
         ref: string;
+        context?: Record<string, any>;
     }) => Promiseable<Partial<RestTransporterRequest & {
         response?: LivequeryResult<any>;
     }>> | void;
@@ -44,14 +45,15 @@ export declare class RestTransporter implements LivequeryTransporter {
     private config;
     private socket;
     constructor(config: RestTransporterConfig);
-    query<T extends Doc>({ ref, filters, headers }: {
+    query<T extends Doc>({ ref, filters, headers, context }: {
         ref: string;
         filters?: Partial<LivequeryFilters<T>>;
         headers?: Record<string, string>;
+        context?: Record<string, any>;
     }): import("rxjs").Observable<Partial<LivequeryQueryResult>>;
-    add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>): Promise<T>;
-    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>): Promise<T>;
-    delete<T extends Doc>(collection_ref: string, id: string): Promise<T>;
-    trigger<T>({ ref, action, payload }: LivequeryAction): Promise<T>;
+    add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>, context?: Record<string, any>): Promise<T>;
+    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>, context?: Record<string, any>): Promise<T>;
+    delete<T extends Doc>(collection_ref: string, id: string, context?: Record<string, any>): Promise<T>;
+    trigger<T>({ ref, action, payload, context }: LivequeryAction): Promise<T>;
 }
 //# sourceMappingURL=RestTransporter.d.ts.map
