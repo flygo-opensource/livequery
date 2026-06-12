@@ -108,6 +108,10 @@ export type LivequeryQueryParams<T extends Doc> = {
     ref: string
     filters?: Partial<LivequeryFilters<T>>
     headers?: Record<string, string>
+    // Arbitrary per-collection context forwarded to the transporter's onRequest hook
+    // (e.g. { account_id } for multi-account routing). Not sent to the server by default —
+    // onRequest decides what to do with it.
+    context?: Record<string, any>
 }
 
 

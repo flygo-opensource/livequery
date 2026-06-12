@@ -22,6 +22,12 @@ export type LivequeryCollectionOptions<T extends Doc> = {
      * - default: skip when `typeof window == 'undefined'` (legacy SSR detection)
      */
     ssr: boolean
+    /**
+     * Arbitrary context forwarded with every operation of this collection (query, add,
+     * update, delete, trigger) down to the transporter's onRequest hook. Used e.g. for
+     * per-tab multi-account routing via `{ account_id }`. Not sent to the server by default.
+     */
+    context: Record<string, any>
 }
 
 
@@ -259,7 +265,8 @@ export class LivequeryCollection<T extends Doc> {
             const cache = await this.client.query<T>({
                 ref: this.ref,
                 filters,
-                collection_id: this.id
+                collection_id: this.id,
+                context: this.options.context
             })
             if (cache && cache.documents && flush) {
                 this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
@@ -395,21 +402,21 @@ export class LivequeryCollection<T extends Doc> {
     async add<Input extends Partial<DocState<T>>[] | Partial<DocState<T>>>(payload: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) return null as any
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
-        const responses = await this.client.add<T>(this.collection_ref, list, mode)
+        const responses = await this.client.add<T>(this.collection_ref, list, mode, this.options.context)
         return (Array.isArray(payload) ? responses : responses[0]) as any
     }
 
     async update<Input extends ParitalDocState<T>[] | ParitalDocState<T>>(payload: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) return null as any
         const list = (Array.isArray(payload) ? payload : [payload]) as ParitalDocState<T>[]
-        const responses = await this.client.update<T>(this.collection_ref, list, mode)
+        const responses = await this.client.update<T>(this.collection_ref, list, mode, this.options.context)
         return (Array.isArray(payload) ? responses : responses[0]) as any
     }
 
     async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) return null as any
         const ids: string[] = Array.isArray(id) ? id : [id]
-        const responses = await this.client.delete<T>(this.collection_ref, ids, mode)
+        const responses = await this.client.delete<T>(this.collection_ref, ids, mode, this.options.context)
         return (Array.isArray(id) ? responses : responses[0]) as any
     }
 
@@ -421,7 +428,8 @@ export class LivequeryCollection<T extends Doc> {
             action,
             payload,
             ref: this.ref,
-            transporter_id
+            transporter_id,
+            context: this.options.context
         })
         return Object.assign($, {
             then: async (onFulfilled: (value: T) => void, onRejected?: (reason: { code: string, message: string }) => void) => {

@@ -178,12 +178,14 @@ Meaning:
 Methods:
 
 - `query(query)`: returns an observable of partial query results.
-- `add(ref, doc)`: creates a remote document.
-- `update(ref, id, doc)`: patches a remote document.
-- `delete(ref, id)`: deletes a remote document.
+- `add(ref, doc, context?)`: creates a remote document.
+- `update(ref, id, doc, context?)`: patches a remote document.
+- `delete(ref, id, context?)`: deletes a remote document.
 - `trigger(action)`: runs a custom remote action.
 
 Query streams should emit incremental `DataChangeEvent`s. Do not assume query results are full snapshot replacements.
+
+Context: the collection option `context: Record<string, any>` is forwarded with every operation — `query`/`trigger` carry it on `LivequeryQueryParams.context` / `LivequeryAction.context`, while `add`/`update`/`delete` receive it as a trailing `context?` argument. The client core only forwards it; transporters decide how to use it (e.g. `@livequery/rest` exposes it on `onRequest`). Used for per-collection routing such as `{ account_id }`.
 
 ## Runtime Model
 

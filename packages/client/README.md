@@ -366,6 +366,7 @@ type LivequeryCollectionOptions<T extends Doc> = {
     data: T[]
     persist: boolean
   }
+  context: Record<string, any>
 }
 ```
 
@@ -374,6 +375,7 @@ type LivequeryCollectionOptions<T extends Doc> = {
 - `debounce`: enables `debounceQuery()`.
 - `mode`: controls query behavior. Mutation methods still default to `server-first` unless you pass a mode override.
 - `seed`: optional initial data. `seed.data` is an array of documents loaded into `items` before any query runs. `seed.persist: false` populates items in memory only — storage is not written. `seed.persist: true` writes the seed to storage before the first query, so a `cache-first` or `local-first` query can read from it immediately.
+- `context`: an arbitrary bag forwarded with **every** operation of this collection (query, add, update, delete, trigger) down to the transporter. It is **not** sent to the server by default — the transporter decides what to do with it (e.g. inject a header). See [context](#context).
 
 ### `seed`
 
@@ -404,6 +406,29 @@ Rules:
 - When `persist: true` and `lazy: false`, the client calls `seedToStorage()` then starts the auto-query. The auto-query may overwrite seed items when the transporter responds.
 - When `persist: false`, seed items are available immediately in `items.value` from the constructor but are replaced on the first `query()` call.
 - `seed` has no effect on the mode behavior. The collection still uses the configured mode for queries.
+
+### context
+
+`context` is an arbitrary per-collection bag attached to every operation and threaded down to the transporter:
+
+```ts
+const todos = new LivequeryCollection<Todo>(client, {
+  mode: "server-first",
+  context: { account_id: "acc-42" },
+})
+
+todos.initialize("todos")
+```
+
+How it flows:
+
+- `query()` carries `context` on `LivequeryQueryParams.context` → `transporter.query({ ..., context })`.
+- `add()` / `update()` / `delete()` pass it as the trailing `context?` argument → `transporter.add/update/delete(ref, ..., context)`.
+- `trigger()` carries it on `LivequeryAction.context` → `transporter.trigger({ ..., context })`.
+
+The client core never inspects `context`; it only forwards it. A transporter chooses how to apply it — for example the `@livequery/rest` transporter exposes it on its `onRequest` hook so you can turn `{ account_id }` into a request header for per-tab multi-account routing.
+
+Because `context` lives on the collection options, switching context means a new query subscription under the new context. With the React bridge, `useCollection` keys the collection on the context so changing it (e.g. switching account) tears down the old subscription and re-subscribes — see `@livequery/react`.
 
 ### Reactive Properties
 
@@ -775,12 +800,14 @@ Transporters connect the client to remote systems.
 ```ts
 type LivequeryTransporter = {
   query<T extends Doc>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult>>
-  add<T extends Doc>(ref: string, doc: Omit<T, "id">): Promise<T>
-  update<T extends Doc>(ref: string, id: string, doc: Partial<T>): Promise<T>
-  delete<T extends Doc>(ref: string, id: string): Promise<T>
+  add<T extends Doc>(ref: string, doc: Omit<T, "id">, context?: Record<string, any>): Promise<T>
+  update<T extends Doc>(ref: string, id: string, doc: Partial<T>, context?: Record<string, any>): Promise<T>
+  delete<T extends Doc>(ref: string, id: string, context?: Record<string, any>): Promise<T>
   trigger<T>(action: LivequeryAction): Promise<T>
 }
 ```
+
+The optional trailing `context` on `add`/`update`/`delete` (and `LivequeryQueryParams.context` / `LivequeryAction.context` for `query`/`trigger`) is the collection's [`context`](#context) option. Transporters that don't need it can ignore the argument.
 
 ### Query Streams
 

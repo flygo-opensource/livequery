@@ -231,6 +231,10 @@ export class LivequeryClient {
                 if (collections.size === 0) {
                     this.#refs.delete(collection_ref)
                 }
+                // Complete data$ so whenCompleted(data$) fires and the server-query pipeline's
+                // takeUntil tears down the (possibly long-lived/realtime) transporter query —
+                // otherwise the old ref's subscription leaks after the collection goes away.
+                data$.complete()
             })
         )
     }
@@ -361,7 +365,7 @@ export class LivequeryClient {
         }
     }
 
-    async #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean): Promise<DocState<T>[]> {
+    async #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean, context?: Record<string, any>): Promise<DocState<T>[]> {
         const results = await Promise.all(
             docs.flatMap(doc =>
                 Object.entries(this.config.transporters).map(async ([tid, transporter]) => {
@@ -375,7 +379,7 @@ export class LivequeryClient {
                             o.complete()
                             this.#adding.delete(collection_ref)
                         })
-                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T), tid)
+                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T, context), tid)
                         if (e && server_first) throw e
                         // unlock
                         const fnd = {
@@ -397,7 +401,7 @@ export class LivequeryClient {
 
                     // _deleting flag → soft-delete on remote then hard-delete locally
                     if (doc._deleting) {
-                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id), tid)
+                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id, context), tid)
                         if (e && server_first) throw e
                         if (e) {
                             const fnd = {
@@ -432,7 +436,7 @@ export class LivequeryClient {
                             ...acc,
                             [key]: doc[key as any as keyof typeof doc]
                         }), {})
-                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields), tid)
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields, context), tid)
                         if (e && server_first) throw e
                         const fnd = {
                             _prev: undefined,
@@ -457,10 +461,10 @@ export class LivequeryClient {
     }
 
 
-    async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode) {
+    async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
             const list = documents.map(doc => ({ ...doc, id: `local:${uuidv7()}` }))
-            return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true)
+            return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true, context)
         }
         const docs = await Promise.all(documents.map(doc =>
             this.config.storage.add<T>(collection_ref, {
@@ -482,13 +486,13 @@ export class LivequeryClient {
             }
         )
         if (mode === 'local-only') return docs
-        return await this.#push<T>(collection_ref, docs, false)
+        return await this.#push<T>(collection_ref, docs, false, context)
     }
 
-    async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode) {
+    async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
             const list = documents.map(doc => ({ ...doc, _prev: doc }))
-            return await this.#push<T>(collection_ref, list, true)
+            return await this.#push<T>(collection_ref, list, true, context)
         }
         const merged = (await Promise.all(documents.map(async doc => {
             const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
@@ -512,13 +516,13 @@ export class LivequeryClient {
             }
         )
         if (mode === 'local-only') return merged
-        return await this.#push<T>(collection_ref, merged, false)
+        return await this.#push<T>(collection_ref, merged, false, context)
     }
 
-    async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode) {
+    async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
             const list = ids.map(id => ({ id, _deleting: true }))
-            return await this.#push<T>(collection_ref, list, true)
+            return await this.#push<T>(collection_ref, list, true, context)
         }
         const soft = Object.keys(this.config.transporters).length > 0
         const merged = (await Promise.all(ids.map(async id => {
@@ -560,7 +564,7 @@ export class LivequeryClient {
 
 
         if (mode == 'local-only') return merged
-        return await this.#push<T>(collection_ref, merged, false)
+        return await this.#push<T>(collection_ref, merged, false, context)
     }
 
     trigger<Response>(action: LivequeryAction) {
