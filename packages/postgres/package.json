@@ -1,0 +1,45 @@
+{
+  "name": "@livequery/postgres",
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "url": "git@github.com:livequery/postgres.git"
+  },
+  "version": "2.0.0",
+  "description": "PostgreSQL datasource mapping for @livequery ecosystem",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/**/*"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
+  },
+  "devDependencies": {
+    "@livequery/core": "^2.0.152",
+    "@types/node": "^18.11.9",
+    "@types/pg": "^8.11.0",
+    "pg": "^8.13.0",
+    "rxjs": "*",
+    "typescript": "*"
+  },
+  "scripts": {
+    "test": "bun test",
+    "build": "rm -rf build; tsc -b .",
+    "deploy": "rm -rf build && yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+  },
+  "peerDependencies": {
+    "pg": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
+  }
+}
