@@ -18,7 +18,7 @@
     },
   },
   "packages": {
-    "@livequery/client": ["@livequery/client@2.0.152", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-cs0oU1YeWRw7JrW2QQvpj8mkLb+HEabT5ZereDePYQ/58bwPsasXE6QEJ1ARLmZzvrC8kKLhOxaQZpLDVWMlEA=="],
+    "@livequery/client": ["@livequery/client@2.0.153", "", { "dependencies": { "rxjs": "^7.8.2", "uuidv7": "^1.2.1" } }, "sha512-V/1qEy3TEaTaICqWVsMB624G3demz1S0ahzHbfmMYEzSqaAMsg9I6vRhFFsAFE2ScLpU8OOOZDwUrWHavxI4/Q=="],
 
     "@msgpack/msgpack": ["@msgpack/msgpack@3.1.3", "", {}, "sha512-47XIizs9XZXvuJgoaJUIE2lFoID8ugvc0jzSHP+Ptfk8nTbnR8g788wv48N03Kx0UkAv559HWRQ3yzOgzlRNUA=="],
 
@@ -28,7 +28,7 @@
 
     "typescript": ["typescript@5.6.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw=="],
 
-    "uuid": ["uuid@13.0.0", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-XQegIaBTVUjSHliKqcnFqYypAd4S+WCYt5NIeRs6w/UAry7z8Y9j5ZwRRL4kzq9U3sD6v+85er9FvkEaBpji2w=="],
+    "uuid": ["uuid@13.0.2", "", { "bin": { "uuid": "dist-node/bin/uuid" } }, "sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw=="],
 
     "uuidv7": ["uuidv7@1.2.1", "", { "bin": { "uuidv7": "cli.js" } }, "sha512-4kPkK3/XTQW9Hbm4CaqfICn+kY9LJtDVEOfgsRRra/+n2Ofg4NqzRFceAkxvQ/Ud/6BpHOPzj8cirqM7TzTN5Q=="],
   }
