@@ -21,7 +21,7 @@
     },
   },
   "packages": {
-    "@livequery/core": ["@livequery/core@2.0.152", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-JkwCwuDO5nvkGk74tuTi7O9sc8sU0bCbMAqWHo21bXFxT6p+DCNv1Tqvt6mhtAleirLGB+rjcHQGqJzqVqfy2A=="],
+    "@livequery/core": ["@livequery/core@2.0.153", "", { "dependencies": { "msgpackr": "^1.11.9", "rxjs": "x", "ws": "^8.18.0" } }, "sha512-HvTtHQMdu99RsQuZfaFPdE9YpNzZG1FT5I+6hvQiYAO9NgunnAE5OAPFxz/9zReNBeV4TYZzz88XRHmEq+z3UA=="],
 
     "@msgpackr-extract/msgpackr-extract-darwin-arm64": ["@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4", "", { "os": "darwin", "cpu": "arm64" }, "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ=="],
 
