@@ -6,7 +6,7 @@
   "repository": {
     "url": "git@github.com:livequery/mongodb.git"
   },
-  "version": "2.0.152",
+  "version": "2.0.153",
   "description": "MongoDB datasource mapping for @livequery ecosystem",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",

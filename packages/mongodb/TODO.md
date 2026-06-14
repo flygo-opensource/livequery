@@ -48,6 +48,15 @@ Notes to revisit before the next compatibility pass.
 - Review summary aggregation keys. Current behavior keeps keys such as `::totals` in facet output.
 - Decide whether summary keys should strip the `::` prefix in a future breaking change.
 
+## MongodbCollection API
+
+- [x] **Constructor nhận `CollectionDef<T>` thay vì string** — DONE: thêm `CollectionDef<T>` class (với phantom field `declare _type: T` cho inference) và `defineCollection<T>()` factory. Constructor cũ nhận `(db, collectionName: string, defaults?)` đã bỏ hoàn toàn.
+  ```ts
+  const OrdersDef = defineCollection<Order>({ collection: 'orders', defaults: () => ({ active: true }) })
+  new MongodbCollection(db, OrdersDef)
+  ```
+- Consider whether `CollectionDef` should carry index hints or schema metadata in the future.
+
 ## Core Integration
 
 - Keep `init(routes)`, `init(config, routes)`, `handle(ctx)`, and `query(req, options)` working.

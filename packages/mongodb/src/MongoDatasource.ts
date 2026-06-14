@@ -198,9 +198,10 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
     }
 
     async #post(req: LivequeryRequest, collection: Collection<any>) {
+        const { id: _bodyId, _id: _bodyRawId, ...cleanBody } = req.body || {}
         const merged = {
             ...req.keys,
-            ...req.body
+            ...cleanBody
         };
         const result = await collection.insertOne(merged);
         return {
@@ -266,7 +267,8 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
 
     #update(body: any) {
         if (!body || Object.keys(body).some(key => key.startsWith('$'))) return body
-        return { $set: body }
+        const { id: _id, _id: _rawId, ...cleanBody } = body
+        return { $set: cleanBody }
     }
 
     #convert(obj: any, fields: Set<string>) {

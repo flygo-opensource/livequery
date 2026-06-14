@@ -27,6 +27,7 @@ Keep both APIs working unless the user explicitly asks for a breaking change.
 - `src/SmartCache.ts`: promise cache for native collection handles.
 - `src/DataChangePayload.ts`: type-only realtime/change payload contract.
 - `src/MongodbRealtime.ts`: MongoDB change stream watcher that formats Livequery websocket sync payloads.
+- `src/MongodbCollection.ts`: imperative CRUD wrapper (Mongoose `Model`-like) over a native collection; independent of the request flow.
 
 ## Core Type Integration
 
@@ -311,6 +312,23 @@ Responsibilities:
 - Convert MongoDB change stream events to Livequery websocket sync payloads.
 - Format nested refs from `schema` params: each `:param` reads the document field of the same name (`id` maps to `_id`). The schema comes pre-parsed from `@livequery/core`, so the document-id segment is already stripped.
 - Support array membership refs automatically when the document field is an array.
+
+### `MongodbCollection`
+
+Imperative CRUD wrapper over one native collection, with a Mongoose `Model`-like surface. Independent of the request flow (`LivequeryContext` / `handle`); for direct application/service reads and writes. Not an ODM: no schemas, validation, hooks, virtuals, or `populate()`.
+
+`constructor(db, collectionName, resolveDefaults?)`:
+
+- `db: Db`: passed in explicitly (no module singleton); the collection handle is resolved lazily via `db.collection(name)`.
+- `resolveDefaults?: (input) => Partial<T>`: per-insert default resolver (replaces `@Prop({ default })`); input overrides the returned defaults.
+
+Behavior:
+
+- Hydrate: returned docs expose an enumerable `id: string` and hide `_id` (still readable as `doc._id`); `toJSON()` drops `_id`/`__v`.
+- API: `find`, `findOne`, `findById`, `create`, `insertMany`, `updateOne`, `updateMany`, `deleteOne`, `deleteMany`, `countDocuments`, `exists`, `aggregate`, plus a `collection` getter.
+- `findOne`/`findById`/`updateOne`/`deleteOne` accept a `string` id (24-hex → `{ _id: ObjectId }`), an `ObjectId`, or a filter object.
+- Updates wrap plain bodies in `$set` and always merge `updated_at`; bodies that already use a `$`-operator pass through and still bump `updated_at`.
+- `create`/`insertMany` add `created_at`/`updated_at`, apply defaults, and never persist an incoming `id`/`_id`.
 
 ## Configuration Types
 

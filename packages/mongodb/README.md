@@ -25,6 +25,7 @@ For local development in this workspace, `@livequery/core` is installed as a dev
 export * from './MongoDatasource.js'
 export * from './DataChangePayload.js'
 export * from './MongodbRealtime.js'
+export * from './MongodbCollection.js'
 export * from './types.js'
 ```
 
@@ -384,6 +385,100 @@ An inserted `{ _id: 'post1', userId: 'user1', title: 'Hello' }` emits:
   type: 'added',
   data: { id: 'post1', userId: 'user1', title: 'Hello' },
 }
+```
+
+### `MongodbCollection`
+
+Lightweight imperative CRUD wrapper over a native MongoDB collection, with a Mongoose-`Model`-like surface. It is independent of the Livequery request flow and `LivequeryContext`: reach for it when application or service code needs to read and write documents directly, rather than through `MongoDatasource.handle(ctx)`.
+
+It is intentionally not an ODM. There are no schemas, validation, hooks, virtuals, or `populate()`. It only layers a few conveniences over the native driver: `id` / `_id` normalization, a collection-level defaults resolver, automatic timestamps, and flexible single-document filters.
+
+```ts
+class MongodbCollection<T = any>
+```
+
+Responsibilities:
+
+- Wrap one collection, resolved lazily from a provided `Db`.
+- Return documents with an enumerable `id: string` and a hidden `_id`.
+- Apply a defaults resolver plus `created_at` / `updated_at` on insert.
+- Bump `updated_at` on every update.
+- Accept a `string` id, an `ObjectId`, or a filter object for single-document operations.
+
+#### `constructor(db, collectionName, resolveDefaults?)`
+
+Parameters:
+
+- `db: Db`: a connected `mongodb` `Db`. It is passed in explicitly (no hidden module singleton), so one class works across databases and connections.
+- `collectionName: string`: collection name. The handle is resolved lazily via `db.collection(name)`.
+- `resolveDefaults?: (input: Partial<T>) => Partial<T>`: optional default-field resolver, a replacement for Mongoose `@Prop({ default })`. It runs on every `create` / `insertMany` with the input document; the input always overrides the returned defaults.
+
+Example:
+
+```ts
+import { MongoClient } from 'mongodb'
+import { MongodbCollection } from '@livequery/mongodb'
+
+const client = new MongoClient(process.env.MONGO_URL!)
+await client.connect()
+const db = client.db('main')
+
+type Order = { video_id: string; amount: number; started: boolean; running: boolean }
+
+const Orders = new MongodbCollection<Order>(db, 'orders', () => ({ started: false, running: true }))
+const Videos = new MongodbCollection<Video>(db, 'videos') // no defaults
+```
+
+#### Document shape: `MongoDoc<T>`
+
+```ts
+type MongoDoc<T> = T & { id: string; toJSON(): any }
+```
+
+Returned documents are hydrated:
+
+- `id` is an enumerable string (`_id.toString()`), so it appears in `JSON.stringify`, JSON responses, and `{ ...doc }`.
+- `_id` is non-enumerable, so it never leaks into output, yet `doc._id` is still readable as an `ObjectId` internally.
+- `toJSON()` returns the document without `_id` and `__v`.
+
+#### Methods
+
+| Method | Description |
+| --- | --- |
+| `find(filter?)` | Returns hydrated documents. |
+| `findOne(filter?)` | `filter` may be a `string` id, an `ObjectId`, or a filter object. |
+| `findById(id)` | Shorthand for `findOne` with a `string` id or `ObjectId`. |
+| `create(doc)` | Inserts one document; applies defaults + timestamps; strips any incoming `id` / `_id`. |
+| `insertMany(docs)` | Inserts many documents with the same preparation as `create`. |
+| `updateOne(filter, update, opts?)` | Wraps plain updates in `$set` and bumps `updated_at`; `filter` accepts string id / ObjectId / object. |
+| `updateMany(filter, update, opts?)` | Same update handling for many documents. |
+| `deleteOne(filter)` | Deletes one; `filter` accepts string id / ObjectId / object. |
+| `deleteMany(filter?)` | Deletes many documents. |
+| `countDocuments(filter?)` | Counts matching documents. |
+| `exists(filter?)` | `true` when at least one document matches. |
+| `aggregate(pipeline)` | Runs an aggregation pipeline and returns the array. |
+| `collection` | Getter for the raw native `Collection` (escape hatch). |
+
+Behavior:
+
+- Filter normalization: a 24-hex `string` becomes `{ _id: ObjectId }`; an `ObjectId` becomes `{ _id }`; any other string or object is used unchanged.
+- Update normalization: an update that already contains a `$`-operator (such as `$inc` or `$push`) is passed through; otherwise it is wrapped in `$set`. `updated_at` is always merged into the `$set` branch.
+- Inserts never persist an incoming `id` or `_id`.
+
+Example:
+
+```ts
+const order = await Orders.create({ video_id: 'v1', amount: 50 })
+order.id              // '507f1f77bcf86cd799439011'
+order._id             // ObjectId — still readable internally
+JSON.stringify(order) // contains "id", not "_id"
+
+await Orders.findOne('507f1f77bcf86cd799439011') // by string id
+await Orders.findById(order._id)                 // by ObjectId
+await Orders.findOne({ video_id: 'v1' })         // by filter
+
+await Orders.updateOne(order.id, { amount: 80 })          // wrapped in $set, bumps updated_at
+await Orders.updateOne(order.id, { $inc: { amount: 5 } }) // operator preserved, still bumps updated_at
 ```
 
 ### `DataChangePayload<T>`

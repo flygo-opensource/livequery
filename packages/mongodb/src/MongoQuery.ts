@@ -556,11 +556,12 @@ export class MongoQuery {
     static async query<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>, collection: Collection<T>) {
 
         if (!req.is_collection) {
+            const { id, _id: _rawId, ...keysWithoutId } = req.keys
             const aggregates = [
                 {
                     $match: {
-                        ...req.keys,
-                        ...req.keys.id ? { id: undefined, _id: this.#objectId('id', req.keys.id) } : {}
+                        ...keysWithoutId,
+                        ...id ? { _id: this.#objectId('id', id) } : {}
                     }
                 },
                 ...this.#rename_id(),
