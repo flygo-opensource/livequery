@@ -103,13 +103,16 @@ export class LivequeryCollection<T extends Doc> {
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
         const startQuery = () => { !ref.includes('undefined') && this.query(this.filters.value || {}) }
+        // Unsubscribe old subscription BEFORE setting the new timer.
+        // The old sub's finalize() clears this.#timer — if we set the timer first and
+        // unsubscribe second, finalize clears the NEW timer and startQuery never runs.
+        this.#subscription?.unsubscribe()
         if (this.options.seed?.persist && this.collection_ref) {
             const persist = this.client.seedToStorage(this.collection_ref, this.options.seed.data)
             if (this.options.lazy !== true) persist.then(startQuery)
         } else if (this.options.lazy !== true) {
             this.#timer = setTimeout(startQuery)
         }
-        this.#subscription?.unsubscribe()
         this.#subscription = merge(
             this.options.debounce ? merge(
                 this.#filters.pipe(

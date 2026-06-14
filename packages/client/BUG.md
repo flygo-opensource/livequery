@@ -1,6 +1,6 @@
 # Known bugs
 
-## 1. `LivequeryCollection.initialize(ref)` — query cho ref mới bị huỷ do race timer
+## 1. [FIXED] `LivequeryCollection.initialize(ref)` — query cho ref mới bị huỷ do race timer
 
 **Triệu chứng:** Khi một component dùng `useCollection` và **đổi `ref`** (ví dụ chuyển từ chat A sang chat B, cùng một collection instance), lần khởi tạo đầu tiên load dữ liệu bình thường, nhưng các lần đổi `ref` sau đó **không load dữ liệu mới** (danh sách trống / giữ nguyên rỗng).
 
@@ -54,3 +54,5 @@ Hoặc đơn giản: đảo thứ tự — gọi `this.#subscription?.unsubscrib
 **Workaround phía app (đến khi vá lib):** Buộc component dùng `useCollection` remount khi `ref` đổi — `<Component key={ref} />` — để tạo `LivequeryCollection` mới đi vào nhánh first-init (không dính race).
 
 **Phát hiện:** dự án codex-dev (Hono + livequery), màn chat — chuyển chat không load turns mới. `@livequery/client` 2.0.140.
+
+**Fix:** Đổi thứ tự trong `initialize()` — gọi `this.#subscription?.unsubscribe()` **trước** khi `this.#timer = setTimeout(startQuery)`, để `finalize` của subscription cũ chạy khi `this.#timer` vẫn còn `undefined` (no-op), không xóa timer mới. (`src/LivequeryCollection.ts`, 2.0.153+)

@@ -236,6 +236,78 @@ describe('timer leak fix', () => {
     })
 })
 
+// ─── fix #2: startQuery not cancelled by old subscription finalize ────────────
+//
+// Race: initialize(ref1) → subscription active →
+//       initialize(ref2): set timer (A) → unsubscribe old sub (B) →
+//       old sub's finalize clearTimeout(#timer) erases timer A → startQuery never runs.
+// Fix: unsubscribe BEFORE setting the timer so finalize sees #timer = undefined.
+
+describe('race condition: startQuery for new ref not cancelled by old sub finalize', () => {
+    test('query fires for new ref when re-initializing from an active subscription', async () => {
+        const queries: string[] = []
+        const client = makeClient(makeStorage(), {
+            query: (req) => {
+                queries.push(req.ref)
+                return of({
+                    changes: [{ id: '1', type: 'added' as const, data: { id: '1', title: 'Item', done: false }, collection_ref: req.ref }],
+                    paging: { total: 1, current: 1 },
+                    source: 'query' as const,
+                })
+            },
+            add: async (_ref, doc) => ({ id: 'x', ...doc }) as Todo,
+            update: async (_ref, id, patch) => ({ id, ...patch }) as Todo,
+            delete: async (_ref, id) => ({ id } as Todo),
+            trigger: async () => ({} as any),
+        })
+        const collection = new LivequeryCollection<Todo>(client)
+
+        // Step 1: initialize ref-a and WAIT for the subscription to become active.
+        // This means this.#subscription is non-null when we switch ref.
+        collection.initialize('todos-a')
+        await tick(50)
+        expect(queries.filter(r => r === 'todos-a').length).toBeGreaterThan(0)
+
+        // Step 2: switch to ref-b (simulates navigating to a different chat room).
+        // Without the fix: old sub's finalize clears the new timer → todos-b never queried.
+        collection.initialize('todos-b')
+        await tick(50)
+
+        expect(queries.filter(r => r === 'todos-b').length).toBeGreaterThan(0)
+        expect(collection.items.value).toHaveLength(1)
+    })
+
+    test('multiple consecutive ref switches all fire their respective queries', async () => {
+        const queries: string[] = []
+        const client = makeClient(makeStorage(), {
+            query: (req) => {
+                queries.push(req.ref)
+                return of({
+                    changes: [],
+                    paging: { total: 0, current: 0 },
+                    source: 'query' as const,
+                })
+            },
+            add: async (_ref, doc) => ({ id: 'x', ...doc }) as Todo,
+            update: async (_ref, id, patch) => ({ id, ...patch }) as Todo,
+            delete: async (_ref, id) => ({ id } as Todo),
+            trigger: async () => ({} as any),
+        })
+        const collection = new LivequeryCollection<Todo>(client)
+
+        collection.initialize('chat-a')
+        await tick(50)
+        collection.initialize('chat-b')
+        await tick(50)
+        collection.initialize('chat-c')
+        await tick(50)
+
+        expect(queries.filter(r => r === 'chat-a').length).toBeGreaterThan(0)
+        expect(queries.filter(r => r === 'chat-b').length).toBeGreaterThan(0)
+        expect(queries.filter(r => r === 'chat-c').length).toBeGreaterThan(0)
+    })
+})
+
 // ─── fix #2: query error propagates to collection.error ──────────────────────
 
 describe('query error handling', () => {
