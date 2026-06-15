@@ -104,12 +104,12 @@ describe('MongoQuery.query', () => {
         )
 
         expect(response.items).toEqual([{ id, name: 'phone' }])
-        expect(collection.aggregateCalls[0][0]).toEqual({
-            $match: {
-                id: undefined,
-                _id: ObjectId.createFromHexString(id),
-            },
-        })
+        // The document $match must convert the `id` key to `_id` WITHOUT leaving a stray
+        // `id: undefined` key behind (BSON would serialize it to null and break the lookup —
+        // see BUG.md). Assert the exact key set, not just a lenient toEqual.
+        const match = collection.aggregateCalls[0][0].$match
+        expect(Object.keys(match)).toEqual(['_id'])
+        expect(match._id).toEqual(ObjectId.createFromHexString(id))
     })
 
     test(':or builds an $or of its nested conditions (not gated on :and)', async () => {
@@ -209,6 +209,122 @@ describe('MongoQuery.query', () => {
         expect(collection.aggregateCalls[0][1]).toEqual({
             $match: { $or: [{ name: { $regex: 'a\\.b\\+c', $options: 'i' } }] },
         })
+    })
+
+    test(':or keeps OR semantics when a group mixes :like with a plain field', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                query: {
+                    ':or': { status: 'active', 'name:like': 'foo' },
+                },
+            }),
+            collection as any
+        )
+
+        // Previously this collapsed to a single-element $or wrapping an $and, silently
+        // turning OR into AND. It must stay a real two-branch $or.
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $or: [
+                    { status: { $eq: 'active' } },
+                    { name: { $regex: 'foo', $options: 'i' } },
+                ],
+            },
+        })
+    })
+
+    test(':or keeps OR semantics for two operators on the same field', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                query: {
+                    ':or': { 'price:lt': '10', 'price:gt': '100' },
+                },
+            }),
+            collection as any
+        )
+
+        // Same field, different ops: must be two OR branches, not a merged AND on `price`.
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $or: [
+                    { price: { $lt: 10 } },
+                    { price: { $gt: 100 } },
+                ],
+            },
+        })
+    })
+
+    test(':not nors each condition separately when a group mixes types', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                query: {
+                    ':not': { status: 'archived', 'name:like': 'spam' },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $nor: [
+                    { status: { $eq: 'archived' } },
+                    { name: { $regex: 'spam', $options: 'i' } },
+                ],
+            },
+        })
+    })
+
+    test(':or with a nested :and group emits the AND as a single branch', async () => {
+        const collection = createMockCollection('products', collectionReadResponse())
+
+        await MongoQuery.query(
+            baseRequest({
+                query: {
+                    ':or': { status: 'active', ':and': { 'level:gte': '5', role: 'admin' } },
+                },
+            }),
+            collection as any
+        )
+
+        expect(collection.aggregateCalls[0][1]).toEqual({
+            $match: {
+                $or: [
+                    { status: { $eq: 'active' } },
+                    { level: { $gte: 5 }, role: { $eq: 'admin' } },
+                ],
+            },
+        })
+    })
+
+    test('summary with only a group field (no aggregate fn) does not throw', async () => {
+        const collection = createMockCollection('orders', collectionReadResponse())
+
+        // `fns` is empty here; the old code did `fns[0].key` and threw a 500.
+        const run = MongoQuery.query(
+            baseRequest({ query: { '::byStatus': 'status' } }),
+            collection as any
+        )
+
+        await expect(run).resolves.toBeDefined()
+        const facet = collection.aggregateCalls[0].find((s: any) => s.$facet).$facet
+        expect(facet['::byStatus']).toBeArray()
+    })
+
+    test('summary with only a $match filter (no aggregate fn) does not throw', async () => {
+        const collection = createMockCollection('orders', collectionReadResponse())
+
+        const run = MongoQuery.query(
+            baseRequest({ query: { '::active': 'status==active' } }),
+            collection as any
+        )
+
+        await expect(run).resolves.toBeDefined()
     })
 
     test('offset paging (:page) skips and limits and is not treated as cursor paging', async () => {

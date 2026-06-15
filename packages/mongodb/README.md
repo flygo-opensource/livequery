@@ -4,17 +4,14 @@ Native MongoDB datasource adapter for the `@livequery` ecosystem.
 
 This package translates Livequery request shapes into MongoDB native driver operations. It is intended for projects that want to use `@livequery/core` with plain `mongodb` collections, without Mongoose models or schema introspection.
 
-The adapter supports two integration styles:
-
-- Core style: `new MongoDatasource(config)`, `init(routes)`, then `handle(ctx)`.
-- Legacy style: `new MongoDatasource()`, `init(config, routes)`, then direct `query(req, options)`.
+Integration with `@livequery/core`: `new MongoDatasource(config)`, `init(routes)`, then `handle(ctx)`. For imperative use you can also call `query(req, options)` directly.
 
 Reads are executed with MongoDB aggregation pipelines through `Collection.aggregate(...).toArray()`. Writes use native collection methods such as `insertOne`, `updateOne`, and `deleteOne`.
 
 ## Installation
 
 ```sh
-bun add @livequery/mongodb mongodb bson rxjs
+bun add @livequery/mongodb mongodb rxjs
 ```
 
 For local development in this workspace, `@livequery/core` is installed as a dev dependency from `file:../core`. Runtime JavaScript does not import `@livequery/core`; the generated declaration files use core types.
@@ -26,7 +23,6 @@ export * from './MongoDatasource.js'
 export * from './DataChangePayload.js'
 export * from './MongodbRealtime.js'
 export * from './MongodbCollection.js'
-export * from './types.js'
 ```
 
 ## Project Meaning
@@ -40,7 +36,7 @@ Typical request flow with `@livequery/core`:
 1. A framework adapter creates a `LivequeryContext`.
 2. `LivequeryRequestParser` reads `ctx.request` and writes `ctx.livequery`.
 3. `MongoDatasource.handle(ctx)` resolves route options from `ctx.request.method` and `ctx.request.ref`.
-4. `MongoDatasource` converts `ctx.livequery.query` into adapter `req.options`.
+4. `MongoDatasource` reads `ctx.livequery` (keys, query, body, method) as the adapter request.
 5. Reads are delegated to `MongoQuery`; writes go directly to the native collection.
 6. The result is assigned to `ctx.response`.
 
@@ -51,13 +47,13 @@ Typical request flow with `@livequery/core`:
 Main adapter class.
 
 ```ts
-class MongoDatasource extends Subject<WebsocketSyncPayload<LivequeryBaseEntity>>
+class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>>
 ```
 
 Responsibilities:
 
 - Store datasource config and route options.
-- Support core-style and legacy-style initialization.
+- Initialize from a list of routes.
 - Resolve connection, database, and collection for each request.
 - Normalize configured ObjectId fields.
 - Execute reads, inserts, updates, and deletes.
@@ -80,7 +76,7 @@ const datasource = new MongoDatasource({
 })
 ```
 
-If `config` is omitted, call `init(config, routes)` later.
+`config` is required before any request runs. Omit it here only if you assign `datasource.config` before the first `handle` / `query` call.
 
 #### `init(routes)`
 
@@ -103,35 +99,6 @@ await datasource.init([
 ```
 
 Route lookup uses `METHOD path`, for example `GET /products`. A path-only fallback is also stored for compatibility.
-
-#### `init(config, routes)`
-
-Legacy-style initialization.
-
-Parameters:
-
-- `config: MongoDatasourceConfig`: MongoDB connection configuration.
-- `routes: Array<{ method; path; options }>`: legacy route entries. The datasource options are nested under `options`.
-
-Example:
-
-```ts
-await datasource.init(
-  {
-    connections: { default: client },
-    databases: ['main'],
-  },
-  [
-    {
-      method: 'GET',
-      path: '/products',
-      options: {
-        collection: 'products',
-      },
-    },
-  ]
-)
-```
 
 #### `handle(ctx)`
 
@@ -165,7 +132,7 @@ Executes a parsed Livequery request against one MongoDB collection.
 
 Parameters:
 
-- `req: LivequeryRequest`: adapter request. Core requests use `query`; this adapter normalizes it to `options`. Legacy callers can pass `options` directly.
+- `req: LivequeryRequest`: parsed Livequery request. Reads `req.keys`, `req.query`, `req.method`, and `req.body`.
 - `options: RouteOptions`: route configuration that tells the adapter which collection, database, connection, and ObjectId fields to use.
 
 Supported `req.method` values:
@@ -193,7 +160,7 @@ const response = await datasource.query(
     ref: 'products',
     is_collection: true,
     keys: {},
-    options: { ':limit': 10 },
+    query: { ':limit': 10 },
   },
   {
     collection: 'products',
@@ -218,7 +185,7 @@ Responsibilities:
 
 Parameters:
 
-- `req: LivequeryRequest`: normalized adapter request. Reads `req.keys`, `req.options`, and `req.is_collection`.
+- `req: LivequeryRequest`: parsed adapter request. Reads `req.keys`, `req.query`, and `req.is_collection` (`req.query` is normalized to `{}` when absent).
 - `collection: Collection<T>`: native MongoDB collection.
 
 Behavior:
@@ -231,8 +198,8 @@ Known behavior:
 - `:limit` defaults to `10`.
 - Minimum `:limit` is `1`.
 - Maximum `:limit` is `100`.
-- Cursor paging is implemented.
-- Offset paging with `page` is not implemented yet.
+- Cursor paging (`:after` / `:before` / `:around`) is the default.
+- Offset paging is used when `:page` is provided.
 
 Filter examples:
 
@@ -268,7 +235,7 @@ Builds a cursor from a response item and active sort options.
 Parameters:
 
 - `item: LivequeryBaseEntity`: response item. Must contain `id`.
-- `options: QueryOption`: request options. Sort options ending with `:sort` are included in the cursor.
+- `options: Record<string, any>`: the request query (`req.query`). Sort options ending with `:sort` are included in the cursor.
 
 Returns:
 
@@ -405,29 +372,44 @@ Responsibilities:
 - Bump `updated_at` on every update.
 - Accept a `string` id, an `ObjectId`, or a filter object for single-document operations.
 
-#### `constructor(db, collectionName, resolveDefaults?)`
+#### `defineCollection<T>(config)` and `constructor(db, config)`
 
-Parameters:
+A collection is described once with `defineCollection`, then bound to a `Db` instance.
+
+`defineCollection<T>({ collection, defaults? })` returns a typed `CollectionDef<T>`:
+
+- `collection: string`: collection name. The handle is resolved lazily via `db.collection(name)`.
+- `defaults?: (input: Partial<T>) => Partial<T>`: optional default-field resolver, a replacement for Mongoose `@Prop({ default })`. It runs on every `create` / `insertMany` with the input document; the input always overrides the returned defaults.
+
+`new MongodbCollection<T>(db, config)`:
 
 - `db: Db`: a connected `mongodb` `Db`. It is passed in explicitly (no hidden module singleton), so one class works across databases and connections.
-- `collectionName: string`: collection name. The handle is resolved lazily via `db.collection(name)`.
-- `resolveDefaults?: (input: Partial<T>) => Partial<T>`: optional default-field resolver, a replacement for Mongoose `@Prop({ default })`. It runs on every `create` / `insertMany` with the input document; the input always overrides the returned defaults.
+- `config: CollectionDef<T>`: the definition returned by `defineCollection`. The generic `T` is inferred from it, so the instance is fully typed.
 
 Example:
 
 ```ts
 import { MongoClient } from 'mongodb'
-import { MongodbCollection } from '@livequery/mongodb'
+import { MongodbCollection, defineCollection } from '@livequery/mongodb'
 
 const client = new MongoClient(process.env.MONGO_URL!)
 await client.connect()
 const db = client.db('main')
 
 type Order = { video_id: string; amount: number; started: boolean; running: boolean }
+type Video = { title: string }
 
-const Orders = new MongodbCollection<Order>(db, 'orders', () => ({ started: false, running: true }))
-const Videos = new MongodbCollection<Video>(db, 'videos') // no defaults
+// With a defaults resolver (replaces Mongoose @Prop({ default })):
+const Orders = new MongodbCollection(db, defineCollection<Order>({
+  collection: 'orders',
+  defaults: () => ({ started: false, running: true }),
+}))
+
+// Without defaults:
+const Videos = new MongodbCollection(db, defineCollection<Video>({ collection: 'videos' }))
 ```
+
+Define each collection once at composition time and reuse the instance across the app.
 
 #### Document shape: `MongoDoc<T>`
 
@@ -468,17 +450,38 @@ Behavior:
 Example:
 
 ```ts
+// create — applies defaults (started/running) + created_at/updated_at; strips any client id/_id
 const order = await Orders.create({ video_id: 'v1', amount: 50 })
 order.id              // '507f1f77bcf86cd799439011'
+order.started         // false — from the defaults resolver
 order._id             // ObjectId — still readable internally
 JSON.stringify(order) // contains "id", not "_id"
 
-await Orders.findOne('507f1f77bcf86cd799439011') // by string id
+// insertMany — same preparation as create, returns hydrated docs
+const [a, b] = await Orders.insertMany([{ video_id: 'v2', amount: 10 }, { video_id: 'v3', amount: 20 }])
+
+// reads — single-doc helpers accept a string id, an ObjectId, or a filter object
+await Orders.findOne('507f1f77bcf86cd799439011') // by string id (24-hex → _id)
 await Orders.findById(order._id)                 // by ObjectId
 await Orders.findOne({ video_id: 'v1' })         // by filter
+await Orders.find({ started: false })            // many
 
-await Orders.updateOne(order.id, { amount: 80 })          // wrapped in $set, bumps updated_at
-await Orders.updateOne(order.id, { $inc: { amount: 5 } }) // operator preserved, still bumps updated_at
+// updates — plain bodies are wrapped in $set; operator bodies pass through; updated_at always bumped
+await Orders.updateOne(order.id, { amount: 80 })            // → { $set: { amount: 80, updated_at } }
+await Orders.updateOne(order.id, { $inc: { amount: 5 } })   // → { $inc, $set: { updated_at } }
+await Orders.updateMany({ started: false }, { running: true })
+
+// existence / counting
+await Orders.exists(order.id)                    // boolean
+await Orders.countDocuments({ video_id: 'v1' })  // number
+
+// delete
+await Orders.deleteOne(order.id)
+await Orders.deleteMany({ video_id: 'v3' })
+
+// escape hatches
+await Orders.aggregate([{ $group: { _id: '$video_id', total: { $sum: '$amount' } } }])
+Orders.collection                                // raw native Collection
 ```
 
 ### `DataChangePayload<T>`
@@ -609,7 +612,9 @@ await datasource.handle(ctx)
 
 `LivequeryRequestParser` will set `ctx.livequery.document_id` and `ctx.livequery.keys.id`. The datasource converts `id` to Mongo `_id` for document reads and writes.
 
-## Legacy Usage Example
+## Direct Query Example
+
+For imperative use, call `query(req, options)` directly without going through `handle(ctx)`. Pass the config to the constructor; `init(routes)` is not required for this path since the collection is given in `options`.
 
 ```ts
 import { MongoClient } from 'mongodb'
@@ -618,33 +623,18 @@ import { MongoDatasource } from '@livequery/mongodb'
 const client = new MongoClient(process.env.MONGO_URL!)
 await client.connect()
 
-const datasource = new MongoDatasource()
-
-await datasource.init(
-  {
-    connections: { default: client },
-    databases: ['main'],
-  },
-  [
-    {
-      method: 'GET',
-      path: '/products',
-      options: {
-        collection: 'products',
-      },
-    },
-  ]
-)
+const datasource = new MongoDatasource({
+  connections: { default: client },
+  databases: ['main'],
+})
 
 const response = await datasource.query(
   {
     method: 'get',
     ref: 'products',
     is_collection: true,
-    collection_ref: 'products',
-    schema_collection_ref: 'products',
     keys: {},
-    options: { ':limit': 10 },
+    query: { ':limit': 10 },
   },
   {
     collection: 'products',

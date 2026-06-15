@@ -3,6 +3,10 @@ import { Cursor } from "./Cursor.js"
 import { ObjectId } from "mongodb";
 import type { Collection } from "mongodb";
 
+// `query` is optional on the core LivequeryRequest. `MongoQuery.query` normalizes it to
+// `{}` once at entry, so every internal helper can treat it as always-present.
+type QueryRequest<T extends LivequeryBaseEntity> = LivequeryRequest<T> & { query: Record<string, any> }
+
 export class MongoQuery {
 
     static #is_operator(c: string): boolean {
@@ -124,7 +128,7 @@ export class MongoQuery {
         }
     }
 
-    static #parse_summary<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    static #parse_summary<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
 
 
         const parsed = Object
@@ -166,7 +170,9 @@ export class MongoQuery {
                 const is_distinc_count = `${v}`.includes('distinc')
 
 
-                const simple = is_distinc_count ? key : (exprs.length == 1 ? fns[0].key : false)
+                // A summary with no aggregate fn (only a group field or only a $match
+                // filter) leaves `fns` empty — guard `fns[0]` so it doesn't throw a 500.
+                const simple = is_distinc_count ? key : (exprs.length == 1 && fns[0] ? fns[0].key : false)
 
                 const pipelines = [
                     ...$match.length > 0 ? [{ $match }] : [],
@@ -267,33 +273,13 @@ export class MongoQuery {
                 if (k.startsWith('::')) return p
                 if (k.endsWith(':like')) return p
                 const [key, expression] = k.split(':')
-                const map = {
-                    eq: () => ({ $eq: value }),
-                    lt: () => ({ $lt: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    lte: () => ({ $lte: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    gt: () => ({ $gt: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    gte: () => ({ $gte: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    ne: () => {
-                        return { $ne: value }
-                    },
-                    in: () => ({ $in: this.#parse_array(value) }),
-                    nin: () => ({ $nin: this.#parse_array(value) }),
-                    'eq-number': () => ({ $eq: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    'neq-number': () => ({ $ne: !isNaN(Number(value)) ? Number(value) : 0 }),
-                    'eq-boolean': () => ({ $eq: `${value}`.toLowerCase() == 'true' ? true : false }),
-                    'neq-boolean': () => ({ $ne: `${value}`.toLowerCase() == 'false' ? false : true }),
-                    'eq-null': () => ({ $eq: null }),
-                    'neq-null': () => ({ $ne: null }),
-                    'eq-oid': () => ({ $eq: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
-                    'neq-oid': () => ({ $ne: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
-                }
-                const fn = map[expression as keyof typeof map || 'eq' as keyof typeof map]
-                if (!fn) return p
+                const clause = this.#operator_clause(expression, value)
+                if (!clause) return p
                 return {
                     ...p,
                     [key]: {
                         ...p[key] || {},
-                        ...fn()
+                        ...clause
                     }
                 }
             },
@@ -307,27 +293,96 @@ export class MongoQuery {
         const andMatch = and ? this.#build_match(and) : {}
         if (Object.keys(andMatch).length > 0) clauses.push(andMatch)
 
-        const orMatch = or ? this.#build_match(or) : {}
-        if (Object.keys(orMatch).length > 0) {
-            clauses.push({ $or: Object.entries(orMatch).map(([k, v]) => ({ [k]: v })) })
-        }
+        // `:or` / `:not` must OR / NOR each condition in the group as a SEPARATE branch.
+        // Building the group's combined $match and then splitting its top-level keys is
+        // lossy: a group mixing :like + a field (or two ops on one field) collapses to a
+        // single { $and } / merged key and silently degrades to an AND. #branches emits one
+        // match per condition so OR/NOR semantics are preserved.
+        const orBranches = or ? this.#branches(or) : []
+        if (orBranches.length > 0) clauses.push({ $or: orBranches })
 
-        const notMatch = not ? this.#build_match(not) : {}
-        if (Object.keys(notMatch).length > 0) {
-            clauses.push({ $nor: Object.entries(notMatch).map(([k, v]) => ({ [k]: v })) })
-        }
+        const notBranches = not ? this.#branches(not) : []
+        if (notBranches.length > 0) clauses.push({ $nor: notBranches })
 
         if (clauses.length === 0) return {}
         if (clauses.length === 1) return clauses[0]
         return { $and: clauses }
     }
 
-    static #build_search_query<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    // Map a single "field:op" filter entry to a Mongo clause body, e.g.
+    // ('gte', '10') -> { $gte: 10 }. A missing/empty operator defaults to `eq`. Returns
+    // null for unknown operators.
+    static #operator_clause(expression: string | undefined, value: any): Record<string, any> | null {
+        const map = {
+            eq: () => ({ $eq: value }),
+            lt: () => ({ $lt: !isNaN(Number(value)) ? Number(value) : 0 }),
+            lte: () => ({ $lte: !isNaN(Number(value)) ? Number(value) : 0 }),
+            gt: () => ({ $gt: !isNaN(Number(value)) ? Number(value) : 0 }),
+            gte: () => ({ $gte: !isNaN(Number(value)) ? Number(value) : 0 }),
+            ne: () => ({ $ne: value }),
+            in: () => ({ $in: this.#parse_array(value) }),
+            nin: () => ({ $nin: this.#parse_array(value) }),
+            'eq-number': () => ({ $eq: !isNaN(Number(value)) ? Number(value) : 0 }),
+            'neq-number': () => ({ $ne: !isNaN(Number(value)) ? Number(value) : 0 }),
+            'eq-boolean': () => ({ $eq: `${value}`.toLowerCase() == 'true' ? true : false }),
+            'neq-boolean': () => ({ $ne: `${value}`.toLowerCase() == 'false' ? false : true }),
+            'eq-null': () => ({ $eq: null }),
+            'neq-null': () => ({ $ne: null }),
+            'eq-oid': () => ({ $eq: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
+            'neq-oid': () => ({ $ne: ObjectId.isValid(value as string) ? new ObjectId(value as string) : value }),
+        }
+        const fn = map[(expression as keyof typeof map) || 'eq']
+        return fn ? fn() : null
+    }
+
+    // Enumerate a logical group into one $match clause PER condition, for use as $or / $nor
+    // branches. Each plain field, each :like, and each nested :and/:or/:not becomes its own
+    // branch (vs. #build_match which ANDs everything into a single object).
+    static #branches<T extends LivequeryBaseEntity>(filters: FilterConditions<T>): Record<string, any>[] {
+        if (!filters) return []
+        const {
+            ':and': and,
+            ':or': or,
+            ':not': not,
+            ...rest
+        } = filters
+
+        const branches: Record<string, any>[] = []
+
+        for (const [k, value] of Object.entries(rest)) {
+            if (k.startsWith('::')) continue
+            if (k.endsWith(':like')) {
+                const key = k.split(':like')[0]
+                branches.push({ [key]: { $regex: this.#escape_regex(`${value}`), $options: 'i' } })
+                continue
+            }
+            const [key, expression] = k.split(':')
+            const clause = this.#operator_clause(expression, value)
+            if (clause) branches.push({ [key]: clause })
+        }
+
+        if (and) {
+            const m = this.#build_match(and)
+            if (Object.keys(m).length > 0) branches.push(m)
+        }
+        if (or) {
+            const m = this.#build_match({ ':or': or } as FilterConditions<T>)
+            if (Object.keys(m).length > 0) branches.push(m)
+        }
+        if (not) {
+            const m = this.#build_match({ ':not': not } as FilterConditions<T>)
+            if (Object.keys(m).length > 0) branches.push(m)
+        }
+
+        return branches
+    }
+
+    static #build_search_query<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
         const search = req.query[":search"]
         return search ? [{ $match: { $text: { $search: `${search}` } } }] : []
     }
 
-    static #get_limit<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    static #get_limit<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
         const l = Number(req.query[':limit'])
         if (isNaN(l)) return 10
         if (l < 1) return 1
@@ -352,7 +407,7 @@ export class MongoQuery {
         }), {} as { [key: string]: number })
     }
 
-    static #build_cursor_query<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: LivequeryRequest<T>, reverse: boolean = false) {
+    static #build_cursor_query<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: QueryRequest<T>, reverse: boolean = false) {
         const limit = this.#get_limit(req)
         const after = req.query[':after']
         const before = req.query[':before']
@@ -420,7 +475,7 @@ export class MongoQuery {
         ]
     }
 
-    static #build_cursor_paging<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: LivequeryRequest<T>) {
+    static #build_cursor_paging<T extends LivequeryBaseEntity>($sort: { [key: string]: number }, req: QueryRequest<T>) {
 
         if (req.query[':after'] || req.query[':before'] || req.query[':around']) {
             // Is cursor request, get items only
@@ -478,7 +533,7 @@ export class MongoQuery {
         ]
     }
 
-    static #build_offset_paging<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    static #build_offset_paging<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
         const limit = this.#get_limit(req)
         const page = Math.max(1, Math.floor(Number(req.query[':page'])) || 1)
         const skip = (page - 1) * limit
@@ -516,7 +571,7 @@ export class MongoQuery {
         ]
     }
 
-    static #build_query_filter<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    static #build_query_filter<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
         const {
             ":after": after,
             ":before": before,
@@ -529,7 +584,7 @@ export class MongoQuery {
         return this.#parse_conditions({ ...rest, ...req.keys })
     }
 
-    static #get_sorter<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>) {
+    static #get_sorter<T extends LivequeryBaseEntity>(req: QueryRequest<T>) {
         let default_sort = -1
         const $sort = Object.entries(req.query).reduce((p, [k, order]) => {
             if (!k.endsWith(':sort')) return p
@@ -555,8 +610,12 @@ export class MongoQuery {
 
     static async query<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>, collection: Collection<T>) {
 
-        if (!req.is_collection) {
-            const { id, _id: _rawId, ...keysWithoutId } = req.keys
+        // `query` is optional on the core request; normalize once so the helpers below can
+        // rely on it being present (matches MongoDatasource.#normalizeRequest at runtime).
+        const request: QueryRequest<T> = { ...req, keys: req.keys ?? {}, query: req.query ?? {} }
+
+        if (!request.is_collection) {
+            const { id, _id: _rawId, ...keysWithoutId } = request.keys
             const aggregates = [
                 {
                     $match: {
@@ -583,20 +642,20 @@ export class MongoQuery {
             }
         }
 
-        const is_cursor_paging = req.query[':after'] || req.query[':before'] || req.query[':around'] || !req.query[':page']
+        const is_cursor_paging = request.query[':after'] || request.query[':before'] || request.query[':around'] || !request.query[':page']
 
-        const $sort = this.#get_sorter(req)
+        const $sort = this.#get_sorter(request)
 
         const pipelines = [
             { $sort },
-            ... this.#build_query_filter(req),
-            ... this.#build_search_query(req),
+            ... this.#build_query_filter(request),
+            ... this.#build_search_query(request),
             ... this.#rename_id(),
-            ...is_cursor_paging ? this.#build_cursor_paging($sort, req) : this.#build_offset_paging(req)
+            ...is_cursor_paging ? this.#build_cursor_paging($sort, request) : this.#build_offset_paging(request)
         ]
 
         const response = await collection.aggregate(pipelines).toArray() as any as Array<{
-            summary
+            summary: any
             items: T[],
             has: {
                 next: boolean
@@ -612,7 +671,7 @@ export class MongoQuery {
 
         return {
             ...response[0],
-            limit: this.#get_limit(req)
+            limit: this.#get_limit(request)
         }
 
     }

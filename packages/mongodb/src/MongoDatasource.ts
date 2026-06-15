@@ -150,8 +150,8 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const paging: Paging = {
 
             cursor: {
-                last: Cursor.caculate(items[items.length - 1] as T, req.query),
-                first: Cursor.caculate(items[0] as T, req.query)
+                last: Cursor.caculate(items[items.length - 1] as T, req.query || {}),
+                first: Cursor.caculate(items[0] as T, req.query || {})
             },
             has,
             count: {
@@ -205,11 +205,11 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         };
         const result = await collection.insertOne(merged);
         return {
-            item: {
+            item: this.#stringifyOids({
                 ...merged,
                 _id: undefined,
                 id: result.insertedId.toString()
-            }
+            })
         };
     }
 
@@ -236,11 +236,20 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const isPlainBody = req.body && typeof req.body === 'object'
             && !Object.keys(req.body).some(k => k.startsWith('$'))
         const id = keys.id ?? req.document_id
-        return {
+        return this.#stringifyOids({
             ...keys,
             ...isPlainBody ? req.body : {},
             ...id ? { id } : {}
-        }
+        })
+    }
+
+    // objectIdFields converts top-level keys/body to ObjectId instances before the write.
+    // Convert them back to hex strings for the API response so the returned item matches the
+    // string shape clients send (and that `id` already uses), instead of leaking ObjectId.
+    #stringifyOids(item: Record<string, any>) {
+        return Object.entries(item).reduce((p, [k, v]) => {
+            return { ...p, [k]: v instanceof ObjectId ? v.toString() : v }
+        }, {} as Record<string, any>)
     }
 
     #keys(req: LivequeryRequest) {

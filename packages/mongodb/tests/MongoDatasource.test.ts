@@ -249,6 +249,28 @@ describe('MongoDatasource query and writes', () => {
         })
     })
 
+    test('objectIdFields write response returns hex strings, not ObjectId instances', async () => {
+        const id = '507f1f77bcf86cd799439011'
+        const ownerId = '507f191e810c19729de860ea'
+        const products = createMockCollection('products')
+        const datasource = new MongoDatasource({ connections: { default: createMockDb({ products }) as any } })
+
+        const response = await datasource.query(
+            baseRequest({
+                method: 'PATCH',
+                keys: { id, ownerId },
+                body: { ownerId },
+            }) as any,
+            { collection: 'products', objectIdFields: ['ownerId'] }
+        )
+
+        // The filter is converted to ObjectId (asserted elsewhere), but the API response
+        // item must echo plain strings so it matches what the client sent.
+        expect(response.item).toEqual({ id, ownerId })
+        expect(typeof response.item.ownerId).toBe('string')
+        expect(response.item.ownerId).not.toBeInstanceOf(ObjectId)
+    })
+
     test('delete converts id key to _id', async () => {
         const id = '507f1f77bcf86cd799439011'
         const products = createMockCollection('products')

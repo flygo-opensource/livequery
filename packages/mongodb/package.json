@@ -30,8 +30,8 @@
   },
   "scripts": {
     "test": "bun test",
-    "build": "rm -rf build; tsc -b .",
-    "deploy": "rm -rf build && yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    "build": "rm -rf build && tsc -b .",
+    "deploy": "rm -rf build && yarn build && git add . && git commit -m \"Update\" && git push origin main && npm publish --access public"
   },
   "peerDependencies": {
     "mongodb": "^6.20.0"
