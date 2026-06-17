@@ -114,6 +114,13 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
         for (const change of e.data.changes) {
             change.collection_ref = change.ref
             this.#topics.get(change.ref)?.stream.next(change)
+            // The gateway emits realtime changes under the COLLECTION ref (e.g. `spaces`)
+            // plus the document id, and fans out to document subscribers by matching
+            // `${ref}/${id}` on its side. Document subscriptions here listen on the full ref
+            // (e.g. `spaces/<id>`), so we must also route the change to that topic — otherwise
+            // single-document `useDocument` never receives realtime updates.
+            const id = change.id ?? change.data?.id
+            if (id) this.#topics.get(`${change.ref}/${id}`)?.stream.next(change)
         }
     }
 
