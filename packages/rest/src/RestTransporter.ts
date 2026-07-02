@@ -6,12 +6,11 @@ import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, 
 import { parseJson } from './helpers/parseJson.js';
 
 
-export type RestTransporterRequest = {
+export type RestTransporterRequest = Omit<RequestInit, 'body' | 'headers'> & {
     url: string
-    method: string
     query?: Record<string, any>
-    body?: Record<string, any> | string
-    headers?: Record<string, string | undefined>
+    body?: BodyInit | Record<string, any> | null
+    headers?: HeadersInit
 }
 
 export type Promiseable<T> = T | Promise<T>
@@ -19,8 +18,53 @@ export type Promiseable<T> = T | Promise<T>
 export type RestTransporterConfig = {
     api: string
     ws?: string
+    credentials?: RequestCredentials
     onRequest?: (options: RestTransporterRequest & { ref: string, context?: Record<string, any> }) => Promiseable<Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>> | void
     onResponse?: (request: RestTransporterRequest & { ref: string }, response: LivequeryResult<any>) => Promise<void> | void
+}
+
+function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
+    const normalized: Record<string, string> = {}
+    if (!headers) return normalized
+
+    if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+        headers.forEach((value, key) => {
+            normalized[key] = value
+        })
+        return normalized
+    }
+
+    if (Array.isArray(headers)) {
+        for (const [key, value] of headers) {
+            normalized[key] = value
+        }
+        return normalized
+    }
+
+    for (const [key, value] of Object.entries(headers)) {
+        if (value !== undefined) normalized[key] = String(value)
+    }
+    return normalized
+}
+
+function isBodyInit(body: unknown): body is BodyInit {
+    return typeof body === 'string'
+        || body instanceof ArrayBuffer
+        || ArrayBuffer.isView(body)
+        || (typeof Blob !== 'undefined' && body instanceof Blob)
+        || (typeof FormData !== 'undefined' && body instanceof FormData)
+        || (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams)
+        || (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream)
+}
+
+function serializeBody(body: RestTransporterRequest['body']): BodyInit | undefined {
+    if (body == null) return undefined
+    if (isBodyInit(body)) return body
+    return JSON.stringify(body)
+}
+
+function shouldUseJsonContentType(body: RestTransporterRequest['body']) {
+    return body != null && !isBodyInit(body)
 }
 
 
@@ -77,10 +121,7 @@ export class RestTransporter implements LivequeryTransporter {
                 new Promise<undefined>(r => setTimeout(() => r(undefined), 3000))
             ])
             : undefined
-        const base_headers = {
-            ...req.body ? {
-                'Content-Type': 'application/json'
-            } : {},
+        const socket_headers = {
             ...this.socket ? {
                 socket_id: this.socket.client_id,
                 'x-lcid': this.socket.client_id,
@@ -88,8 +129,11 @@ export class RestTransporter implements LivequeryTransporter {
             } : {}
         }
         const request_headers = {
-            ...base_headers,
-            ...req.headers
+            ...shouldUseJsonContentType(req.body) ? {
+                'Content-Type': 'application/json'
+            } : {},
+            ...socket_headers,
+            ...normalizeHeaders(req.headers)
         }
         const original_request: RestTransporterRequest & { ref: string, context?: Record<string, any> } = {
             url,
@@ -100,29 +144,38 @@ export class RestTransporter implements LivequeryTransporter {
             ref: req.ref,
             context: req.context
         }
-        const { response: fake_response, headers, ...modified } = await this.config.onRequest?.(original_request) || {}
+        const modifications = await this.config.onRequest?.(original_request) || {}
+        const { response: fake_response, headers, body: modified_body, ...modified } = modifications
         if (fake_response) {
             this.config.onResponse && await this.config.onResponse(original_request, fake_response)
             if (fake_response.error) throw fake_response.error
             return fake_response.data as T
         }
+        const has_modified_body = Object.prototype.hasOwnProperty.call(modifications, 'body')
+        const body = has_modified_body ? modified_body : req.body
+        const final_body = serializeBody(body)
         const request = {
             ref: req.ref,
             url,
             method: req.method,
-            ...req.body ? { body: typeof req.body === 'string' ? req.body : JSON.stringify(req.body) } : {},
+            ...this.config.credentials ? { credentials: this.config.credentials } : {},
             ...modified as any as {},
+            ...final_body !== undefined ? { body: final_body } : {},
             headers: {
-                ...req.body && typeof req.body != 'string' ? { 'Content-Type': 'application/json' } : {},
-                ...request_headers,
-                ...headers
+                ...shouldUseJsonContentType(body) ? { 'Content-Type': 'application/json' } : {},
+                ...socket_headers,
+                ...normalizeHeaders(req.headers),
+                ...normalizeHeaders(headers)
             },
         }
         const response: LivequeryResult<T> = await (async () => {
             try {
                 const controller = new AbortController()
                 const timer = setTimeout(() => controller.abort(), 30000)
-                const result = await fetch(request.url, { ...request, signal: controller.signal }).finally(() => clearTimeout(timer))
+                const result = await fetch(request.url, {
+                    ...request,
+                    signal: controller.signal
+                }).finally(() => clearTimeout(timer))
                 const body = await result.text()
                 const parsed = parseJson(body)
                 if (!result.ok) {
@@ -145,7 +198,7 @@ export class RestTransporter implements LivequeryTransporter {
             } catch (e) {
                 return {
                     error: {
-                        code: e instanceof Error ? e.name : 'UnknownError',
+                        code: e instanceof TypeError ? 'NETWORK_ERROR' : e instanceof Error ? e.name : 'UnknownError',
                         message: e instanceof Error ? e.message : 'UnknownError'
                     }
                 }
@@ -159,7 +212,7 @@ export class RestTransporter implements LivequeryTransporter {
         return response as any as T
     }
 
-    query<T extends Doc>({ ref, filters, headers, context }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: Record<string, string>, context?: Record<string, any> }) {
+    query<T extends Doc>({ ref, filters, headers, context }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: HeadersInit, context?: Record<string, any> }) {
         const ready$ = this.socket
             ? merge(
                 this.socket.pipe(filter(s => !!s.connected), map(() => Date.now())),
@@ -241,7 +294,7 @@ export class RestTransporter implements LivequeryTransporter {
                             } as Partial<LivequeryQueryResult>
                         }),
                         catchError(e => {
-                            const error = e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || 'UnknownError', message: e.message || 'An unknown error occurred' }
+                            const error = e instanceof TypeError ? { code: 'NETWORK_ERROR', message: e.message } : e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || 'UnknownError', message: e.message || 'An unknown error occurred' }
                             return of({ error, source: "query" } as Partial<LivequeryQueryResult>)
                         })
 

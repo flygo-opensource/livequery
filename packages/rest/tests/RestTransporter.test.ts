@@ -64,6 +64,62 @@ describe("RestTransporter", () => {
         expect(calls[0].init?.method).toBe("POST");
     });
 
+    test("forwards configured credentials", async () => {
+        const calls: Array<{ init?: RequestInit }> = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            calls.push({ init });
+            return new Response(JSON.stringify({
+                data: {
+                    items: [],
+                    count: { current: 0, total: 0 },
+                    has: {},
+                    cursor: {}
+                }
+            }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({
+            api: "https://api.example.com",
+            credentials: "include"
+        });
+        await firstValueFrom(transporter.query<Todo>({ ref: "todos" }));
+
+        expect(calls[0].init?.credentials).toBe("include");
+    });
+
+    test("normalizes HeadersInit values returned by onRequest", async () => {
+        const calls: Array<{ init?: RequestInit }> = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            calls.push({ init });
+            return new Response(JSON.stringify({
+                data: {
+                    items: [],
+                    count: { current: 0, total: 0 },
+                    has: {},
+                    cursor: {}
+                }
+            }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({
+            api: "https://api.example.com",
+            onRequest: () => ({
+                headers: new Headers([
+                    ["x-from-headers", "yes"]
+                ])
+            })
+        });
+        await firstValueFrom(transporter.query<Todo>({
+            ref: "todos",
+            headers: [["x-from-array", "yes"]]
+        }));
+
+        expect(calls[0].init?.headers).toMatchObject({
+            "x-from-array": "yes",
+            "x-from-headers": "yes"
+        });
+    });
+
     test("throws a structured error for non-2xx responses", async () => {
         globalThis.fetch = (async () => new Response(JSON.stringify({
             error: { message: "short and stout" }

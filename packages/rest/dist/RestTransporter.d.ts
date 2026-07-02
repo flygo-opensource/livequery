@@ -1,15 +1,15 @@
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/client';
-export type RestTransporterRequest = {
+export type RestTransporterRequest = Omit<RequestInit, 'body' | 'headers'> & {
     url: string;
-    method: string;
     query?: Record<string, any>;
-    body?: Record<string, any> | string;
-    headers?: Record<string, string | undefined>;
+    body?: BodyInit | Record<string, any> | null;
+    headers?: HeadersInit;
 };
 export type Promiseable<T> = T | Promise<T>;
 export type RestTransporterConfig = {
     api: string;
     ws?: string;
+    credentials?: RequestCredentials;
     onRequest?: (options: RestTransporterRequest & {
         ref: string;
         context?: Record<string, any>;
@@ -48,7 +48,7 @@ export declare class RestTransporter implements LivequeryTransporter {
     query<T extends Doc>({ ref, filters, headers, context }: {
         ref: string;
         filters?: Partial<LivequeryFilters<T>>;
-        headers?: Record<string, string>;
+        headers?: HeadersInit;
         context?: Record<string, any>;
     }): import("rxjs").Observable<Partial<LivequeryQueryResult>>;
     add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>, context?: Record<string, any>): Promise<T>;
