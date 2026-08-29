@@ -1,5 +1,4 @@
 import type { LivequeryContext, LivequeryHandler, LivequeryRequest, RawRequest } from './LivequeryContext.js'
-import type { WebsocketGateway } from './WebsocketGateway.js'
 
 export type HttpRequestContext = {
     pathname: string

@@ -1,11 +1,13 @@
-import { randomUUID } from "crypto"
-
-export const API_GATEWAY_NAMESPACE = process.env.API_GATEWAY_NAMESPACE || 'default'
-export const LIVEQUERY_MAGIC_KEY = `${process.env.LIVEQUERY_MAGIC_KEY || 'livequery'}/`
-export const API_GATEWAY_MULTICAST_PORT = Number(process.env.UDP_PUBLIC_PORT || 11001)
-export const API_GATEWAY_MULTICAST_ADDRESS = process.env.UDP_MULTICAST_ADDRESS || "239.0.1.1"
-export const API_GATEWAY_WHITELIST_ADDRESS = process.env.UDP_WHITELIST_ADDRESS || ''
-export const NODE_ID = randomUUID()
+export const API_GATEWAY_NAMESPACE = typeof process !== 'undefined' ? process.env.OHAYO_DISCOVERY_NAMESPACE || 'default' : 'default'
+export const OHAYO_DISCOVERY_KEY = typeof process !== 'undefined' ? process.env.OHAYO_DISCOVERY_KEY || 'livequery' : 'livequery'
+export const OHAYO_DISCOVERY_PORT = typeof process !== 'undefined' ? Number(process.env.OHAYO_DISCOVERY_PORT || 12001) : 12001
+export const OHAYO_API_GATEWAY = typeof process !== 'undefined' ? process.env.OHAYO_API_GATEWAY || '' : ''
+export const OHAYO_WS_GATEWAY = typeof process !== 'undefined' ? process.env.OHAYO_WS_GATEWAY || '' : ''
+export const API_GATEWAY_MULTICAST_PORT = typeof process !== 'undefined' ? Number(process.env.OHAYO_DISCOVERY_PORT || 11001) : 11001
+export const API_GATEWAY_MULTICAST_ADDRESS = typeof process !== 'undefined' ? process.env.OHAYO_UDP_MULTICAST_ADDRESS || "239.0.1.1" : "239.0.1.1"
+export const API_GATEWAY_WHITELIST_ADDRESS = typeof process !== 'undefined' ? process.env.OHAYO_UDP_WHITELIST_ADDRESS || '' : ''
+// Math.random() is safe at module scope in all runtimes including CF Workers
+export const NODE_ID = Array.from({ length: 4 }, () => Math.random().toString(16).slice(2, 10)).join('-')
 export const LIVEQUERY_API_GATEWAY_DEBUG = process.env.LIVEQUERY_API_GATEWAY_DEBUG || false
 export const WEBSOCKET_PATH = process.env.REALTIME_UPDATE_SOCKET_PATH || '/livequery/realtime-updates'
 

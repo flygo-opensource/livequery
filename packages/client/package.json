@@ -1,0 +1,115 @@
+{
+  "name": "@livequery/client",
+  "version": "3.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./LivequeryCollection": {
+      "types": "./dist/LivequeryCollection.d.ts",
+      "import": "./dist/LivequeryCollection.js",
+      "default": "./dist/LivequeryCollection.js"
+    },
+    "./LivequeryClient": {
+      "types": "./dist/LivequeryClient.d.ts",
+      "import": "./dist/LivequeryClient.js",
+      "default": "./dist/LivequeryClient.js"
+    },
+    "./LivequeryDocument": {
+      "types": "./dist/LivequeryDocument.d.ts",
+      "import": "./dist/LivequeryDocument.js",
+      "default": "./dist/LivequeryDocument.js"
+    },
+    "./LivequeryMemoryStorage": {
+      "types": "./dist/LivequeryMemoryStorage.d.ts",
+      "import": "./dist/LivequeryMemoryStorage.js",
+      "default": "./dist/LivequeryMemoryStorage.js"
+    },
+    "./LivequeryStorage": {
+      "types": "./dist/LivequeryStorage.d.ts",
+      "import": "./dist/LivequeryStorage.js",
+      "default": "./dist/LivequeryStorage.js"
+    },
+    "./LivequeryStorge": {
+      "types": "./dist/LivequeryStorge.d.ts",
+      "import": "./dist/LivequeryStorge.js",
+      "default": "./dist/LivequeryStorge.js"
+    },
+    "./LivequeryTransporter": {
+      "types": "./dist/LivequeryTransporter.d.ts",
+      "import": "./dist/LivequeryTransporter.js",
+      "default": "./dist/LivequeryTransporter.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js",
+      "default": "./dist/types.js"
+    },
+    "./helpers/filterDocs": {
+      "types": "./dist/helpers/filterDocs.d.ts",
+      "import": "./dist/helpers/filterDocs.js",
+      "default": "./dist/helpers/filterDocs.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "LivequeryCollection": [
+        "./dist/LivequeryCollection.d.ts"
+      ],
+      "LivequeryClient": [
+        "./dist/LivequeryClient.d.ts"
+      ],
+      "LivequeryDocument": [
+        "./dist/LivequeryDocument.d.ts"
+      ],
+      "LivequeryMemoryStorage": [
+        "./dist/LivequeryMemoryStorage.d.ts"
+      ],
+      "LivequeryStorage": [
+        "./dist/LivequeryStorage.d.ts"
+      ],
+      "LivequeryStorge": [
+        "./dist/LivequeryStorge.d.ts"
+      ],
+      "LivequeryTransporter": [
+        "./dist/LivequeryTransporter.d.ts"
+      ],
+      "types": [
+        "./dist/types.d.ts"
+      ],
+      "helpers/filterDocs": [
+        "./dist/helpers/filterDocs.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:js": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly false --declaration false --declarationMap false",
+    "build:types": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "test": "bun test",
+    "build:watch": "bunx tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/chrome": "^0.1.38",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "rxjs": "^7.8.2",
+    "uuidv7": "^1.2.1"
+  },
+  "private": false
+}

@@ -2,8 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 import { Subject } from 'rxjs'
-import { ApiGatewayHandler, type ServiceApiMetadata } from '../src/index.js'
-import type { UdpDiscovery } from '../src/UdpDiscovery.js'
+import { ApiGatewayHandler, type DiscoveryMessage, type ServiceApiMetadata } from '../src/index.js'
 
 describe('ApiGatewayHandler', () => {
     test('updates a service route when the same node publishes a newer metadata version', async () => {
@@ -504,7 +503,14 @@ describe('ApiGatewayHandler', () => {
                 port: service.port,
                 version: 1,
             }),
-            role: 'gateway',
+            data: {
+                ...metadata({
+                    node_id: 'gateway-metadata',
+                    port: service.port,
+                    version: 1,
+                }).data,
+                role: 'gateway',
+            },
         })
         await sleep(10)
 
@@ -543,13 +549,13 @@ describe('ApiGatewayHandler', () => {
 })
 
 function createDiscovery() {
-    const subject = new Subject<ServiceApiMetadata>() as Subject<ServiceApiMetadata> & {
-        broadcast(node: ServiceApiMetadata): Promise<void>
+    const subject = new Subject<DiscoveryMessage<ServiceApiMetadata>>() as Subject<DiscoveryMessage<ServiceApiMetadata>> & {
+        broadcast(message: DiscoveryMessage<ServiceApiMetadata>): Promise<void>
         close(): void
     }
     subject.broadcast = async () => {}
     subject.close = () => subject.complete()
-    return subject as unknown as UdpDiscovery<ServiceApiMetadata>
+    return subject
 }
 
 function metadata(options: {
@@ -557,17 +563,22 @@ function metadata(options: {
     port: number
     version: number
     namespace?: string
-}): ServiceApiMetadata {
+}): DiscoveryMessage<ServiceApiMetadata> {
     return {
         node_id: options.node_id,
-        host: '127.0.0.1',
         namespace: options.namespace ?? 'default',
-        version: options.version,
-        role: 'service',
-        name: 'products',
-        port: options.port,
-        paths: [{ method: 'GET', path: 'livequery/products' }],
-        linked: [],
+        tags: ['livequery', 'service'],
+        version: String(options.version),
+        created_at: Date.now(),
+        seq: options.version,
+        data: {
+            host: '127.0.0.1',
+            role: 'service',
+            name: 'products',
+            port: options.port,
+            paths: [{ method: 'GET', path: 'livequery/products' }],
+            linked: [],
+        },
     }
 }
 

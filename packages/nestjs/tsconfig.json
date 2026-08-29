@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "strict": true,
+    "module": "NodeNext",
+    "declaration": true,
+    "removeComments": true,
+    "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "target": "ESNext",
+    "sourceMap": true,
+    "moduleResolution": "NodeNext",
+    "outDir": "./build",
+    "incremental": false,
+    "useDefineForClassFields": true,
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "lib": [
+      "esnext.asynciterable",
+      "dom",
+      "ESNext.Array",
+      "ESNext.String",
+      "ESNext"
+    ],
+    "esModuleInterop": true,
+    "importHelpers": true
+  },
+  "exclude": [
+    "node_modules",
+    "tests",
+    "out",
+    "src/schema.ts",
+    "bin",
+    "./build/**/*"
+  ]
+}

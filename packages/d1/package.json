@@ -1,0 +1,36 @@
+{
+  "name": "@livequery/d1",
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "url": "git@github.com:livequery/d1.git"
+  },
+  "version": "3.0.0",
+  "description": "Cloudflare D1 datasource mapping for @livequery ecosystem",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/src/**/*"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "@livequery/core": "file:../core",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "build": "rm -rf build && tsc -b .",
+    "type-check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@cloudflare/workers-types": "^4"
+  }
+}

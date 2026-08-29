@@ -1,0 +1,82 @@
+{
+  "name": "@livequery/rpc",
+  "version": "3.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "bun run clean && bunx tsc -p tsconfig.build.json",
+    "build:watch": "bunx tsc -p tsconfig.build.json --watch",
+    "test": "bun test tests/",
+    "prepublishOnly": "bun run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./ExtensionChannel": {
+      "types": "./dist/ExtensionChannel.d.ts",
+      "import": "./dist/ExtensionChannel.js",
+      "default": "./dist/ExtensionChannel.js"
+    },
+    "./RpcChannel": {
+      "types": "./dist/RpcChannel.d.ts",
+      "import": "./dist/RpcChannel.js",
+      "default": "./dist/RpcChannel.js"
+    },
+    "./SharedWorkerChannel": {
+      "types": "./dist/SharedWorkerChannel.d.ts",
+      "import": "./dist/SharedWorkerChannel.js",
+      "default": "./dist/SharedWorkerChannel.js"
+    },
+    "./ServiceLinker": {
+      "types": "./dist/ServiceLinker.d.ts",
+      "import": "./dist/ServiceLinker.js",
+      "default": "./dist/ServiceLinker.js"
+    },
+    "./WorkerService": {
+      "types": "./dist/WorkerService.d.ts",
+      "import": "./dist/WorkerService.js",
+      "default": "./dist/WorkerService.js"
+    },
+    "./WorkerManager": {
+      "types": "./dist/WorkerManager.d.ts",
+      "import": "./dist/WorkerManager.js",
+      "default": "./dist/WorkerManager.js"
+    },
+    "./LimitConcurrency": {
+      "types": "./dist/LimitConcurrency.d.ts",
+      "import": "./dist/LimitConcurrency.js",
+      "default": "./dist/LimitConcurrency.js"
+    },
+    "./StorageBehaviorSubject": {
+      "types": "./dist/StorageBehaviorSubject.d.ts",
+      "import": "./dist/StorageBehaviorSubject.js",
+      "default": "./dist/StorageBehaviorSubject.js"
+    },
+    "./RxjsQueue": {
+      "types": "./dist/RxjsQueue.d.ts",
+      "import": "./dist/RxjsQueue.js",
+      "default": "./dist/RxjsQueue.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/chrome": "^0.1.38",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "rxjs": "^7.8.2",
+    "uuidv7": "^1.2.1"
+  },
+  "private": false
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@livequery/discovery",
+  "version": "3.0.0",
+  "description": "Runtime-neutral discovery contracts for Livequery",
+  "license": "MIT",
+  "type": "module",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": { ".": { "types": "./build/index.d.ts", "import": "./build/index.js" } },
+  "files": ["build/**/*"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "bun test tests/" },
+  "dependencies": { "rxjs": "x" },
+  "devDependencies": { "typescript": "^5.1.6" }
+}

@@ -9,6 +9,8 @@
 export { BunWebsocketGateway } from './BunWebsocketGateway.js'
 export * from './WebsocketGatewayBase.js'
 export * from './const.js'
+export * from './Discovery.js'
+export * from './HttpDiscovery.js'
 export * from './UdpDiscovery.js'
 export * from './ApiGatewayHandler.js'
 export * from './ApiServiceLinker.js'

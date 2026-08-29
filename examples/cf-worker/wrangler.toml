@@ -1,0 +1,22 @@
+name = "livequery-worker"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "livequery"
+database_id = "local-dev"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "YOUR_KV_NAMESPACE_ID"
+preview_id = "YOUR_KV_PREVIEW_ID"
+
+[[durable_objects.bindings]]
+name = "GATEWAY"
+class_name = "RealtimeGatewayDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RealtimeGatewayDO"]

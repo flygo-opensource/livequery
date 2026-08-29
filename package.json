@@ -1,0 +1,19 @@
+{
+  "name": "livequery-workspace",
+  "private": true,
+  "packageManager": "bun@1.2.5",
+  "workspaces": [
+    "packages/*",
+    "core",
+    "bunjs",
+    "nestjs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck",
+    "test": "bun scripts/test-packages.ts && bun run --cwd examples test"
+  },
+  "overrides": {
+    "@ohayo/udp": "file:../ohayo/udp"
+  }
+}

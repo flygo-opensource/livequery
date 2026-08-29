@@ -1,17 +1,9 @@
 /**
- * Edge runtime entry point — `@livequery/core/workers`.
- *
- *   import { EdgeWebsocketGateway } from '@livequery/core/workers'
- *
- * Use this on Cloudflare Workers / Deno Deploy / Vercel Edge so the build
- * does not pull in `ws` or Bun globals.
+ * Cloudflare/edge-safe compatibility entrypoint. It intentionally exports no
+ * Node HTTP server, UDP transport, `ws` implementation, or `process.env` config.
  */
-export { EdgeWebsocketGateway } from './EdgeWebsocketGateway.js'
-export * from './WebsocketGatewayBase.js'
-export * from './const.js'
-export * from './ApiGatewayHandler.js'
-export * from './ApiServiceLinker.js'
-export * from './LivequeryContext.js'
-export * from './LivequeryDatasource.js'
-export * from './LivequeryRequestParser.js'
-export * from './helpers/hidePrivateFields.js'
+export * from '@livequery/protocol'
+export * from '@livequery/service'
+export * from '@livequery/gateway'
+export * from '@livequery/realtime'
+export * from '@livequery/realtime-cloudflare'

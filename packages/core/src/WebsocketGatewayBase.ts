@@ -25,29 +25,27 @@ import {
 import { UpdatedData, LivequeryBaseEntity } from './LivequeryBaseEntity.js'
 import { LIVEQUERY_API_GATEWAY_DEBUG } from './const.js'
 import { LivequeryContext, LivequeryHandler } from './LivequeryContext.js'
+import type {
+    LivequeryHelloEvent,
+    LivequeryRealtimeEvent,
+    LivequeryStartEvent,
+    LivequerySubscribeEvent,
+    LivequerySyncEvent,
+    LivequeryUnsubscribeEvent,
+    RealtimeSubscription,
+} from './LivequeryRealtime.js'
+
+export type { RealtimeSubscription } from './LivequeryRealtime.js'
 
 
 // ─── Event types ──────────────────────────────────────────────────────────────
-
-export type RealtimeSubscription = {
-    ref: string,
-    client_id: string
-    gateway_id: string
-    listener_node_id: string
-}
-
-type HelloEvent = { event: 'hello'; gid: string, binary: boolean }
-type StartEvent = { event: 'start'; data: { id: string; auth: string } }
-type SubscribeEvent = { event: 'subscribe' } & RealtimeSubscription
-type UnsubscribeEvent = { event: 'unsubscribe'; data: { ref?: string; refs?: string[]; client_id: string } }
-type SyncEvent = { event: 'sync'; cids: string[]; data?: { changes: UpdatedData[] } }
-type AnyEvent = HelloEvent | StartEvent | SubscribeEvent | UnsubscribeEvent | SyncEvent
 
 type SubscriptionMeta = { gateway_id: string; listener_node_id: string }
 
 type GatewayId = string
 type ClientId = string
 type Ref = string
+type BinaryMessage = ArrayBuffer | ArrayBufferView
 
 const ENDPOINT_RESTARTED = 'ENDPOINT_RESTARTED'
 
@@ -80,6 +78,16 @@ function randomId(): string {
     if (g.crypto?.randomUUID) return g.crypto.randomUUID()
     // Fallback for older runtimes — sufficient uniqueness for gateway/auth ids.
     return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join('-')
+}
+
+function decodeMessage(data: string | BinaryMessage): string {
+    if (typeof data === 'string') return data
+    if (data instanceof ArrayBuffer) return new TextDecoder().decode(data)
+    return new TextDecoder().decode(new Uint8Array(
+        data.buffer,
+        data.byteOffset,
+        data.byteLength,
+    ))
 }
 
 
@@ -133,10 +141,12 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                 // convenience — the UpdatedData type only carries it inside
                 // `data`, but consumers commonly want it at the change level.
                 const change = { ref, data, type, id: data?.id } as UpdatedData & { id?: string }
-                const event: SyncEvent = { event: 'sync', cids, data: { changes: [change] } }
+                const event: LivequerySyncEvent = { event: 'sync', cids, data: { changes: [change] } }
                 // A socket may close between the liveness check and the write; never
                 // let one dead peer break the fan-out to the others.
-                try { socket.send(JSON.stringify(event)) } catch { /* dead socket */ }
+                setTimeout(() => {
+                    try { socket.send(JSON.stringify(event)) } catch { /* dead socket */ }
+                }, 0)
             }
         })
     }
@@ -151,15 +161,11 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     }
 
     /** Forward a frame received from the wire into the protocol. */
-    onMessage(socket: SocketLike, raw: string | Buffer | ArrayBuffer): void {
+    onMessage(socket: SocketLike, raw: string | BinaryMessage): void {
         if (this._closed) return
         try {
-            const text = typeof raw === 'string'
-                ? raw
-                : raw instanceof ArrayBuffer
-                    ? new TextDecoder().decode(raw)
-                    : raw.toString()
-            const msg = JSON.parse(text) as AnyEvent
+            const text = decodeMessage(raw)
+            const msg = JSON.parse(text) as LivequeryRealtimeEvent
             if (msg.event === 'start') this._onStart(socket, msg.data)
             else if (msg.event === 'unsubscribe') this.unsubscribe_client(socket, msg.data)
             else if (msg.event === 'subscribe') this.listen([msg])
@@ -195,7 +201,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             }
         }
 
-        const hello: HelloEvent = { event: 'hello', gid: this.id, binary: true }
+        const hello: LivequeryHelloEvent = { event: 'hello', gid: this.id, binary: true }
         socket.send(JSON.stringify(hello))
     }
 
@@ -279,7 +285,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                 if (listener_node_id !== this.id) {
                     const target = this._connections.get(listener_node_id)
                     if (target) {
-                        const ev: UnsubscribeEvent = { event: 'unsubscribe', data: { client_id, ref } }
+                        const ev: LivequeryUnsubscribeEvent = { event: 'unsubscribe', data: { client_id, ref } }
                         target.send(JSON.stringify(ev))
                     }
                 }
@@ -295,7 +301,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             if (gateway_id !== this.id) {
                 const target = this._connections.get(gateway_id)
                 if (target) {
-                    const ev: SubscribeEvent = { event: 'subscribe', client_id, gateway_id, ref, listener_node_id }
+                    const ev: LivequerySubscribeEvent = { event: 'subscribe', client_id, gateway_id, ref, listener_node_id }
                     target.send(JSON.stringify(ev))
                 }
             }
@@ -328,7 +334,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             if (listener_node_id && listener_node_id !== this.id) {
                 const gateway = this._connections.get(listener_node_id)
                 if (gateway) {
-                    const ev: UnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
+                    const ev: LivequeryUnsubscribeEvent = { event: 'unsubscribe', data: { ref, client_id } }
                     gateway.send(JSON.stringify(ev))
                 }
             }
@@ -375,16 +381,16 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             map(() => new WS(url)),
             switchMap((ws) => merge(
                 fromEvent(ws, 'open').pipe(tap(() => {
-                    const ev: StartEvent = { event: 'start', data: { id: this.id, auth } }
+                    const ev: LivequeryStartEvent = { event: 'start', data: { id: this.id, auth } }
                     ws.send(JSON.stringify(ev))
                 })),
                 fromEvent(ws, 'close').pipe(map(() => { throw 'CLOSED' })),
                 fromEvent(ws, 'error').pipe(map(e => { throw e })),
-                fromEvent<MessageEvent | { data: string | Buffer }>(ws, 'message').pipe(
+                fromEvent<MessageEvent<string | BinaryMessage> | { data: string | BinaryMessage }>(ws, 'message').pipe(
                     map((e: any) => {
-                        const data = (e?.data ?? e) as string | Buffer
-                        const text = typeof data === 'string' ? data : data.toString()
-                        const parsed = JSON.parse(text) as AnyEvent
+                        const data = (e?.data ?? e) as string | BinaryMessage
+                        const text = decodeMessage(data)
+                        const parsed = JSON.parse(text) as LivequeryRealtimeEvent
 
                         if (parsed.event === 'hello') {
                             const old_id = gateway$.getValue().id
@@ -416,10 +422,10 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                             return null
                         }
 
-                        return parsed as SyncEvent
+                        return parsed as LivequerySyncEvent
                     }),
                     filter(Boolean),
-                    map(({ cids, data }) => cids.map(client_id => ({ event: 'sync', data, client_id }))),
+                    map(({ cids = [], data }) => cids.map(client_id => ({ event: 'sync', data, client_id }))),
                     mergeAll(),
                     tap(({ client_id, ...event }: any) => {
                         this._connections.get(client_id)?.send(JSON.stringify(event))

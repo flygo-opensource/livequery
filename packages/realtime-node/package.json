@@ -1,0 +1,14 @@
+{
+  "name": "@livequery/realtime-node",
+  "version": "3.0.0",
+  "description": "Node.js WebSocket runtime adapter for Livequery",
+  "license": "MIT",
+  "type": "module",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "exports": { ".": { "types": "./build/index.d.ts", "import": "./build/index.js" } },
+  "files": ["build/**/*"],
+  "scripts": { "build": "tsc -p tsconfig.json", "test": "bun test tests/" },
+  "dependencies": { "@livequery/protocol": "workspace:*", "@livequery/realtime": "workspace:*", "ws": "^8.18.0" },
+  "devDependencies": { "@types/node": "x", "@types/ws": "^8", "typescript": "^5.1.6" }
+}

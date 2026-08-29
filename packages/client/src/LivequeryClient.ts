@@ -1,0 +1,603 @@
+import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
+import type { LivequeryStorage } from "./LivequeryStorage.js"
+import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
+import { tryCatch } from "./helpers/tryCatch.js"
+import { whenCompleted } from "./helpers/whenCompleted.js"
+import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
+import { useDispose } from "./helpers/useDispose.js"
+import { uuidv7 } from 'uuidv7'
+
+export type LivequeryClientOptions = {
+    transporters: Record<string, LivequeryTransporter>
+    storage: LivequeryStorage
+}
+
+export type LivequeryLoadingState = null | 'next' | 'prev' | 'all'
+
+type CollectionId = string
+type Ref = string
+
+export type SyncRequest = DataChangeEvent & {
+    ref: string,
+    collection_ref: string
+    source: RealtimeChangeSource
+}
+
+
+
+export type ConflictResolverFunction = <T extends Doc>(e: {
+    from: Record<string, string | number | boolean>
+    old_document: T
+    change: DataChangeEvent
+}) => {
+    approved: boolean
+    document: T
+}
+
+
+export type LivequeryClientConfig = {
+    storage: LivequeryStorage
+    transporters: Record<string, LivequeryTransporter>
+}
+
+export type ActionMode = 'server-first' | 'local-first' | 'local-only'
+
+export type CollectionMetadata = {
+    collection_id: string
+    document_id?: string
+    data$: Subject<Partial<LivequeryQueryResult> & {
+        from: RealtimeChangeSource
+    }>
+    collection_ref: string
+    mode: 'server-first' | 'local-first' | 'cache-first' | 'local-only'
+    filters: Partial<LivequeryFilters<any>>
+    parsedFilters: ParsedFilter[]
+}
+
+type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
+
+
+
+export class LivequeryClient {
+
+    #collections = new Map<CollectionId, CollectionMetadata>()
+    #refs = new Map<Ref, Set<CollectionId>>()
+    #queries$ = new Subject<Query>()
+    #localSyncingStop$ = new Subject<void>()
+    #adding = new Map<string, Subject<void>>()
+    #running = new Subscription()
+
+    constructor(private readonly config: LivequeryClientConfig) {
+        this.#start()
+    }
+
+    #cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
+    #query(e: Query, deduplicate_key?: string) {
+        const clear = () => deduplicate_key && this.#cache.delete(deduplicate_key)
+        const cached = deduplicate_key && this.#cache.get(deduplicate_key)
+        if (cached) return Object.assign(cached, { clear })
+        const $ = from(Object.values(this.config.transporters)).pipe(
+            mergeMap(transporter => (
+                transporter.query(e).pipe(
+                    mergeMap(async result => {
+                        for (const change of result.changes || []) {
+                            change.type == 'added' && change.data && await this.config.storage.add(change.collection_ref, {
+                                id: change.data.id,
+                                ...change.data
+                            })
+                            change.type == 'modified' && change.data && await this.config.storage.update(change.collection_ref, change.id, change.data)
+                            change.type == 'removed' && await this.config.storage.delete(change.collection_ref, change.id)
+                        }
+                        return result
+                    }),
+                    map((result, index) => ({ result, index })),
+                    mergeMap(({ result, index }) => {
+                        if (index == 0) return of(result)
+                        const changes = result.changes || []
+
+                        if (changes.length === 0) return EMPTY
+                        const lock$ = this.#adding.get(e.collection.collection_ref)
+
+                        if (!lock$) {
+                            return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes })).pipe(
+                                switchMap(() => EMPTY)
+                            )
+                        }
+
+                        const ok_changes = changes.filter(c => c.type != 'added')
+                        const delay_changes = changes.filter(c => c.type == 'added')
+
+                        return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: ok_changes })).pipe(
+                            switchMap(() => lock$.pipe(
+                                mergeMap(() => from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: delay_changes }))),
+                                switchMap(() => EMPTY)
+                            ))
+                        )
+                    })
+                )
+            )),
+            finalize(clear),
+            shareReplay({ bufferSize: 1, refCount: true })
+        )
+        deduplicate_key && this.#cache.set(deduplicate_key, $)
+        return Object.assign($, { clear })
+    }
+
+    #start() {
+
+        // const collection_errors = new Map<string, { code: string, message: string }>()
+        this.#running = merge(
+
+            // Server queries
+            this.#queries$.pipe(
+                filter(req => req.collection.mode == 'server-first' || req.collection.mode == 'cache-first'),
+                mergeMap(e => {
+                    const deduplicate_key = `${e.collection.collection_id}:${JSON.stringify(e.filters, Object.keys(e.filters || {}).sort())}`
+                    const before = e.filters?.[':before']
+                    const after = e.filters?.[':after']
+                    const around = e.filters?.[':around']
+                    const loading = ((!before && !after) || (before && after) || around) ? 'all' : (before ? 'prev' : 'next')
+                    e.collection.data$.next({
+                        from: 'query',
+                        loading: e.collection.document_id ? 'all' : loading
+                    })
+                    return this.#query(e, deduplicate_key).pipe(
+                        takeUntil(whenCompleted(e.collection.data$)),
+                        tap(result => {
+                            e.collection.data$.next({
+                                ...result,
+                                from: 'query',
+                                loading: null
+                            })
+                        })
+                    )
+                })
+            ),
+
+
+            // Local queries
+            this.#queries$.pipe(
+                filter(req => req.collection.mode == 'local-first'),
+                groupBy(
+                    e => `${e.collection.collection_ref}/${e.collection.document_id || '::'}`,
+                    // stopLocalSyncing() đóng group đang mở; group bị xóa khỏi groupBy nên
+                    // lần query kế tiếp của cùng collection_ref tạo group mới → fetch lại từ index 0.
+                    { duration: () => this.#localSyncingStop$ }
+                ),
+                mergeMap($ => $.pipe(
+                    mergeMap((e, index) => {
+                        index == 0 && e.collection.data$.next({
+                            from: 'query',
+                            loading: 'all'
+                        })
+                        return merge(
+                            of(e),
+                            index > 0 ? EMPTY : defer(() => {
+                                return this.#query(e).pipe(
+                                    expand(res => {
+                                        const next = res.paging?.next
+                                        if (!next) return EMPTY
+                                        return this.#query({
+                                            ...e,
+                                            filters: { ':after': next.cursor }
+                                        })
+                                    }),
+                                    mergeMap((result, index) => {
+                                        // if (index == 0) {
+                                        //     if (result.error) {
+                                        //         collection_errors.set(e.collection.collection_ref, result.error)
+                                        //     } else {
+                                        //         collection_errors.delete(e.collection.collection_ref)
+                                        //     }
+                                        // }
+                                        return from(this.#broadcast(e.collection.collection_ref, 'query', result)).pipe(
+                                            map(() => result)
+                                        )
+                                    })
+
+                                )
+                            }).pipe(switchMap(() => EMPTY))
+                        )
+                    }),
+                    scan(
+                        (p, c) => new Set([...p, c.collection.data$].filter($ => !$.closed)),
+                        new Set<Subject<any>>()
+                    ),
+                    map(set => [...set].map($ => whenCompleted($))),
+                    switchMap(list => forkJoin(list)),
+                    takeWhile(() => false)
+                ))
+
+            )
+        ).subscribe()
+    }
+
+    /**
+     * Đóng mọi local-first sync đang chạy. Lần query kế tiếp của mỗi collection_ref
+     * sẽ được fetch lại từ đầu thay vì bị dedup. Gọi khi logout / đổi account.
+     */
+    stopLocalSyncing() {
+        this.#localSyncingStop$.next()
+    }
+
+    watch(ref: string, collection_id: string, mode: CollectionMetadata['mode']) {
+        const refs = ref.split('/')
+        const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
+        const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
+        const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
+        collections.add(collection_id)
+        this.#refs.set(collection_ref, collections)
+        const data$ = new Subject() as CollectionMetadata['data$']
+        this.#collections.set(collection_id, {
+            data$,
+            document_id,
+            collection_id,
+            collection_ref,
+            mode,
+            filters: {},
+            parsedFilters: []
+        })
+        return data$.pipe(
+            finalize(() => {
+                this.#collections.delete(collection_id)
+                collections.delete(collection_id)
+                if (collections.size === 0) {
+                    this.#refs.delete(collection_ref)
+                }
+                // Complete data$ so whenCompleted(data$) fires and the server-query pipeline's
+                // takeUntil tears down the (possibly long-lived/realtime) transporter query —
+                // otherwise the old ref's subscription leaks after the collection goes away.
+                data$.complete()
+            })
+        )
+    }
+
+    async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
+        const collection = this.#collections.get(req.collection_id)
+        if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
+
+        // If document 
+        if (collection.document_id) {
+            const ids = this.#refs.get(collection.collection_ref)
+            const collections = ids ? [...ids].map(id => this.#collections.get(id)).filter(c => c && c.document_id) : []
+            const doc = await this.config.storage.get<T>(collection.collection_ref, collection.document_id)
+            if (collections.length > 0 && doc) return {
+                documents: [doc]
+            }
+        }
+
+        setTimeout(() => this.#queries$.next({
+            ...req,
+            filters: collection.mode == 'local-first' ? {} : req.filters,
+            collection
+        }))
+
+
+        // If collection
+        collection.filters = req.filters || {}
+        collection.parsedFilters = parseFilters(collection.filters as Record<string, any>)
+        if (collection.mode == 'local-first') {
+            return await this.config.storage.query<T>(req.ref, req.filters)
+        }
+
+        if (collection.mode == 'cache-first') {
+            const before = req.filters?.[':before']
+            const after = req.filters?.[':after']
+            const is_first_query = !before && !after
+            if (is_first_query) {
+                return await this.config.storage.query<T>(req.ref, req.filters)
+            }
+        }
+
+        if (collection.mode == 'local-only') {
+            const data = await this.config.storage.query<T>(req.ref, req.filters)
+            await this.#broadcast(collection.collection_ref, 'query', {
+                changes: data.documents.map(doc => ({
+                    collection_ref: collection.collection_ref,
+                    id: doc.id,
+                    type: 'added',
+                    data: doc
+                }))
+            })
+        }
+    }
+
+
+    async #filterLocalEvents(collection: CollectionMetadata, events: Array<DataChangeEvent>, docs: Map<string, Promise<Doc | null>>) {
+        const changes: DataChangeEvent[] = []
+        for (const event of events) {
+            if (event.type == 'removed') {
+                changes.push(event)
+                continue
+            }
+
+            if (event.type == 'added') {
+                event.data && matchesParsedFilters(event.data, collection.parsedFilters) && changes.push(event)
+                continue
+            }
+
+            const cache_key = `${event.collection_ref}/${event.id}`
+            const cached = docs.get(cache_key) || this.config.storage.get(collection.collection_ref, event.id)
+            docs.set(cache_key, cached)
+            const doc = await cached
+            if (doc && matchesParsedFilters(doc as Record<string, any>, collection.parsedFilters)) {
+                changes.push(event)
+                continue
+            }
+
+            changes.push({
+                collection_ref: event.collection_ref,
+                id: event.id,
+                type: 'removed'
+            })
+        }
+        return changes
+    }
+
+    async #broadcast(collection_ref: string, from: RealtimeChangeSource, e: Partial<LivequeryQueryResult>) {
+        const changes = e.changes || [] 
+        const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
+        const docs = new Map<string, Promise<Doc | null>>()
+        for (const collection_id of collections) {
+            const collection = this.#collections.get(collection_id)
+            if (!collection) continue
+
+            if (collection.document_id) {
+                // Is document
+                const change = changes.find(c => c.id == collection.document_id)
+                change && collection.data$.next({
+                    ...e,
+                    changes: [change],
+                    from,
+                    loading: null
+                })
+                continue
+            }
+
+            // If local collection 
+            if (collection.mode == 'local-first' || collection.mode == 'local-only') {
+                const list = await this.#filterLocalEvents(collection, changes, docs)
+                // Is collection
+                collection.data$.next({
+                    ...e,
+                    changes: list,
+                    from,
+                    ...from == 'query' ? { loading: null } : {}
+                })
+                continue
+            }
+
+            collection.data$.next({
+                ...e,
+                from,
+                ...from == 'query' ? { loading: null } : {}
+            })
+
+
+
+        }
+    }
+
+    async #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean, context?: Record<string, any>): Promise<DocState<T>[]> {
+        const results = await Promise.all(
+            docs.flatMap(doc =>
+                Object.entries(this.config.transporters).map(async ([tid, transporter]) => {
+                    const id = doc.id
+                    if (String(id).startsWith('local:')) {
+                        // lock by collection_ref
+                        const o = new Subject<void>()
+                        this.#adding.set(collection_ref, o)
+                        using $ = useDispose(() => {
+                            o.next()
+                            o.complete()
+                            this.#adding.delete(collection_ref)
+                        })
+                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T, context), tid)
+                        if (e && server_first) throw e
+                        // unlock
+                        const fnd = {
+                            ...data,
+                            _adding: undefined,
+                            ...e ? { _adding_error: e } : {}
+                        }
+                        await this.config.storage.update<T>(collection_ref, id, fnd)
+                        await this.#broadcast(collection_ref, 'action', {
+                            changes: [{
+                                collection_ref,
+                                type: 'modified',
+                                id,
+                                data: fnd
+                            }]
+                        })
+                        return data as DocState<T>
+                    }
+
+                    // _deleting flag → soft-delete on remote then hard-delete locally
+                    if (doc._deleting) {
+                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id, context), tid)
+                        if (e && server_first) throw e
+                        if (e) {
+                            const fnd = {
+                                _deleting: undefined,
+                                _deleting_error: e
+                            }
+                            await this.config.storage.update<T>(collection_ref, id, fnd)
+                            await this.#broadcast(collection_ref, 'action', {
+                                changes: [{
+                                    collection_ref,
+                                    type: 'modified',
+                                    id,
+                                    data: fnd
+                                }]
+                            })
+                        } else {
+                            await this.config.storage.delete<T>(collection_ref, id)
+                            await this.#broadcast(collection_ref, 'action', {
+                                changes: [{
+                                    collection_ref,
+                                    type: 'removed',
+                                    id
+                                }]
+                            })
+                        }
+                        return data as DocState<T>
+                    }
+
+                    // _prev present → document was updated locally, push changed fields to remote
+                    if (doc._prev && Object.keys(doc._prev).length > 0) {
+                        const changedFields = Object.keys(doc._prev).reduce<Partial<T>>((acc, key) => ({
+                            ...acc,
+                            [key]: doc[key as any as keyof typeof doc]
+                        }), {})
+                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields, context), tid)
+                        if (e && server_first) throw e
+                        const fnd = {
+                            _prev: undefined,
+                            _updating: undefined,
+                            _updating_error: e
+                        }
+                        await this.config.storage.update<T>(collection_ref, id, fnd)
+                        await this.#broadcast(collection_ref, 'action', {
+                            changes: [{
+                                collection_ref,
+                                type: 'modified',
+                                id,
+                                data: fnd
+                            }]
+                        })
+                        return data as DocState<T>
+                    }
+                })
+            )
+        )
+        return results.filter(Boolean) as DocState<T>[]
+    }
+
+
+    async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode, context?: Record<string, any>) {
+        if (mode == 'server-first') {
+            const list = documents.map(doc => ({ ...doc, id: `local:${uuidv7()}` }))
+            return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true, context)
+        }
+        const docs = await Promise.all(documents.map(doc =>
+            this.config.storage.add<T>(collection_ref, {
+                ...doc,
+                _adding: true,
+                ...mode === 'local-only' ? { _local_only: true } : {}
+            } as DocState<T>) as Promise<DocState<T>>
+        ))
+        await this.#broadcast(
+            collection_ref,
+            'action',
+            {
+                changes: docs.map(data => ({
+                    collection_ref,
+                    id: data.id,
+                    type: 'added',
+                    data
+                } as DataChangeEvent))
+            }
+        )
+        if (mode === 'local-only') return docs
+        return await this.#push<T>(collection_ref, docs, false, context)
+    }
+
+    async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
+        if (mode == 'server-first') {
+            const list = documents.map(doc => ({ ...doc, _prev: doc }))
+            return await this.#push<T>(collection_ref, list, true, context)
+        }
+        const merged = (await Promise.all(documents.map(async doc => {
+            const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
+            if (!old) return
+            const _prev = Object.keys(doc).reduce((acc, key) => {
+                if (key in (old._prev || {})) return acc
+                return { ...acc, [key]: (old as any)[key] }
+            }, old._prev || {})
+            return await this.config.storage.update<T>(collection_ref, doc.id, { _prev, _updating: true, ...doc }) as DocState<T>
+        }))).filter(Boolean) as DocState<T>[]
+        await this.#broadcast(
+            collection_ref,
+            'action',
+            {
+                changes: merged.map(data => ({
+                    collection_ref,
+                    id: data.id,
+                    type: 'modified',
+                    data
+                } as DataChangeEvent))
+            }
+        )
+        if (mode === 'local-only') return merged
+        return await this.#push<T>(collection_ref, merged, false, context)
+    }
+
+    async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode, context?: Record<string, any>) {
+        if (mode == 'server-first') {
+            const list = ids.map(id => ({ id, _deleting: true }))
+            return await this.#push<T>(collection_ref, list, true, context)
+        }
+        const soft = Object.keys(this.config.transporters).length > 0
+        const merged = (await Promise.all(ids.map(async id => {
+            const is_local_doc = id.startsWith('local:')
+            if (!soft || is_local_doc || mode == 'local-only') {
+                return await this.config.storage.delete<T>(collection_ref, id)
+            }
+            return await this.config.storage.update<T>(collection_ref, id, { _deleting: true })
+        }))).filter(Boolean) as T[]
+        const deleting_list = (merged as any[]).filter(doc => doc._deleting)
+        const deleted_list = (merged as any[]).filter(doc => !doc._deleting)
+
+        await this.#broadcast(
+            collection_ref,
+            'action',
+            {
+                changes: deleting_list.map(({ id }) => ({
+                    collection_ref,
+                    id,
+                    type: 'modified',
+                    data: {
+                        _deleting: true
+                    }
+                }))
+            }
+        )
+
+        await this.#broadcast(
+            collection_ref,
+            'action',
+            {
+                changes: deleted_list.map(({ id }) => ({
+                    collection_ref,
+                    id,
+                    type: 'removed',
+                }))
+            }
+        )
+
+
+        if (mode == 'local-only') return merged
+        return await this.#push<T>(collection_ref, merged, false, context)
+    }
+
+    trigger<Response>(action: LivequeryAction) {
+        return from(Object.entries(this.config.transporters)).pipe(
+            filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
+            mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
+        )
+    }
+
+    async seedToStorage<T extends Doc>(collection_ref: string, docs: T[]) {
+        await Promise.all(docs.map(doc => this.config.storage.add<T>(collection_ref, doc as any)))
+    }
+
+    async flush(collection_ref: string) {
+        await this.#broadcast(collection_ref, 'realtime', { changes: [{ collection_ref, id: '*', type: 'removed' }] })
+        return this.config.storage.flush()
+    }
+
+    destroy() {
+        this.#running.unsubscribe()
+    }
+}

@@ -4,11 +4,12 @@ import { Subject } from 'rxjs'
 import {
     ApiGatewayHandler,
     ApiServiceLinker,
+    type Discovery,
+    type DiscoveryMessage,
     type ServiceApiMetadata,
 } from '../src/index.js'
-import type { UdpDiscovery } from '../src/UdpDiscovery.js'
 
-type TestDiscovery = UdpDiscovery<ServiceApiMetadata>
+type TestDiscovery = Discovery<ServiceApiMetadata>
 type HonoServer = ReturnType<typeof Bun.serve>
 
 const gateways: ApiGatewayHandler[] = []
@@ -188,18 +189,21 @@ function startHono(app: Hono) {
 }
 
 function createDiscovery() {
-    const subject = new Subject<ServiceApiMetadata>() as Subject<ServiceApiMetadata> & {
-        broadcast(node: ServiceApiMetadata): Promise<void>
+    const subject = new Subject<DiscoveryMessage<ServiceApiMetadata>>() as Subject<DiscoveryMessage<ServiceApiMetadata>> & {
+        broadcast(message: DiscoveryMessage<ServiceApiMetadata>): Promise<void>
         close(): void
     }
     subject.broadcast = async node => {
         subject.next({
             ...node,
-            host: node.host || '127.0.0.1',
+            data: {
+                ...node.data,
+                host: node.data.host || '127.0.0.1',
+            },
         })
     }
     subject.close = () => subject.complete()
-    return subject as unknown as TestDiscovery
+    return subject as TestDiscovery
 }
 
 function sleep(ms: number): Promise<void> {

@@ -5,10 +5,15 @@ import {
     API_GATEWAY_NAMESPACE,
     LIVEQUERY_API_GATEWAY_DEBUG,
     LIVEQUERY_GATEWAY_TIMEOUT_MS,
-    LIVEQUERY_MAGIC_KEY,
+    OHAYO_DISCOVERY_KEY,
     WEBSOCKET_PATH,
 } from './const.js'
-import { UdpDiscovery, type UdpDiscoveryNode } from './UdpDiscovery.js'
+import {
+    isDiscoveryOfflineData,
+    type Discovery,
+    type DiscoveryMessage,
+} from './Discovery.js'
+import { HttpDiscovery } from './HttpDiscovery.js'
 import { WebsocketGateway } from './WebsocketGateway.js'
 import { nodeRequestToWebRequest } from './helpers/nodeRequestToWebRequest.js'
 import { writeWebResponse } from './helpers/writeWebResponse.js'
@@ -40,7 +45,8 @@ export type RegisterOptions = {
     paths: Array<{ method: string; path: string }>
 }
 
-export type ServiceApiMetadata = UdpDiscoveryNode & {
+export type ServiceApiMetadata = {
+    host?: string
     role: 'service' | 'gateway'
     name: string
     port: number
@@ -58,7 +64,7 @@ export type ServiceApiStatus = {
 
 export type ApiGatewayOptions = {
     ws?: WebsocketGateway
-    discovery?: UdpDiscovery<ServiceApiMetadata>
+    discovery?: Discovery<ServiceApiMetadata>
     node_id?: string
     // Upstream-request timeout in ms. Defaults to LIVEQUERY_GATEWAY_TIMEOUT_MS
     // (env LIVEQUERY_GATEWAY_TIMEOUT in seconds, default 30s).
@@ -86,40 +92,59 @@ export class ApiGatewayHandler {
     readonly #nodeId: string
     readonly #timeoutMs: number
     readonly #lws?: WebsocketGateway
-    readonly #discovery: UdpDiscovery<ServiceApiMetadata>
+    readonly #discovery: Discovery<ServiceApiMetadata>
     readonly #discoverySubscription: Subscription
     readonly #services = new Map<string, {
         host: string
         metadata: ServiceApiMetadata
+        seq: number
+        version: string
         subscription?: Subscription
     }>()
     #cleanupTimer: ReturnType<typeof setInterval> | undefined
+    #seq = 0
 
     constructor(private options: ApiGatewayOptions) {
         this.#nodeId = options.node_id ?? randomUUID()
         this.#timeoutMs = options.timeoutMs ?? LIVEQUERY_GATEWAY_TIMEOUT_MS
         this.#lws = options.ws
-        this.#discovery = options.discovery ?? new UdpDiscovery<ServiceApiMetadata>({ key: LIVEQUERY_MAGIC_KEY })
+        this.#discovery = options.discovery ?? new HttpDiscovery<ServiceApiMetadata>({
+            key: OHAYO_DISCOVERY_KEY,
+            namespace: API_GATEWAY_NAMESPACE,
+            tags: ['livequery'],
+            node_id: this.#nodeId,
+        })
 
-        this.#discoverySubscription = this.#discovery.subscribe(metadata => {
-            if (metadata.role !== 'service') return
-            if (metadata.namespace !== API_GATEWAY_NAMESPACE) return
-            if (metadata.node_id === this.#nodeId) return
-
-            const existing = this.#services.get(metadata.node_id)
-            if (existing) {
-                if (metadata.version <= existing.metadata.version) return
-                if (isSameServiceDefinition(existing.metadata, metadata)) {
-                    existing.metadata = { ...metadata, host: existing.host }
-                    // A fresh heartbeat proves the process is alive → lift any
-                    // HTTP-triggered isolation. WS isolation stays until reconnect.
-                    this.#clearHttpOffline(metadata.node_id)
-                    return
-                }
-                this.#removeService(metadata.node_id, false)
+        this.#discoverySubscription = this.#discovery.subscribe(message => {
+            if (message.namespace !== API_GATEWAY_NAMESPACE) return
+            if (message.node_id === this.#nodeId) return
+            if (isDiscoveryOfflineData(message.data)) {
+                this.#removeService(message.node_id, true)
+                return
             }
 
-            this.#join(metadata)
+            const metadata = message.data as ServiceApiMetadata
+            if (metadata.role !== 'service') return
+
+            const node_id = message.node_id
+            const host = metadata.host || message.remote_host || ''
+            const normalized = { ...metadata, host }
+            const existing = this.#services.get(node_id)
+            if (existing) {
+                if (message.seq <= existing.seq) return
+                if (isSameServiceDefinition(existing.metadata, normalized)) {
+                    existing.metadata = { ...normalized, host: existing.host }
+                    existing.seq = message.seq
+                    existing.version = message.version
+                    // A fresh heartbeat proves the process is alive → lift any
+                    // HTTP-triggered isolation. WS isolation stays until reconnect.
+                    this.#clearHttpOffline(node_id)
+                    return
+                }
+                this.#removeService(node_id, false)
+            }
+
+            this.#join(message as DiscoveryMessage<ServiceApiMetadata>, normalized)
         })
 
         this.#discovery.broadcast(this.#metadata()).catch(e => console.error(e))
@@ -293,8 +318,9 @@ export class ApiGatewayHandler {
         return host
     }
 
-    #join(metadata: ServiceApiMetadata): void {
-        const { port, node_id, name, paths, ws } = metadata
+    #join(message: DiscoveryMessage<ServiceApiMetadata>, metadata: ServiceApiMetadata): void {
+        const { port, name, paths, ws } = metadata
+        const node_id = message.node_id
         const host = metadata.host ?? ''
         const subscription = ws
             ? this.#lws?.connect(
@@ -306,7 +332,7 @@ export class ApiGatewayHandler {
             )
             : undefined
 
-        this.#services.set(node_id, { metadata, subscription, host })
+        this.#services.set(node_id, { metadata, subscription, host, seq: message.seq, version: message.version })
         this.register({ node_id, hostname: host, port, paths: paths ?? [] })
 
         LIVEQUERY_API_GATEWAY_DEBUG && console.info(
@@ -409,26 +435,33 @@ export class ApiGatewayHandler {
         )
     }
 
-    #metadata(): ServiceApiMetadata {
-        const metadata: ServiceApiMetadata = {
+    #metadata(): DiscoveryMessage<ServiceApiMetadata> {
+        const now = Date.now()
+        const data: ServiceApiMetadata = {
             name: 'API gateway',
             paths: [],
             port: 0,
             role: 'gateway',
             linked: [...this.#services.keys()],
             host: '',
-            node_id: this.#nodeId,
-            namespace: API_GATEWAY_NAMESPACE,
-            version: Date.now(),
         }
 
         if (this.#lws) {
-            metadata.ws = {
+            data.ws = {
                 auth: this.#lws.auth,
                 path: WEBSOCKET_PATH,
             }
         }
 
-        return metadata
+        return {
+            node_id: this.#nodeId,
+            namespace: API_GATEWAY_NAMESPACE,
+            tags: ['livequery', 'gateway'],
+            version: String(now),
+            created_at: now,
+            seq: ++this.#seq,
+            data,
+        }
     }
-} 
+
+}

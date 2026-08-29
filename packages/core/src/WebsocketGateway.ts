@@ -47,7 +47,7 @@ export class WebsocketGateway extends WebsocketGatewayBase {
             const socket: SocketLike = {
                 send: (d) => ws.send(d),
                 close: () => ws.close(),
-                isAlive: () => ws.readyState === ws.OPEN,
+                isAlive: () => ws.readyState === WebSocket.OPEN,
                 id: '',
                 gateway: false,
                 refs: new Set<string>(),
@@ -72,7 +72,7 @@ export class WebsocketGateway extends WebsocketGatewayBase {
         this.#httpServer = undefined
         httpServer?.[HTTP_SERVER_GATEWAYS]?.delete(this)
         if (wss) {
-            for (const client of wss.clients) client.terminate()
+            for (const client of wss.clients) client.close()
             wss.close()
         }
     }

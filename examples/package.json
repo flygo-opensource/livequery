@@ -1,0 +1,17 @@
+{
+  "name": "@livequery/examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun run --cwd ../core build && bun test udp-auto-discovery/e2e.test.ts",
+    "typecheck": "bun run --cwd ../core build && tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@livequery/core": "workspace:*",
+    "@ohayo/udp": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.1.6"
+  }
+}

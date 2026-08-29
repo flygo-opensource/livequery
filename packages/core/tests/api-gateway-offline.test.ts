@@ -15,17 +15,16 @@ import { describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 import { Subject } from 'rxjs'
-import { ApiGatewayHandler, WebsocketGateway, WEBSOCKET_PATH, type ServiceApiMetadata } from '../src/index.js'
-import type { UdpDiscovery } from '../src/UdpDiscovery.js'
+import { ApiGatewayHandler, WebsocketGateway, WEBSOCKET_PATH, type DiscoveryMessage, type ServiceApiMetadata } from '../src/index.js'
 
 function createDiscovery() {
-    const subject = new Subject<ServiceApiMetadata>() as Subject<ServiceApiMetadata> & {
-        broadcast(node: ServiceApiMetadata): Promise<void>
+    const subject = new Subject<DiscoveryMessage<ServiceApiMetadata>>() as Subject<DiscoveryMessage<ServiceApiMetadata>> & {
+        broadcast(message: DiscoveryMessage<ServiceApiMetadata>): Promise<void>
         close(): void
     }
     subject.broadcast = async () => {}
     subject.close = () => subject.complete()
-    return subject as unknown as UdpDiscovery<ServiceApiMetadata>
+    return subject
 }
 
 function startService(body: string, port = 0): Promise<{ server: http.Server; port: number }> {
@@ -36,19 +35,30 @@ function startService(body: string, port = 0): Promise<{ server: http.Server; po
     })
 }
 
-const closeServer = (server: http.Server) => new Promise<void>(resolve => server.close(() => resolve()))
+const closeServer = (server: http.Server) => new Promise<void>(resolve => {
+    server.closeAllConnections?.()
+    server.close(() => resolve())
+})
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms))
 const text = (r: Response) => r.text()
 
-function meta(o: Partial<ServiceApiMetadata> & { node_id: string; port: number; version: number }): ServiceApiMetadata {
+function meta(o: Partial<ServiceApiMetadata> & { node_id: string; port: number; version: number }): DiscoveryMessage<ServiceApiMetadata> {
+    const { node_id, version, ...data } = o
     return {
-        host: '127.0.0.1',
+        node_id,
         namespace: 'default',
-        role: 'service',
-        name: 'svc',
-        paths: [{ method: 'GET', path: 'livequery/products' }],
-        linked: [],
-        ...o,
+        tags: ['livequery', 'service'],
+        version: String(version),
+        created_at: Date.now(),
+        seq: version,
+        data: {
+            host: '127.0.0.1',
+            role: 'service',
+            name: 'svc',
+            paths: [{ method: 'GET', path: 'livequery/products' }],
+            linked: [],
+            ...data,
+        },
     }
 }
 

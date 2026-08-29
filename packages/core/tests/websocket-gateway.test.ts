@@ -611,8 +611,8 @@ function nextJson(ws: WebSocket, timeoutMs = 1_000): Promise<any> {
             ws.off('message', onMessage)
             ws.off('error', onError)
         }
-        ws.once('message', onMessage)
-        ws.once('error', onError)
+        ws.on('message', onMessage)
+        ws.on('error', onError)
     })
 }
 
@@ -635,8 +635,8 @@ function expectNoMessage(ws: WebSocket, timeoutMs = 100): Promise<void> {
             ws.off('message', onMessage)
             ws.off('error', onError)
         }
-        ws.once('message', onMessage)
-        ws.once('error', onError)
+        ws.on('message', onMessage)
+        ws.on('error', onError)
     })
 }
 

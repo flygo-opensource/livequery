@@ -22,10 +22,11 @@ afterEach(async () => {
 })
 
 describe('Hono services behind ApiGatewayHandler in separate processes', () => {
-    test('routes through one gateway process to two service processes via UDP discovery', async () => {
-        const sharedEnv = createSharedEnv()
+    test('routes through one gateway process to two service processes via HTTP discovery', async () => {
+        const gatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([gatewayDiscoveryPort])
 
-        const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+        const gateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, gatewayDiscoveryPort))
         const catalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'catalog',
@@ -95,7 +96,8 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
     }, 10_000)
 
     test('services that start before the gateway are linked after gateway discovery', async () => {
-        const sharedEnv = createSharedEnv()
+        const gatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([gatewayDiscoveryPort])
         const catalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'catalog',
@@ -111,7 +113,7 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
             orders.ready,
         ])
 
-        const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+        const gateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, gatewayDiscoveryPort))
         processes.push(gateway)
         const gatewayReady = await gateway.ready
 
@@ -135,9 +137,10 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
         })
     }, 10_000)
 
-    test('a stopped sole-node service keeps returning 502 while other services keep working', async () => {
-        const sharedEnv = createSharedEnv()
-        const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+    test('a gracefully stopped sole-node service deregisters while other services keep working', async () => {
+        const gatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([gatewayDiscoveryPort])
+        const gateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, gatewayDiscoveryPort))
         const catalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'catalog',
@@ -168,15 +171,15 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
             '/livequery/orders/order-after-catalog-stop'
         )
 
-        expect(first.status).toBe(502)
+        expect(first.status).toBe(503)
         expect(await first.json()).toMatchObject({
-            error: { status: 502, code: 'SERVICE_API_OFFLINE' },
+            error: { status: 503, code: 'API_OFFLINE' },
         })
-        // catalog is the only node for its route → never hard-503'd; the gateway
-        // keeps dialing it (502) so it recovers the instant it is restarted.
-        expect(second.status).toBe(502)
+        // HTTP discovery performs best-effort deregistration on graceful shutdown,
+        // so the route has no registered host until the service registers again.
+        expect(second.status).toBe(503)
         expect(await second.json()).toMatchObject({
-            error: { status: 502, code: 'SERVICE_API_OFFLINE' },
+            error: { status: 503, code: 'API_OFFLINE' },
         })
         expect(orderJson).toMatchObject({
             service: 'orders',
@@ -186,8 +189,9 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
     }, 10_000)
 
     test('round-robins between two service processes with the same route', async () => {
-        const sharedEnv = createSharedEnv()
-        const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+        const gatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([gatewayDiscoveryPort])
+        const gateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, gatewayDiscoveryPort))
         const firstMirror = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'mirror',
@@ -224,9 +228,11 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
     }, 10_000)
 
     test('multiple gateway processes in the same namespace can route to the same service', async () => {
-        const sharedEnv = createSharedEnv()
-        const firstGateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
-        const secondGateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+        const firstGatewayDiscoveryPort = nextDiscoveryPort()
+        const secondGatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([firstGatewayDiscoveryPort, secondGatewayDiscoveryPort])
+        const firstGateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, firstGatewayDiscoveryPort))
+        const secondGateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, secondGatewayDiscoveryPort))
         const catalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'catalog',
@@ -253,8 +259,9 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
     }, 10_000)
 
     test('a restarted service process can register again after the old route went offline', async () => {
-        const sharedEnv = createSharedEnv()
-        const gateway = spawnFixture('hono-gateway-process.ts', sharedEnv)
+        const gatewayDiscoveryPort = nextDiscoveryPort()
+        const sharedEnv = createSharedEnv([gatewayDiscoveryPort])
+        const gateway = spawnFixture('hono-gateway-process.ts', gatewayEnv(sharedEnv, gatewayDiscoveryPort))
         const catalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
             SERVICE_KIND: 'catalog',
@@ -273,7 +280,7 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
 
         await stopProcess(catalog)
         const offline = await fetch(`http://127.0.0.1:${gatewayReady.port}/livequery/catalog`)
-        expect(offline.status).toBe(502)
+        expect(offline.status).toBe(503)
 
         const restartedCatalog = spawnFixture('hono-service-process.ts', {
             ...sharedEnv,
@@ -290,13 +297,25 @@ describe('Hono services behind ApiGatewayHandler in separate processes', () => {
     }, 10_000)
 })
 
-function createSharedEnv(): Record<string, string> {
+function createSharedEnv(gatewayDiscoveryPorts: number[]): Record<string, string> {
+    const seed = `hono-process-e2e-${Date.now()}-${Math.random()}`
     return {
-        API_GATEWAY_NAMESPACE: `hono-process-e2e-${Date.now()}-${Math.random()}`,
-        LIVEQUERY_MAGIC_KEY: `hono-process-e2e-${Date.now()}-${Math.random()}`,
-        UDP_PUBLIC_PORT: String(30_000 + Math.floor(Math.random() * 10_000)),
-        UDP_WHITELIST_ADDRESS: '127.0.0.1',
+        OHAYO_DISCOVERY_NAMESPACE: seed,
+        OHAYO_DISCOVERY_KEY: seed,
+        OHAYO_API_GATEWAY: gatewayDiscoveryPorts.map(port => `127.0.0.1:${port}`).join(','),
+        OHAYO_SERVICE_HOST: '127.0.0.1',
     }
+}
+
+function gatewayEnv(sharedEnv: Record<string, string>, discoveryPort: number): Record<string, string> {
+    return {
+        ...sharedEnv,
+        OHAYO_DISCOVERY_PORT: String(discoveryPort),
+    }
+}
+
+function nextDiscoveryPort(): number {
+    return 30_000 + Math.floor(Math.random() * 20_000)
 }
 
 function spawnFixture(

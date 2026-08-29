@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "cf-worker",
+      "runtimeExecutable": "bunx",
+      "runtimeArgs": ["wrangler", "dev", "--port", "8787"],
+      "port": 8787,
+      "cwd": "/Users/baduongvan/dev/opensource/livequery/cf-worker"
+    },
+    {
+      "name": "todo-app",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "5173", "--host"],
+      "port": 5173,
+      "url": "http://localhost:5173",
+      "cwd": "/Users/baduongvan/dev/opensource/livequery/todo-app"
+    }
+  ]
+}

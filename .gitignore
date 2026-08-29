@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+*.tsbuildinfo
+.wrangler/
+.vite/
+
+# Local environment
+.env.local
+.env.*.local
+
+# Backups of the pre-monorepo per-package git histories
+# (originals remain pushed at github.com/livequery/*)
+.git.bak/
+
+# Logs
+*.log
+
+# OS
+.DS_Store

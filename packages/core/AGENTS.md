@@ -11,7 +11,7 @@ It provides:
 - Shared request/response/context types.
 - A handler interface for parser, middleware, datasource, auth, and realtime layers.
 - Request parsing into normalized Livequery refs.
-- UDP-based service and gateway discovery.
+- Ohayo HTTP-based service and gateway discovery.
 - HTTP gateway routing and forwarding.
 - Service metadata publishing.
 - WebSocket realtime subscription routing.
@@ -40,6 +40,8 @@ The public entrypoint is `src/index.ts`.
 It exports:
 
 - `const.ts`
+- `Discovery.ts`
+- `HttpDiscovery.ts`
 - `UdpDiscovery.ts`
 - `WebsocketGateway.ts`
 - `ApiGatewayHandler.ts`
@@ -55,7 +57,7 @@ It exports:
 flowchart LR
   Client["Client HTTP/WebSocket"]
   Gateway["ApiGatewayHandler + WebsocketGateway"]
-  Discovery["UdpDiscovery"]
+  Discovery["HttpDiscovery / UdpDiscovery"]
   ServiceLinker["ApiServiceLinker"]
   Service["Service HTTP API"]
   Parser["LivequeryRequestParser"]
@@ -137,9 +139,10 @@ Behavior to preserve:
 
 - Discovery only accepts metadata with `role === 'service'`.
 - Metadata must match `API_GATEWAY_NAMESPACE`.
-- Stale metadata is ignored when its version is older or equal.
+- Stale metadata is ignored when its discovery `seq` is older or equal.
 - Newer metadata with the same service definition updates metadata and host only.
 - Newer metadata with a changed service definition removes old routes and joins again.
+- Offline discovery events remove the service from every route.
 - Route matching supports static segments, wildcard `:`, and prefix-param segments such as `post:`.
 - Route hosts are selected by round-robin.
 - Forwarded headers remove `content-length` and `host`.
@@ -162,30 +165,69 @@ Public methods:
 
 Behavior:
 
-- Publishes metadata with `role: 'service'`.
+- Publishes Ohayo discovery messages whose `data.role` is `service`.
 - Includes configured `paths`.
 - Includes websocket metadata when options include `ws`.
-- When it sees a gateway in the same namespace, it bumps metadata version and broadcasts again.
+- When it sees a gateway in the same namespace, it bumps metadata `version`/`seq` and broadcasts again.
 
-### `src/UdpDiscovery.ts`
+### `src/Discovery.ts`
 
-Observable UDP discovery layer.
+Shared discovery abstraction.
+
+- `DiscoveryMessage<T>` is the Ohayo envelope with `node_id`, `namespace`, `tags`, `version`, `created_at`, `seq`, and app-specific `data`.
+- `Discovery<T>` extends `Observable<DiscoveryEvent<T>>` and exposes `broadcast(message)` plus `close()`.
+- `DiscoveryOfflineData` uses `{ status: 'offline' }` for TTL or deregister events.
+- Discovery implementations filter namespace exactly and tags with contains-all semantics.
+
+### `src/HttpDiscovery.ts`
+
+Ohayo HTTP discovery adapter.
 
 Public API:
 
-- Constructor: `new UdpDiscovery<T>({ key, port? })`
+- Constructor: `new HttpDiscovery<T>({ namespace, tags, node_id?, key?, port?, gateways?, listen?, heartbeatMs?, ttlMs?, requestTimeoutMs? })`
 - `status$`
-- `broadcast(node, targetIp?)`
+- `port`
+- `broadcast(message)`
 - `close()`
 
 Behavior:
 
+- Gateway-side discovery listens for `POST /register`, `DELETE /register/:node_id`, `GET /health`, and `GET /nodes`.
+- Registry requests use `Authorization: Bearer <OHAYO_DISCOVERY_KEY>`.
+- Service-side discovery uses `OHAYO_API_GATEWAY` when `gateways` is not provided.
+- Heartbeats rebroadcast the last message with bumped `version`, `created_at`, and `seq`.
+- TTL expiry emits an offline discovery event.
+- `close()` sends best-effort deregistration for the last broadcast message.
+- Transport must keep Livequery metadata inside `data`; it may attach transport metadata such as `remote_host` at the envelope level.
+
+### `src/UdpDiscovery.ts`
+
+Compatibility re-export of the shared `@ohayo/udp` implementation. UDP socket,
+packet codec, HMAC, multicast and peer behavior must be changed in `@ohayo/udp`,
+not duplicated in core. Runnable integration belongs in
+`examples/udp-auto-discovery`, not a Livequery UDP wrapper package.
+
+Public API:
+
+- Constructor: `new UdpDiscovery<T>({ namespace, tags, node_id?, key?, port?, peers?, multicastAddress?, packetTtlMs?, broadcastCopies? })`
+- `status$`
+- `broadcast(message, targetIp?)`
+- `close()`
+
+Behavior:
+
+- Implements the shared `Discovery<T>` contract.
 - Packets are msgpack encoded.
+- Packet shape is `{ version, sender_id, timestamp, message, signature }`.
+- `message` is the Ohayo `DiscoveryMessage<T>` envelope; app metadata must stay inside `message.data`.
 - Packets are signed with HMAC SHA-256.
 - Packets older than 30 seconds are rejected.
 - Packets with invalid signatures are rejected.
+- Inbound and outbound messages are filtered by exact `namespace` and contains-all `tags`.
+- When `node_id` is configured, outbound messages must use it and inbound messages from the same id are ignored.
 - Duplicate valid packets are emitted. Consumers handle dedupe.
-- Nodes from all namespaces are emitted. Consumers handle namespace filtering.
+- `seq` and `version` ordering is not handled in UDP transport. Consumers handle staleness.
 - `close()` is idempotent.
 
 UDP tests should use random ports to avoid conflicts.
@@ -264,6 +306,7 @@ bunx tsc -p tests/tsconfig.json --noEmit
 - Request parser tests: `LivequeryRequestParser`.
 - `tests/api-gateway.test.ts`: gateway routing, discovery metadata, forwarding, errors, and round-robin.
 - `tests/api-service-linker.test.ts`: service metadata publishing and rebroadcast behavior.
+- `tests/http-discovery.test.ts`: Ohayo HTTP discovery registration, auth, namespace/tags filtering, and TTL offline events.
 - `tests/udp-discovery.test.ts`: UDP packet validation, signatures, TTL, status, and close behavior.
 - `tests/websocket-gateway.test.ts`: WebSocket lifecycle, subscriptions, observable links, and gateway bridge behavior.
 - `tests/hono-api-gateway.e2e.test.ts`: in-process Hono service/gateway integration.

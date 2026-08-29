@@ -1,0 +1,41 @@
+{
+  "name": "@livequery/honojs",
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "repository": {
+    "url": "git@github.com:livequery/honojs.git"
+  },
+  "version": "3.0.0",
+  "description": "Hono adapter for @livequery ecosystem",
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/**/*"
+  ],
+  "scripts": {
+    "test": "bun test tests/",
+    "build": "tsc -b ."
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./build/src/index.d.ts",
+        "default": "./build/src/index.js"
+      }
+    }
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "x",
+    "typescript": "^5.1.6"
+  },
+  "peerDependencies": {
+    "hono": "^4.12.21"
+  },
+  "dependencies": {
+    "@livequery/bunjs": "^3.0.0",
+    "@livequery/core": "^3.0.0",
+    "rxjs": "x"
+  }
+}

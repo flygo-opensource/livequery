@@ -22,7 +22,7 @@ This package handles the core infrastructure around that model:
 - Parse raw framework requests into normalized `LivequeryRequest` objects.
 - Pass request state through a shared `LivequeryContext`.
 - Define a handler interface for parser, middleware, datasource, and realtime handlers.
-- Discover gateway and service nodes over UDP.
+- Discover gateway and service nodes over Ohayo HTTP discovery by default.
 - Route HTTP requests through an API gateway to online service nodes.
 - Publish service metadata from service nodes.
 - Manage realtime WebSocket subscriptions and update forwarding.
@@ -54,6 +54,7 @@ bunx tsc -p tests/tsconfig.json --noEmit
 import {
   ApiGatewayHandler,
   ApiServiceLinker,
+  HttpDiscovery,
   LivequeryRequestParser,
   UdpDiscovery,
   WebsocketGateway,
@@ -307,7 +308,7 @@ class MemoryDatasource implements LivequeryDatasource<RouteConfig> {
 
 It can:
 
-- Receive service metadata from `UdpDiscovery`.
+- Receive service metadata from `Discovery<ServiceApiMetadata>` implementations. The default is `HttpDiscovery`.
 - Register routes by method and path.
 - Forward HTTP requests to online service nodes.
 - Round-robin between multiple hosts for the same route.
@@ -324,7 +325,7 @@ Use this in a gateway process. Public HTTP requests enter the gateway and are fo
 ```ts
 new ApiGatewayHandler({
   node_id?: string
-  discovery?: UdpDiscovery<ServiceApiMetadata>
+  discovery?: Discovery<ServiceApiMetadata>
   ws?: WebsocketGateway
   timeoutMs?: number
 })
@@ -334,6 +335,10 @@ new ApiGatewayHandler({
 - `discovery`: custom discovery instance, useful in tests or custom network setups.
 - `ws`: realtime gateway used for cross-gateway WebSocket forwarding.
 - `timeoutMs`: upstream request timeout in milliseconds. Defaults to `LIVEQUERY_GATEWAY_TIMEOUT` (in **seconds**, default `30`).
+
+`discovery` is structurally typed. It may be an `HttpDiscovery` from `@ohayo/http`, a
+`UdpDiscovery` from `@ohayo/udp`, the backward-compatible discovery exported by core, or a test
+implementation. The instance only needs to implement the shared `Discovery<T>` contract.
 
 ### `register(options)`
 
@@ -389,10 +394,10 @@ Unsubscribes from discovery, closes discovery sockets, disconnects service subsc
 
 ### Error Responses
 
-- Missing route (no method/path match): `404 { error: { status: 404, code: 'API_NOT_FOUND' } }`
-- Route is known but has **no registered host** (every node deregistered): `503 { error: { status: 503, code: 'API_OFFLINE' } }`
-- Forwarded request could not reach the upstream (connection refused/reset): `502 { error: { status: 502, code: 'SERVICE_API_OFFLINE' } }`
-- Upstream accepted the connection but did not respond within the timeout: `504 { error: { status: 504, code: 'SERVICE_API_TIMEOUT' } }`
+- Missing route: `404 { error: { status: 404, code: 'API_NOT_FOUND', message } }`
+- Route is known but has **no registered host**: `503 { error: { status: 503, code: 'API_OFFLINE', message } }`
+- Forwarded request could not reach the upstream: `502 { error: { status: 502, code: 'SERVICE_API_OFFLINE', message } }`
+- Upstream accepted the connection but did not respond within the timeout: `504 { error: { status: 504, code: 'SERVICE_API_TIMEOUT', message } }`
 
 > A node that is merely *offline* (transiently unreachable but still registered) does **not** produce a `503` — the gateway keeps trying it. See **Offline Isolation & Failover**.
 
@@ -438,9 +443,12 @@ new ApiServiceLinker({
 })
 ```
 
+The `discovery` option uses the same structural contract as `ApiGatewayHandler`. Gateway and service
+can therefore receive matching instances from `@ohayo/http` or `@ohayo/udp` without an adapter.
+
 ### `start(name, port)`
 
-Broadcasts service metadata through UDP discovery.
+Broadcasts service metadata through discovery. The default service discovery is `HttpDiscovery` in service-side mode: it reads `OHAYO_API_GATEWAY`, sends `POST /register`, heartbeats periodically, and sends best-effort `DELETE /register/:node_id` on close.
 
 ```ts
 const linker = new ApiServiceLinker({
@@ -452,28 +460,231 @@ linker.start('posts-service', 3001)
 
 When the service sees a gateway in the same namespace, it refreshes its metadata version and broadcasts again.
 
+### Using Ohayo Packages Directly
+
+Livequery does not require a discovery instance to be constructed by `@livequery/core`. HTTP and UDP
+implement the same public shape:
+
+```sh
+bun add @ohayo/http   # HTTP registry, heartbeat, TTL and graceful deregistration
+bun add @ohayo/udp    # UDP multicast / explicit-peer discovery
+```
+
+```ts
+type Discovery<T> = Observable<DiscoveryMessage<T>> & {
+  broadcast(message: DiscoveryMessage<T>): Promise<void>
+  close(): void
+}
+```
+
+HTTP registry example:
+
+```ts
+import { HttpDiscovery } from '@ohayo/http'
+import {
+  ApiGatewayHandler,
+  ApiServiceLinker,
+  type ServiceApiMetadata,
+} from '@livequery/core'
+
+const gatewayDiscovery = new HttpDiscovery<ServiceApiMetadata>({
+  mode: 'server',
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'gateway-1',
+  key: process.env.OHAYO_DISCOVERY_KEY,
+  port: 12001,
+})
+
+const gateway = new ApiGatewayHandler({ discovery: gatewayDiscovery })
+
+const serviceDiscovery = new HttpDiscovery<ServiceApiMetadata>({
+  mode: 'client',
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'posts-service-1',
+  key: process.env.OHAYO_DISCOVERY_KEY,
+  servers: ['10.0.0.10:12001'],
+})
+
+const service = new ApiServiceLinker({
+  paths: [{ method: 'GET', path: 'livequery/posts' }],
+  discovery: serviceDiscovery,
+})
+
+service.start('posts-service', 3001)
+```
+
+For zero-config LAN discovery, replace both `HttpDiscovery` instances with `UdpDiscovery` from
+`@ohayo/udp`, keeping the same `namespace`, key, port, and compatible required tags:
+
+```ts
+import { UdpDiscovery } from '@ohayo/udp'
+
+const gatewayDiscovery = new UdpDiscovery<ServiceApiMetadata>({
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'gateway-1',
+})
+
+const serviceDiscovery = new UdpDiscovery<ServiceApiMetadata>({
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'posts-service-1',
+})
+```
+
+The linker owns the supplied discovery lifecycle: calling `gateway.close()` or `service.close()`
+also closes that discovery instance. Do not share one instance between independently managed
+linkers.
+
 ### `close()`
 
 Unsubscribes from discovery and closes the discovery instance.
 
-## `UdpDiscovery`
+## `HttpDiscovery`
 
-`UdpDiscovery<T>` is an observable UDP discovery layer. It sends and receives msgpack packets signed with HMAC SHA-256.
+`HttpDiscovery<T>` is the production-oriented Ohayo discovery transport. It uses a small HTTP registry so service nodes can register with gateway nodes without relying on multicast.
 
-### When To Use It
+Both HTTP and UDP discovery use the same envelope:
 
-Use it when gateway and service nodes need to discover each other without a central registry. `ApiGatewayHandler` and `ApiServiceLinker` create a default instance when no custom discovery is provided.
+```ts
+type DiscoveryMessage<T> = {
+  node_id: string
+  namespace: string
+  tags: string[]
+  version: string
+  created_at: number
+  seq: number
+  data: T
+  remote_host?: string
+}
+```
 
 ### Constructor
 
 ```ts
-const discovery = new UdpDiscovery<MyNode>({
-  key: 'shared-secret',
-  port: 11001,
+new HttpDiscovery<T>({
+  mode: 'server' | 'client'
+  namespace: string
+  tags: string[]
+  node_id?: string
+  key?: string
+  // server mode
+  host?: string
+  port?: number
+  ttlMs?: number
+  // client mode
+  servers?: string[]
+  heartbeatMs?: number
+  requestTimeoutMs?: number
+  retryAttempts?: number
 })
 ```
 
-All trusted nodes must use the same key.
+- `mode`: required role. `server` opens a registry; `client` registers with configured servers.
+- `namespace`: exact discovery namespace. Inbound and outbound messages must match.
+- `tags`: required tags. Messages may contain extra tags, but must contain all configured tags.
+- `node_id`: optional fixed node id. Outbound messages with a different id are rejected; inbound messages from the same id are ignored.
+- `key`: bearer token for registry requests. Defaults to `OHAYO_DISCOVERY_KEY`.
+- `host`, `port`, `ttlMs`: server-mode bind and lease options.
+- `servers`: required non-empty client-mode registry list. It is always supplied to the constructor and is not read from environment variables.
+- `heartbeatMs`, `requestTimeoutMs`, `retryAttempts`: client-mode delivery options.
+
+### Gateway-Side Registry
+
+Gateway-side instances keep an in-memory registry and expose:
+
+- `POST /register`: authenticated registration body is a `DiscoveryMessage<T>`.
+- `DELETE /register/:node_id`: authenticated graceful deregistration.
+- `GET /health`: unauthenticated health probe.
+- `GET /nodes`: authenticated snapshot of registered nodes.
+
+```ts
+const gatewayDiscovery = new HttpDiscovery<ServiceApiMetadata>({
+  mode: 'server',
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'gateway-1',
+  port: 12001,
+})
+```
+
+Accepted registrations are emitted through the observable. The transport keeps app metadata inside `data` and may attach `remote_host` at the envelope level.
+
+### Service-Side Client
+
+Client-mode instances send registrations to every explicit constructor `servers` entry.
+
+```ts
+const serviceDiscovery = new HttpDiscovery<ServiceApiMetadata>({
+  mode: 'client',
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'service-1',
+  servers: ['127.0.0.1:12001', '127.0.0.1:12002'],
+})
+
+await serviceDiscovery.broadcast({
+  node_id: 'service-1',
+  namespace: 'default',
+  tags: ['livequery', 'service'],
+  version: String(Date.now()),
+  created_at: Date.now(),
+  seq: 1,
+  data: {
+    role: 'service',
+    name: 'posts',
+    host: '127.0.0.1',
+    port: 3001,
+    paths: [{ method: 'GET', path: 'livequery/posts' }],
+    linked: [],
+  },
+})
+```
+
+HTTP discovery filters inbound and outbound messages by namespace and contains-all tags. It authenticates registry requests with `Authorization: Bearer <OHAYO_DISCOVERY_KEY>`, retries failed registrations with backoff, refreshes service registrations with heartbeat, emits `{ data: { status: 'offline' } }` after TTL expiry, and sends best-effort deregistration on close.
+
+## `UdpDiscovery`
+
+`UdpDiscovery<T>` is a compatibility re-export from `@ohayo/udp`. Core does not
+maintain its own UDP sockets or packet codec. The transport uses UDP multicast
+or explicit peers, msgpack packet encoding, and HMAC SHA-256 signatures. New
+integrations should import `@ohayo/udp` directly; see the workspace
+`examples/udp-auto-discovery` E2E.
+
+### When To Use It
+
+Use it when gateway and service nodes need local-network discovery without an HTTP registry. It is useful for development, LAN deployments, and environments where multicast is allowed. `ApiGatewayHandler` and `ApiServiceLinker` default to `HttpDiscovery`; pass a `UdpDiscovery` instance explicitly if you want UDP.
+
+### Constructor
+
+```ts
+new UdpDiscovery<T>({
+  namespace: string
+  tags: string[]
+  node_id?: string
+  key?: string
+  port?: number
+  peers?: string[]
+  multicastAddress?: string
+  packetTtlMs?: number
+  broadcastCopies?: number
+})
+```
+
+- `namespace`, `tags`, and `node_id` follow the same contract as `HttpDiscovery`.
+- `key`: HMAC signing key. Explicit configuration is recommended; direct
+  `@ohayo/udp` use otherwise falls back to `OHAYO_DISCOVERY_KEY` and then its
+  development default.
+- `port`: UDP send/receive port. Defaults to `OHAYO_DISCOVERY_PORT`.
+- `peers`: extra peer IPs or `/24` prefixes. Defaults to `OHAYO_UDP_WHITELIST_ADDRESS`.
+- `multicastAddress`: multicast group; defaults to `OHAYO_UDP_MULTICAST_ADDRESS`
+  or `239.0.1.1`.
+- `packetTtlMs`: anti-replay packet window. Defaults to 30 seconds.
+- `broadcastCopies`: number of copies per broadcast; defaults to 3.
+
+All trusted nodes must use the same key, namespace, and compatible tags.
 
 ### `status$`
 
@@ -483,18 +694,42 @@ Observable lifecycle status:
 - `ready`
 - `closed`
 
-### `broadcast(node, targetIp?)`
+### Packet Format
 
-Broadcasts a node metadata packet.
+UDP packets are msgpack-encoded:
 
-If `targetIp` is omitted, the packet is sent to configured multicast peers and local multicast. If `targetIp` is provided, the packet is sent only to that address or list of addresses.
+```ts
+type UdpDiscoveryPacket<T> = {
+  version: 1
+  sender_id: string
+  timestamp: number
+  message: DiscoveryMessage<T>
+  signature: string
+}
+```
+
+`signature` is `hmac_sha256(pack(unsigned_packet), key)`. Packets older than `packetTtlMs`, packets with invalid signatures, malformed envelopes, wrong namespaces, or missing required tags are ignored.
+
+UDP discovery does not dedupe and does not compare `seq`; duplicate valid packets are emitted and consumers decide how to handle staleness.
+
+### `broadcast(message, targetIp?)`
+
+Broadcasts a `DiscoveryMessage<T>`.
+
+If `targetIp` is omitted, the packet is sent to multicast, configured peers, and local multicast. If `targetIp` is provided, the packet is sent only to that address or list of addresses.
 
 ```ts
 await discovery.broadcast({
   node_id: 'service-1',
   namespace: 'default',
-  version: Date.now(),
-  role: 'service',
+  tags: ['livequery', 'service'],
+  version: String(Date.now()),
+  created_at: Date.now(),
+  seq: 1,
+  data: {
+    role: 'service',
+    name: 'posts',
+  },
 })
 ```
 
@@ -505,22 +740,32 @@ Closes sockets and completes the observable streams.
 ### Example
 
 ```ts
-import { UdpDiscovery, type UdpDiscoveryNode } from '@livequery/core'
+import { UdpDiscovery, type DiscoveryMessage } from '@livequery/core'
 
-type Node = UdpDiscoveryNode & { role: 'service' | 'gateway' }
+type Metadata = { role: 'service' | 'gateway'; name: string }
 
-const discovery = new UdpDiscovery<Node>({ key: 'livequery/' })
-
-discovery.subscribe(node => {
-  console.log('node online', node)
+const discovery = new UdpDiscovery<Metadata>({
+  namespace: 'default',
+  tags: ['livequery'],
+  node_id: 'service-1',
+  key: 'shared-secret',
 })
 
-await discovery.broadcast({
+discovery.subscribe(message => {
+  console.log('node online', message.node_id, message.data)
+})
+
+const message: DiscoveryMessage<Metadata> = {
   node_id: 'service-1',
   namespace: 'default',
-  version: Date.now(),
-  role: 'service',
-})
+  tags: ['livequery', 'service'],
+  version: String(Date.now()),
+  created_at: Date.now(),
+  seq: 1,
+  data: { role: 'service', name: 'posts' },
+}
+
+await discovery.broadcast(message)
 ```
 
 ## `WebsocketGateway`
@@ -687,11 +932,14 @@ Copies a Web `Response` into a Node.js `ServerResponse`.
 
 | Constant | Meaning | Default |
 | --- | --- | --- |
-| `API_GATEWAY_NAMESPACE` | Namespace used by gateway and service metadata filtering | `default` |
-| `LIVEQUERY_MAGIC_KEY` | Livequery path prefix and default discovery key suffix | `livequery/` |
-| `API_GATEWAY_MULTICAST_PORT` | UDP discovery port | `11001` |
-| `API_GATEWAY_MULTICAST_ADDRESS` | UDP multicast address | `239.0.1.1` |
-| `API_GATEWAY_WHITELIST_ADDRESS` | Additional peer IPs or prefixes | empty |
+| `API_GATEWAY_NAMESPACE` | Namespace used by gateway and service metadata filtering. Reads `OHAYO_DISCOVERY_NAMESPACE`. | `default` |
+| `OHAYO_DISCOVERY_KEY` | Shared bearer/HMAC key for Ohayo discovery | `livequery` |
+| `OHAYO_DISCOVERY_PORT` | HTTP registry port and default UDP discovery port | `12001` |
+| `OHAYO_API_GATEWAY` | Comma-separated HTTP discovery registries for services | empty |
+| `OHAYO_WS_GATEWAY` | Reserved comma-separated websocket gateway list | empty |
+| `API_GATEWAY_MULTICAST_PORT` | UDP discovery port. Reads `OHAYO_DISCOVERY_PORT`. | `11001` |
+| `API_GATEWAY_MULTICAST_ADDRESS` | UDP multicast address. Reads `OHAYO_UDP_MULTICAST_ADDRESS`. | `239.0.1.1` |
+| `API_GATEWAY_WHITELIST_ADDRESS` | Additional peer IPs or prefixes. Reads `OHAYO_UDP_WHITELIST_ADDRESS`. | empty |
 | `NODE_ID` | Runtime node id | random UUID |
 | `LIVEQUERY_API_GATEWAY_DEBUG` | Enables gateway logs | false |
 | `WEBSOCKET_PATH` | Realtime WebSocket path | `/livequery/realtime-updates` |
@@ -765,18 +1013,19 @@ server.listen(3000)
 ## Environment Variables
 
 ```sh
-API_GATEWAY_NAMESPACE=default
-LIVEQUERY_MAGIC_KEY=livequery
-UDP_PUBLIC_PORT=11001
-UDP_MULTICAST_ADDRESS=239.0.1.1
-UDP_WHITELIST_ADDRESS=192.168.1
+OHAYO_DISCOVERY_NAMESPACE=default
+OHAYO_DISCOVERY_KEY=livequery
+OHAYO_DISCOVERY_PORT=12001
+OHAYO_API_GATEWAY=10.0.0.10:12001,10.0.0.11:12001
+OHAYO_SERVICE_HOST=10.0.0.20
+OHAYO_UDP_MULTICAST_ADDRESS=239.0.1.1
+OHAYO_UDP_WHITELIST_ADDRESS=192.168.1
 REALTIME_UPDATE_SOCKET_PATH=/livequery/realtime-updates
 LIVEQUERY_API_GATEWAY_DEBUG=1
-LIVEQUERY_UDP_DEBUG=1
 LIVEQUERY_GATEWAY_TIMEOUT=30
 ```
 
-`UDP_WHITELIST_ADDRESS` accepts:
+`OHAYO_UDP_WHITELIST_ADDRESS` accepts:
 
 - A full IP address, for example `192.168.1.10`.
 - A three-part prefix, for example `192.168.1`, expanded to `192.168.1.0` through `192.168.1.255`.
@@ -795,6 +1044,7 @@ The test suite covers:
 - Request parsing, including nested params, realtime suffixes, and query strings containing `~`.
 - API gateway routing, metadata updates, header/body forwarding, error responses, and round-robin.
 - Service metadata publishing with `ApiServiceLinker`.
+- HTTP discovery registration, auth, namespace/tag filtering, and TTL expiration.
 - UDP discovery signatures, TTL, status, and close behavior.
 - WebSocket gateway lifecycle, subscriptions, observable links, and gateway-to-gateway forwarding.
 - Hono integration and multi-process gateway/service discovery flows.
