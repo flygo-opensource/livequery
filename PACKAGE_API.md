@@ -1,9 +1,26 @@
-# Public classes and symbols by package
+# Public classes and symbols
 
-Tài liệu này liệt kê public runtime class của từng package. Những package chủ ý
-không có class được ghi rõ cùng function/interface thay thế.
+Livequery phát hành một package lõi, `@livequery/core`, chia theo entry point.
+Mỗi entry chỉ kéo phần runtime của nó: import root hoặc `/workers` không đụng tới
+Node built-in, `ws` hay UDP.
 
-## `@livequery/protocol`
+| Entry | Chạy trên | Nội dung |
+| --- | --- | --- |
+| `@livequery/core` | Mọi runtime | Contract, parser, realtime protocol engine |
+| `@livequery/core/node` | Node.js | Root + gateway `ws`, discovery HTTP, API gateway |
+| `@livequery/core/bun` | Bun | Root + gateway `Bun.serve`, discovery HTTP, API gateway |
+| `@livequery/core/udp` | Node.js, Bun | `UdpDiscovery` (cần `@ohayo/udp`) |
+| `@livequery/core/workers` | Cloudflare Workers | Root + gateway Durable Object, router, publisher |
+
+`ws` và `@ohayo/udp` là optional peer dependency: cài `ws` khi dùng
+`WebsocketGateway` của `/node`, cài `@ohayo/udp` khi dùng `/udp`. Import `/node` hay `/bun` không
+bao giờ nạp `@ohayo/udp`.
+
+Package ngoài core: datasource (`@livequery/d1`, `@livequery/mongodb`,
+`@livequery/postgres`) và framework adapter (`@livequery/nestjs`,
+`@livequery/honojs`).
+
+## `@livequery/core`
 
 ### `LivequeryRequestParser`
 
@@ -12,157 +29,96 @@ collection/document, document id, route schema, query, body và custom action
 `~verb`. Có thể dùng `LivequeryRequestParser.parse(request)` hoặc đặt instance
 vào handler pipeline.
 
-Các symbol quan trọng khác:
-
-- `LivequeryContext`, `LivequeryHandler`: contract của request pipeline.
-- `LivequeryDatasource`: contract cho database/framework datasource adapter.
-- `LivequeryBaseEntity`, `UpdatedData`, `DatabaseEvent`: entity và change-event types.
-- `LivequeryRealtimeEvent`, `RealtimeSubscription`: WebSocket wire contracts.
-- `QueryOption`, `FilterConditions`: type-safe query/filter types.
-- `hidePrivateFields`, `hidePrivateFieldsInItem`: loại bỏ private fields trước response.
-
-## `@livequery/service`
-
-### `ApiServiceLinker`
-
-Quản lý lifecycle publication của một application service. `start()`, `ready()`,
-`draining()` và `close()` phát manifest tương ứng; `update()` thay đổi version,
-endpoint, routes, health hoặc realtime metadata. Class chỉ phụ thuộc
-`ServicePublisher`, không biết gateway vendor.
-
-### `NoopServicePublisher`
-
-Publisher không tạo external side effect. Dùng khi CI/CD đã lấy manifest và cấu
-hình gateway ở deploy time, ví dụ Kubernetes hoặc Cloudflare.
-
-Các contract:
-
-- `ServicePublisher`: interface `publish(manifest)` và optional `close()`.
-- `ServiceManifest`: source of truth của service instance, routes và lifecycle.
-- `NetworkServiceEndpoint`: upstream có protocol/host/port.
-- `BindingServiceEndpoint`: deploy-time binding như Cloudflare Service Binding.
-
-## `@livequery/discovery`
-
-Package này không có runtime class. Nó chỉ cung cấp contract chung:
-
-- `Discovery<T>`: observable transport với `broadcast()` và `close()`.
-- `DiscoveryMessage<T>`: Ohayo envelope có node, namespace, tags, version và seq.
-- `DiscoveryOfflineData`: offline event marker.
-- `hasDiscoveryEnvelope`: kiểm tra envelope tối thiểu.
-- `isDiscoveryOfflineData`: type guard cho offline event.
-- `containsAllTags`: kiểm tra contains-all tag semantics.
-
-## `@livequery/discovery-http`
-
-### `HttpDiscovery<T>`
-
-HTTP discovery transport hai chế độ. Gateway-side `listen: true` mở registry,
-health và node snapshot endpoints. Service-side `listen: false` gửi register,
-heartbeat, retry và deregister tới một hoặc nhiều registry. `status$` phát
-`not_ready`, `ready`, `closed`.
-
-### `HttpServicePublisher`
-
-Adapter từ `ServicePublisher` sang `HttpDiscovery<ServiceManifest>`. Nó tạo Ohayo
-envelope từ manifest và giữ discovery instance theo `instanceId`.
-
-## `@livequery/discovery-file`
-
-### `FileServicePublisher`
-
-Ghi một JSON file cho mỗi service instance bằng temporary file và atomic rename.
-`close()` xóa file của instance. Class chỉ publish; agent watcher và gateway reload
-nằm ngoài application process.
-
-## `@livequery/gateway`
-
-### `ApiGatewayHandler`
-
-Fetch API gateway engine. `register()`/`applyManifest()` thêm ready service,
-`deregister()` loại instance, `fetch()` match route và forward request. Class xử
-lý route priority, ownership conflict, round-robin, failover và timeout nhưng
-không mở server.
-
-### `DiscoveryGatewayRegistry`
-
-Bridge một `Discovery<ServiceManifest>` vào `ApiGatewayHandler`. Online/ready
-manifest được apply; offline event deregister instance. `close()` chỉ hủy
-subscription bridge.
-
-### `RouteConflictError`
-
-Error chuyên biệt khi hai logical service khác nhau khai báo cùng normalized
-HTTP method/path.
-
-## `@livequery/realtime`
-
 ### `WebsocketGatewayBase`
 
-Runtime-neutral realtime protocol engine, kế thừa `Subject<UpdatedData>`. Class
-quản lý socket handshake, subscriptions, unsubscribe, reconnect grace period,
-gateway-to-gateway connection, Observable link và phát sync events. Runtime
-adapter gọi `onConnection`, `onMessage` và `onClose`.
+Realtime protocol engine không phụ thuộc runtime, kế thừa `Subject<UpdatedData>`.
+Class quản lý handshake, subscription, unsubscribe, reconnect grace period, kết nối
+gateway-to-gateway, Observable link và phát `sync`. Runtime adapter gọi
+`onConnection`, `onMessage` và `onClose`. Frame nhận vào có thể là JSON hoặc
+msgpack (client chuyển sang msgpack khi `hello.binary` là true).
 
-Các contract:
+Option: `disconnectGraceMs`, `id` (gateway id cố định), `binary` (giá trị
+`hello.binary`).
 
-- `SocketLike`: WebSocket tối thiểu mà runtime adapter phải bọc.
-- `RealtimeEventPublisher`: contract publish change event vào broker.
-- `RealtimeEventConsumer`: contract consume broker event.
-- `LivequeryChangeEvent`: event envelope độc lập NATS/Redis/Kafka.
+Các symbol khác:
 
-## `@livequery/realtime-node`
+- `LivequeryContext`, `LivequeryHandler`, `LivequeryDatasource`: contract của request pipeline và datasource.
+- `LivequeryBaseEntity`, `UpdatedData`, `DatabaseEvent`: entity và change-event types.
+- `LivequeryRealtimeEvent`, `RealtimeSubscription`, `LIVEQUERY_REALTIME_PATH`: WebSocket wire contracts.
+- `QueryOption`, `FilterConditions`: type-safe query/filter types.
+- `hidePrivateFields`, `hidePrivateFieldsInItem`: bỏ field private trước khi trả response.
+- `Discovery<T>`, `DiscoveryMessage<T>`, `isDiscoveryOfflineData`, `hasDiscoveryEnvelope`, `containsAllTags`: contract discovery.
+- `RealtimeEventPublisher`, `RealtimeEventConsumer`, `LivequeryChangeEvent`: contract broker (NATS/Redis/Kafka).
+- `decodeMsgpack`, `decodeRealtimeFrame`: giải mã frame realtime, không dependency.
+- `SocketLike`: WebSocket tối thiểu mà adapter phải bọc.
+
+## `@livequery/core/node`
 
 ### `WebsocketGateway`
 
-Node adapter kế thừa `WebsocketGatewayBase`, dùng package `ws` và gắn vào
-`http.Server`. `attach()` hỗ trợ bind/rebind; `close()` đóng clients và tháo
+Adapter Node kế thừa `WebsocketGatewayBase`, dùng package `ws` và gắn vào
+`http.Server`. `attach()` hỗ trợ bind/rebind; `close()` đóng client và tháo
 WebSocket server.
 
-## `@livequery/realtime-bun`
+### `ApiGatewayHandler`
+
+API gateway cho Node/Bun. Nghe discovery để dựng bảng route, proxy HTTP tới
+`host:port` của service với timeout, round-robin giữa bản sao, cô lập node lỗi và
+mở WebSocket gateway-to-gateway tới realtime gateway của từng service.
+
+### `ApiServiceLinker`
+
+Phía service: phát metadata (host, port, route, thông tin WebSocket gateway) qua
+discovery và phát lại khi thấy gateway mới.
+
+### `HttpDiscovery<T>`
+
+Transport discovery qua HTTP, hai chế độ: gateway `listen: true` mở registry, service
+`listen: false` gửi register/heartbeat tới `gateways`.
+
+## `@livequery/core/udp`
+
+### `UdpDiscovery`
+
+Re-export từ `@ohayo/udp`: discovery multicast có ký trong LAN. Tách entry riêng để `/node` và
+`/bun` không phụ thuộc `@ohayo/udp`.
+
+## `@livequery/core/bun`
 
 ### `BunWebsocketGateway`
 
-Bun-native adapter kế thừa `WebsocketGatewayBase`. `serve()` mở standalone
-`Bun.serve`; `attachBunUpgrade()` và `getBunWebsocketHandlers()` cho phép dùng
-chung application server. `path` xác định endpoint được phép upgrade.
+Adapter Bun kế thừa `WebsocketGatewayBase`. `new BunWebsocketGateway({ port })`
+mở `Bun.serve` riêng; `attachBunUpgrade()` và `getBunWebsocketHandlers()` dùng
+chung server có sẵn. `path` quy định endpoint được upgrade. Cũng được export với
+tên `WebsocketGateway` để đổi từ `/node` sang `/bun` chỉ cần đổi đường import.
 
-## `@livequery/realtime-cloudflare`
+Entry này còn export `ApiGatewayHandler`, `ApiServiceLinker`, `HttpDiscovery` như `/node`.
+
+## `@livequery/core/workers`
+
+### `HibernatableWebsocketGateway`
+
+Gateway chạy trong Durable Object, dùng WebSocket Hibernation API. Gateway id là id
+của Durable Object, socket lưu `client_id` và principal trong attachment,
+subscription lưu trong storage, nên object bị evict hay deploy lại vẫn giữ realtime.
+`fetch()` xử lý upgrade và hai endpoint nội bộ broadcast/subscribe; `register()`
+từ chối subscription khác principal.
 
 ### `CloudflareRealtimeRouter`
 
-Stateless public-Worker router. Class xác minh WebSocket upgrade, lấy bounded
-shard key và forward request tới Durable Object tương ứng qua namespace binding.
+Chạy ở Worker public. Chỉ chuyển WebSocket upgrade tới shard do `shardKey` chọn và
+ghi đè header principal bằng giá trị Worker đã xác thực.
+
+### `CloudflareRealtimePublisher`
+
+Chạy ở Worker. `register()` đăng ký subscription tới gateway theo `x-lgid` sau một
+lần đọc đã phân quyền; `publish()` phát change tới các shard.
 
 ### `EdgeWebsocketGateway`
 
-`WebSocketPair` adapter kế thừa `WebsocketGatewayBase`. `handleRequest()` accept
-upgrade và chuyển socket events vào protocol engine. Production phải khởi tạo
-class bên trong Durable Object, không tạo mới theo từng public Worker request.
+Adapter `WebSocketPair` không hibernate, state chỉ nằm trong memory. Giữ để tương
+thích; code mới dùng `HibernatableWebsocketGateway`.
 
-Các contract `DurableObjectNamespaceLike` và `DurableObjectStubLike` giữ package
-độc lập với phiên bản cụ thể của Cloudflare type definitions.
-
-## `@livequery/gateway-controller`
-
-Package này không có class. `createServiceTopology(manifests)` validate ownership,
-lọc ready instances và collapse replicas thành `ServiceTopology` dùng chung cho
-vendor renderers.
-
-## `@livequery/gateway-controller-nginx`
-
-Không có class. `renderNginxConfig(manifests)` trả về Nginx config string gồm
-upstream, targets, regex locations, allowed methods và proxy headers. Function
-không ghi file hoặc reload Nginx.
-
-## `@livequery/gateway-controller-kong`
-
-Không có class. `renderKongConfig(manifests)` trả về Kong declarative object với
-format version, upstreams, targets, services và routes. Function không gọi Kong
-Admin API.
-
-## `@livequery/gateway-controller-cloudflare`
-
-Không có class. `renderCloudflarePlan(manifests)` tạo danh sách service binding và
-HTTP routes để CI/Wrangler/Terraform apply. Function không deploy Worker và không
-quản lý Durable Object WebSocket state.
+Các contract `DurableObjectStateLike`, `DurableObjectNamespaceLike`,
+`HibernatableWebSocket` giữ core độc lập với phiên bản của Cloudflare type
+definitions.

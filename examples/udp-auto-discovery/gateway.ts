@@ -2,7 +2,7 @@ import {
   API_GATEWAY_NAMESPACE,
   ApiGatewayHandler,
   type ServiceApiMetadata,
-} from '@livequery/core'
+} from '@livequery/core/node'
 import { UdpDiscovery } from '@ohayo/udp'
 
 const discoveryPort = Number(process.env.OHAYO_DISCOVERY_PORT)

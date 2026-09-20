@@ -547,56 +547,36 @@ sung deployment metadata và upstream ownership mà OpenAPI không mô tả đ�
 
 ## 12. Package boundary đã triển khai
 
+Toàn bộ phần không phụ thuộc hạ tầng nằm trong một package, `@livequery/core`,
+chia theo entry point để mỗi runtime chỉ kéo đúng phần của nó:
+
 ```text
-@livequery/protocol
-  Runtime-neutral request, response, route and realtime event contracts.
+@livequery/core            Contract, parser, realtime protocol engine, discovery
+                           contract. Không import Node built-in, ws hay UDP.
+@livequery/core/node       + WebsocketGateway (ws), HttpDiscovery,
+                           ApiGatewayHandler, ApiServiceLinker.
+@livequery/core/bun        + BunWebsocketGateway và các thành phần gateway/service.
+@livequery/core/udp        + UdpDiscovery (re-export từ @ohayo/udp).
+@livequery/core/workers    + HibernatableWebsocketGateway, CloudflareRealtimeRouter,
+                           CloudflareRealtimePublisher.
 
-@livequery/service
-  ServiceManifest, ApiServiceLinker and publisher interfaces.
-
-@livequery/discovery
-  Runtime-neutral Discovery envelope and transport interface.
-
-@livequery/discovery-http
-  HttpDiscovery and HttpServicePublisher.
-
-@livequery/discovery-file
-  Atomic FileServicePublisher. Agent-side watcher is a later package concern.
-
-@livequery/gateway
-  Reference HTTP API Gateway implementation.
-
-@livequery/realtime
-  Runtime-neutral realtime protocol and broker interfaces.
-
-@livequery/realtime-node
-@livequery/realtime-bun
-@livequery/realtime-cloudflare
-  Runtime-specific WebSocket implementations.
-
-@livequery/gateway-controller-kong
-@livequery/gateway-controller-nginx
-@livequery/gateway-controller-cloudflare
-  Desired-state renderers for CI/CD or an external reconciliation agent.
+@livequery/d1 | mongodb | postgres   Datasource, mỗi package kéo driver riêng.
+@livequery/nestjs | honojs           Framework adapter.
 ```
 
-Các package nằm trong `packages/` và được build theo dependency graph bằng Bun
-workspace. `@livequery/core` hiện là compatibility facade: các consumer cũ vẫn
-có thể nâng cấp theo từng bước, còn code mới phải import trực tiếp package nhỏ
-nhất cần dùng.
+Trước đây phần lõi được tách thành nhiều package nhỏ (`protocol`, `service`,
+`discovery`, `gateway`, `realtime-*`, `gateway-controller-*`...), trong khi `core`
+vẫn giữ bản sao của cùng code đó. Hai nguồn song song khiến mỗi bản sửa phải làm
+hai lần, nên các package đó đã được gom lại vào `core`. Ranh giới runtime vẫn được
+giữ bằng entry point; `core/tests/root-entrypoint.test.ts` kiểm tra đồ thị import
+của root và `/workers` không chạm module Node.
 
-UDP transport chỉ có một implementation trong `@ohayo/udp`. Livequery không có
-package `discovery-udp`; compatibility export đi theo một chiều `@ohayo/udp` →
-`@livequery/core` → `@livequery/bunjs`. Cách tích hợp và E2E nằm trong
-`examples/udp-auto-discovery`.
+UDP transport chỉ có một implementation trong `@ohayo/udp`. `@livequery/core/udp`
+re-export `UdpDiscovery`; tách entry riêng để `/node` và `/bun` không bắt buộc cài
+`@ohayo/udp` (optional peer dependency). Cách tích hợp và E2E nằm trong `examples/udp-auto-discovery`.
 
-`@livequery/gateway` chỉ dùng Fetch API và không mở server, không tự tạo discovery
-transport, không import WebSocket implementation. `@livequery/realtime-*` sở hữu
-runtime WebSocket. Các controller chỉ render desired state; việc apply, validate
-ngoài môi trường và rollback thuộc CI/CD hoặc agent.
-
-Framework adapters như Hono/NestJS chỉ phụ thuộc protocol/service contracts và
-không phụ thuộc cứng vào Bun gateway implementation.
+Trên Cloudflare không có discovery lúc chạy: gateway gọi service qua Service
+Binding khai báo lúc deploy, realtime nằm trong Durable Object (xem `cf-worker`).
 
 ## 13. Deployment matrix
 

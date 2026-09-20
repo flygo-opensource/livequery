@@ -1,0 +1,47 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "livequery-api-gateway",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-09-03",
+  "workers_dev": true,
+  "vars": {
+    // Set API_TOKENS as a secret: `wrangler secret put API_TOKENS -c api-gateway-worker/wrangler.jsonc`.
+    "ALLOW_ANONYMOUS": "false",
+    "REALTIME_SHARDS": "4"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REALTIME",
+        "class_name": "RealtimeGatewayDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RealtimeGatewayDO"]
+    }
+  ],
+  "services": [
+    {
+      "binding": "TASKS_SERVICE",
+      "service": "livequery-tasks-service-api"
+    },
+    {
+      "binding": "INCIDENTS_SERVICE",
+      "service": "livequery-incidents-service-api"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  }
+}

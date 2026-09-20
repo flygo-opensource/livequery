@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "declaration": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": [
+    "api-gateway-worker/src/**/*.ts",
+    "api-gateway-worker/worker-configuration.d.ts",
+    "tasks-service-api-worker/src/**/*.ts",
+    "tasks-service-api-worker/worker-configuration.d.ts",
+    "incidents-service-api-worker/src/**/*.ts",
+    "incidents-service-api-worker/worker-configuration.d.ts",
+    "shared/**/*.ts"
+  ],
+  "exclude": ["shared/**/*.test.ts"]
+}

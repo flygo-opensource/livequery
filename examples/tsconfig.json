@@ -2,7 +2,16 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["bun"]
+    "types": [
+      "bun"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["**/*.ts"]
+  "include": [
+    "udp-auto-discovery/**/*.ts",
+    "api-gateway/**/*.ts"
+  ],
+  "exclude": [
+    "cloudflare-multi-worker"
+  ]
 }
