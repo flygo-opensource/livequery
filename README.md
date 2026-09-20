@@ -43,6 +43,9 @@ export default serve(app, { port: 8080, realtime })
 
 - [examples/api-gateway](examples/api-gateway/README.md): gateway và service API hoàn chỉnh
   (CRUD + realtime). Cùng một file chạy trên cả Node lẫn Bun, có test e2e cho bốn tổ hợp runtime.
+- [examples/todo-mongodb](examples/todo-mongodb/README.md): ứng dụng todo một process, kèm trang
+  web nhỏ. Realtime đến từ change stream của MongoDB, nên một lần ghi từ mongosh cũng tới được
+  client — `realtime()` vì thế chỉ đứng trên route GET.
 
 ## Cloudflare
 

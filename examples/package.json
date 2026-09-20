@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "bun run --cwd ../core build && bun run --cwd ../d1 build && bun test api-gateway/e2e.test.ts",
-    "typecheck": "bun run --cwd ../core build && bun run --cwd ../d1 build && tsc -p tsconfig.json --noEmit && tsc -p cloudflare-multi-worker/tsconfig.json --noEmit",
+    "typecheck": "bun run --cwd ../core build && bun run --cwd ../d1 build && bun run --cwd ../mongodb build && tsc -p tsconfig.json --noEmit && tsc -p cloudflare-multi-worker/tsconfig.json --noEmit",
     "cloudflare:types": "wrangler types cloudflare-multi-worker/api-gateway-worker/worker-configuration.d.ts --env-interface GatewayEnv --include-runtime false -c cloudflare-multi-worker/api-gateway-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/tasks-service-api-worker/worker-configuration.d.ts --env-interface TasksServiceEnv --include-runtime false -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/incidents-service-api-worker/worker-configuration.d.ts --env-interface IncidentsServiceEnv --include-runtime false -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
     "cloudflare:types:check": "wrangler types cloudflare-multi-worker/api-gateway-worker/worker-configuration.d.ts --env-interface GatewayEnv --include-runtime false --check -c cloudflare-multi-worker/api-gateway-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/tasks-service-api-worker/worker-configuration.d.ts --env-interface TasksServiceEnv --include-runtime false --check -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/incidents-service-api-worker/worker-configuration.d.ts --env-interface IncidentsServiceEnv --include-runtime false --check -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
     "cloudflare:dev": "wrangler dev -c cloudflare-multi-worker/api-gateway-worker/wrangler.jsonc -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
@@ -16,14 +16,17 @@
     "cloudflare:migrate:local:incidents": "wrangler d1 migrations apply INCIDENTS_DB --local --persist-to cloudflare-multi-worker/api-gateway-worker/.wrangler/state -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
     "cloudflare:migrate:tasks": "wrangler d1 migrations apply TASKS_DB --remote -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc",
     "cloudflare:migrate:incidents": "wrangler d1 migrations apply INCIDENTS_DB --remote -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
-    "api-gateway:node": "node api-gateway/node/gateway.ts & node api-gateway/node/service.ts",
-    "api-gateway:bun": "bun api-gateway/bun/gateway.ts & bun api-gateway/bun/service.ts"
+    "api-gateway": "node api-gateway/gateway.ts & node api-gateway/service.ts",
+    "todo-mongodb": "node todo-mongodb/index.ts",
+    "test:todo-mongodb": "bun run --cwd ../core build && bun run --cwd ../mongodb build && bun test todo-mongodb/e2e.test.ts"
   },
   "dependencies": {
     "@livequery/core": "workspace:*",
     "@livequery/d1": "workspace:*",
     "@livequery/honojs": "workspace:*",
+    "@livequery/mongodb": "workspace:*",
     "hono": "^4.13.5",
+    "mongodb": "^6.20.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

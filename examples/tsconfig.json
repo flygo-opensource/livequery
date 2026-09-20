@@ -9,7 +9,8 @@
     "resolveJsonModule": true
   },
   "include": [
-    "api-gateway/**/*.ts"
+    "api-gateway/**/*.ts",
+    "todo-mongodb/**/*.ts"
   ],
   "exclude": [
     "cloudflare-multi-worker"

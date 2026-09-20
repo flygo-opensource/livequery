@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Livequery todos</title>
+    <style>
+        :root { color-scheme: light dark; --line: color-mix(in srgb, currentColor 15%, transparent) }
+        body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem }
+        h1 { font-size: 1.3rem; display: flex; justify-content: space-between; align-items: baseline }
+        #status { font-size: .75rem; font-weight: 400; opacity: .6 }
+        form { display: flex; gap: .5rem; margin: 1rem 0 }
+        input[type=text] { flex: 1; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: .5rem; background: none; color: inherit }
+        button { padding: .55rem .8rem; border: 1px solid var(--line); border-radius: .5rem; background: none; color: inherit; cursor: pointer }
+        ul { list-style: none; padding: 0; margin: 0 }
+        li { display: flex; gap: .7rem; align-items: center; padding: .6rem .2rem; border-top: 1px solid var(--line) }
+        li span { flex: 1 }
+        li.done span { text-decoration: line-through; opacity: .5 }
+        li button { border: 0; opacity: .45; padding: .2rem .4rem }
+        p.empty { opacity: .5; padding: 1rem .2rem }
+    </style>
+</head>
+
+<body>
+    <h1>Todos <span id="status">connecting…</span></h1>
+    <form id="new">
+        <input type="text" id="title" placeholder="What needs doing?" autocomplete="off" required>
+        <button type="submit">Add</button>
+    </form>
+    <ul id="list"></ul>
+    <p class="empty" id="empty" hidden>Nothing here yet. Add one above — or insert a document straight
+        into MongoDB and watch it appear.</p>
+
+    <script type="module">
+        // A livequery client in plain JS: one WebSocket, then ordinary REST calls. The server
+        // subscribes this client to whatever it reads, so nothing here asks for a subscription.
+        const client_id = crypto.randomUUID()
+        const status = document.getElementById('status')
+        const list = document.getElementById('list')
+        const empty = document.getElementById('empty')
+        let todos = []
+
+        const socket = new WebSocket(`${location.protocol == 'https:' ? 'wss' : 'ws'}://${location.host}/livequery/realtime-updates`)
+        const gateway_id = await new Promise(resolve => {
+            socket.onopen = () => socket.send(JSON.stringify({ event: 'start', data: { id: client_id } }))
+            socket.onmessage = event => {
+                const frame = JSON.parse(event.data)
+                if (frame.event == 'hello') resolve(frame.gid)
+            }
+        })
+        status.textContent = 'live'
+        socket.onclose = () => status.textContent = 'disconnected'
+
+        socket.addEventListener('message', event => {
+            const frame = JSON.parse(event.data)
+            if (frame.event != 'sync') return
+            for (const change of frame.data.changes ?? []) apply(change)
+            render()
+        })
+
+        function apply({ type, data }) {
+            const index = todos.findIndex(todo => todo.id == data.id)
+            if (type == 'removed') return void (index >= 0 && todos.splice(index, 1))
+            if (index >= 0) todos[index] = { ...todos[index], ...data }
+            // `added` for a todo this client just created arrives after its own POST response.
+            else if (type == 'added') todos.unshift(data)
+        }
+
+        const headers = { 'x-lcid': client_id, 'x-lgid': gateway_id, 'content-type': 'application/json' }
+        const call = async (path, init) => {
+            const response = await fetch(`/livequery/todos${path}`, { headers, ...init })
+            const body = await response.json()
+            if (!response.ok) throw new Error(body?.error?.message ?? response.statusText)
+            return body
+        }
+
+        function render() {
+            list.replaceChildren(...todos.map(todo => {
+                const item = document.createElement('li')
+                item.className = todo.done ? 'done' : ''
+                const box = Object.assign(document.createElement('input'), { type: 'checkbox', checked: !!todo.done })
+                box.onchange = () => call(`/${todo.id}`, { method: 'PATCH', body: JSON.stringify({ done: box.checked }) })
+                const label = document.createElement('span')
+                label.textContent = todo.title
+                const remove = Object.assign(document.createElement('button'), { textContent: '✕', title: 'Delete' })
+                remove.onclick = () => call(`/${todo.id}`, { method: 'DELETE' })
+                item.append(box, label, remove)
+                return item
+            }))
+            empty.hidden = todos.length > 0
+        }
+
+        // The GET both loads the list and subscribes this client to the `todos` ref.
+        todos = (await call('')).items
+        render()
+
+        document.getElementById('new').onsubmit = async event => {
+            event.preventDefault()
+            const title = document.getElementById('title')
+            await call('', { method: 'POST', body: JSON.stringify({ title: title.value }) })
+            title.value = ''
+        }
+    </script>
+</body>
+
+</html>
