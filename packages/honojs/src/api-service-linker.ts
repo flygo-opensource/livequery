@@ -1,11 +1,18 @@
-import { ApiServiceLinker as CoreApiServiceLinker, UdpDiscovery, WebsocketGateway, type ServiceApiMetadata } from '@livequery/bunjs'
+// The /bun entry of core loads no `ws` and no UDP transport, so this module also runs on Node.
+import {
+    ApiServiceLinker as CoreApiServiceLinker,
+    type Discovery,
+    type ServiceApiMetadata,
+    type WebsocketGatewayBase,
+} from '@livequery/core/bun'
 import type { LivequeryRouteRegistry } from './route-registry.js'
 import type { LivequeryRoute } from './types.js'
 
 export type HonoApiServiceLinkerOptions = {
     routes: LivequeryRoute[] | LivequeryRouteRegistry
-    websocketGateway?: WebsocketGateway
-    discovery?: UdpDiscovery<ServiceApiMetadata>
+    websocketGateway?: WebsocketGatewayBase
+    /** Any discovery transport: `HttpDiscovery`, or `UdpDiscovery` from `@livequery/core/udp`. */
+    discovery?: Discovery<ServiceApiMetadata>
     node_id?: string
 }
 

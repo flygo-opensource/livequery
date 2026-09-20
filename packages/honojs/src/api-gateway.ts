@@ -1,14 +1,16 @@
 import type { Context, Handler } from 'hono'
+// The /bun entry of core loads no `ws` and no UDP transport, so this module also runs on Node.
 import {
     ApiGatewayHandler,
-    UdpDiscovery,
-    WebsocketGateway,
+    type Discovery,
     type ServiceApiMetadata,
-} from '@livequery/bunjs'
+    type WebsocketGatewayBase,
+} from '@livequery/core/bun'
 
 export type HonoApiGatewayOptions = {
-    websocketGateway?: WebsocketGateway
-    discovery?: UdpDiscovery<ServiceApiMetadata>
+    websocketGateway?: WebsocketGatewayBase
+    /** Any discovery transport: `HttpDiscovery`, or `UdpDiscovery` from `@livequery/core/udp`. */
+    discovery?: Discovery<ServiceApiMetadata>
     node_id?: string
 }
 

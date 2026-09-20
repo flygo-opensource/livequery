@@ -22,6 +22,18 @@
         "types": "./build/src/index.d.ts",
         "default": "./build/src/index.js"
       }
+    },
+    "./bun": {
+      "import": {
+        "types": "./build/src/bun.d.ts",
+        "default": "./build/src/bun.js"
+      }
+    },
+    "./node": {
+      "import": {
+        "types": "./build/src/node.d.ts",
+        "default": "./build/src/node.js"
+      }
     }
   },
   "type": "module",
@@ -31,11 +43,16 @@
     "typescript": "^5.1.6"
   },
   "peerDependencies": {
-    "hono": "^4.12.21"
+    "hono": "^4.12.21",
+    "ws": "^8.18.0"
   },
   "dependencies": {
-    "@livequery/bunjs": "^3.0.0",
     "@livequery/core": "^3.0.0",
     "rxjs": "x"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
   }
 }

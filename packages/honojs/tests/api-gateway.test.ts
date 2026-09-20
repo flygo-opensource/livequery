@@ -9,9 +9,9 @@ import {
     HonoApiServiceLinker,
     livequeryJson,
     API_GATEWAY_NAMESPACE,
-    UdpDiscovery,
-} from '../src/index.js'
-import type { ServiceApiMetadata } from '@livequery/bunjs'
+} from '../src/bun.js'
+import type { ServiceApiMetadata } from '@livequery/core/bun'
+import { UdpDiscovery } from '@livequery/core/udp'
 
 describe('HonoApiGateway', () => {
     test('proxies a matched route with Fetch Request/Response', async () => {

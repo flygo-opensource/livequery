@@ -1,18 +1,22 @@
 import type { Context, Handler } from 'hono'
-import { Observable, Subject, Subscription } from 'rxjs'
+import type { Observable, Subscription } from 'rxjs'
 import { hidePrivateFields, LivequeryRequestParser, type LivequeryDatasourceInitConfig } from '@livequery/core'
-import type { LivequeryBaseEntity, LivequeryRequest, UpdatedData, WebsocketSyncPayload } from '@livequery/core'
+import type { LivequeryBaseEntity, LivequeryRequest, UpdatedData } from '@livequery/core'
 import { getLivequeryRequest } from './request.js'
 import { livequeryJson } from './response.js'
 import type { LivequeryRoute, LivequeryResponse } from './types.js'
+import type { LivequeryRealtimeSink } from './realtime.js'
 import type { LivequeryRouteRegistry } from './route-registry.js'
-import { WebsocketGateway } from '@livequery/bunjs'
 
 export class LivequeryItemMapper<T extends LivequeryBaseEntity> {
     constructor(public readonly mapper: (item: T) => T) {}
 }
 
-export type LivequeryDatasource<RouteOptions> = Subject<WebsocketSyncPayload<LivequeryBaseEntity>> & {
+/**
+ * What `createDatasourceMapper` needs from a datasource: route setup and a query call.
+ * `MongoDatasource`, `PostgresDatasource` and `D1Datasource` all fit.
+ */
+export type MappedDatasource<RouteOptions> = {
     init(routes: Array<LivequeryDatasourceInitConfig<RouteOptions>>): Promise<void>
     query(query: LivequeryRequest, options: RouteOptions): Promise<{ items?: any[]; item?: any }>
 }
@@ -34,14 +38,17 @@ export type LivequeryDatasourceWatcher<Config, RouteOptions> = {
     watch(
         config: Config,
         routes: Array<LivequeryWatcherRoute<RouteOptions>>,
-        ds: LivequeryDatasource<RouteOptions>
+        ds: MappedDatasource<RouteOptions>
     ): Observable<UpdatedData<any>>
 }
 
 export type CreateDatasourceOptions<Config, RouteOptions> = {
-    datasource: LivequeryDatasource<RouteOptions>
+    datasource: MappedDatasource<RouteOptions>
     watcher?: LivequeryDatasourceWatcher<Config, RouteOptions>
-    websocketGateway?: WebsocketGateway
+    /** Receives the watcher's changes, usually the service's realtime gateway. */
+    realtime?: LivequeryRealtimeSink
+    /** @deprecated Use `realtime`. */
+    websocketGateway?: LivequeryRealtimeSink
     routes: Array<LivequeryDatasourceRoute<RouteOptions>> | LivequeryRouteRegistry
     config?: Config | Promise<Config>
 }
@@ -76,7 +83,8 @@ export async function createDatasourceMapper<Config, RouteOptions>(
     await options.datasource.init(datasourceRoutes)
 
     let realtime: Subscription | undefined
-    if (options.watcher && options.websocketGateway) {
+    const sink = options.realtime ?? options.websocketGateway
+    if (options.watcher && sink) {
         const config = (await options.config) as Config
         const watcherRoutes = routes.flatMap<LivequeryWatcherRoute<RouteOptions>>(route => {
             if (!route.options) return []
@@ -85,7 +93,7 @@ export async function createDatasourceMapper<Config, RouteOptions>(
             return [{ path: route.path, method: route.method, schema, options: route.options }]
         })
         realtime = options.watcher.watch(config, watcherRoutes, options.datasource).subscribe({
-            next: value => options.websocketGateway?.next(value),
+            next: value => sink.next(value),
         })
     }
 

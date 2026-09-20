@@ -2,7 +2,7 @@
 
 Hono framework adapter for the `@livequery` ecosystem. Protocol contracts come
 from `@livequery/core`; Bun discovery, gateway, and realtime runtime code comes
-from `@livequery/bunjs`. Provides middleware,
+from `@livequery/core/bun` via the `/bun` and `/node` entries; the root entry is runtime-neutral. Provides middleware,
 route registration helpers, a route registry, response utilities, an API gateway,
 and a service linker for building livequery-compatible REST APIs.
 
@@ -20,7 +20,7 @@ and a service linker for building livequery-compatible REST APIs.
 | `src/api-gateway.ts` | `HonoApiGateway` (thin subclass) and `HonoApiGatewayLinker` (opaque wrapper with Hono handler) |
 | `src/api-service-linker.ts` | `HonoApiServiceLinker` — wraps Bun runtime `ApiServiceLinker`, accepts a registry or plain array |
 | `src/datasource.ts` | `createDatasourceMapper()` — initialises a typed datasource and returns a `useDatasource()` handler factory |
-| `src/index.ts` | Re-exports all of the above plus protocol symbols from `@livequery/core` and runtime symbols from `@livequery/bunjs` |
+| `src/index.ts` | Re-exports all of the above plus protocol symbols from `@livequery/core` and runtime symbols live in `src/bun.ts` / `src/node.ts` (root stays Worker-safe) |
 
 ---
 
@@ -58,21 +58,25 @@ variable key. Must be called inside or after the `livequery()` middleware.
 ### `livequery(options?)`
 
 ```ts
-function livequery(options?: {
-    websocketGateway?: WebsocketGateway
+function livequery<E extends Env>(options?: {
+    realtime?: LivequeryRealtimeSubscriber<E>   // websocketGateway is a deprecated alias
     routePath?: string
-}): MiddlewareHandler
+}): MiddlewareHandler<E>
+
+type LivequeryRealtimeSubscriber<E> =
+    | Pick<WebsocketGatewayBase, 'id' | 'listen'>              // Bun / Node gateway
+    | ((subscription: RealtimeSubscription, c: Context<E>) => unknown)  // e.g. Workers publisher.register
 ```
 
 1. Calls `createLivequeryRequest` with the given `routePath`.
 2. Stores the result in context via `c.set('livequery', ...)`.
-3. If `websocketGateway` is provided, the request method is `GET`, and the parsed
-   request is defined, checks for realtime subscription eligibility:
+3. Runs the handler (`await next()`).
+4. Only then, if `realtime` is set, the method is `GET`, the response is 2xx and no cursor
+   param (`:after`, `:before`, `:around`) is present, registers the subscription:
    - `x-lcid` header (or legacy `socket_id`) must be present (client id).
-   - `x-lgid` header (or `ws.id`) is used as gateway id.
-   - Subscription is **skipped** when `:after`, `:before`, or `:around` cursor
-     query params are present.
-   - Calls `ws.listen([{ ref, client_id, gateway_id, listener_node_id }])`.
+   - Gateway object: `listen([{ ref, client_id, gateway_id: x-lgid ?? gw.id, listener_node_id: gw.id }])`.
+   - Function: requires `x-lgid`; awaited with `{ ref, client_id, gateway_id, listener_node_id }`
+     (both ids = `x-lgid`). Errors are logged, never fail the read.
 
 ### `createLivequery(app, options?)`
 
@@ -147,7 +151,7 @@ element in `response.items`. Items with a `toJSON()` method are serialised first
 
 ```ts
 class HonoApiGateway extends ApiGatewayHandler {
-    constructor(options?: { websocketGateway?: WebsocketGateway; discovery?: UdpDiscovery<ServiceApiMetadata>; node_id?: string })
+    constructor(options?: { websocketGateway?: WebsocketGatewayBase; discovery?: Discovery<ServiceApiMetadata>; node_id?: string })
 }
 ```
 
@@ -161,7 +165,7 @@ Constructor maps `websocketGateway` → core's `ws` option internally.
 
 ```ts
 class HonoApiGatewayLinker {
-    constructor(options?: { websocketGateway?: WebsocketGateway; discovery?: UdpDiscovery<ServiceApiMetadata>; node_id?: string })
+    constructor(options?: { websocketGateway?: WebsocketGatewayBase; discovery?: Discovery<ServiceApiMetadata>; node_id?: string })
     get gateway(): ApiGatewayHandler
     handler(): Handler           // Hono Handler: async c => this.fetch(c)
     fetch(c: Context): Promise<Response>
@@ -187,8 +191,8 @@ Opaque wrapper designed for drop-in use as a Hono catch-all handler. Owns an
 class HonoApiServiceLinker {
     constructor(options: {
         routes: LivequeryRoute[] | LivequeryRouteRegistry
-        websocketGateway?: WebsocketGateway
-        discovery?: UdpDiscovery<ServiceApiMetadata>
+        websocketGateway?: WebsocketGatewayBase
+        discovery?: Discovery<ServiceApiMetadata>   // HttpDiscovery by default, or UdpDiscovery from @livequery/core/udp
         node_id?: string
     })
     start(name: string, port: number): void
@@ -196,23 +200,24 @@ class HonoApiServiceLinker {
 }
 ```
 
-Wraps `@livequery/bunjs` `ApiServiceLinker`. Accepts a `LivequeryRouteRegistry` (reads `.routes`)
-or a plain array. Broadcasts service metadata over UDP so gateways can discover it.
+Exported from `/bun` and `/node` only. Wraps core's `ApiServiceLinker`. Accepts a
+`LivequeryRouteRegistry` (reads `.routes`) or a plain array. Publishes service metadata through
+the given discovery transport so gateways can find it.
 
 ### `createDatasourceMapper(options)`
 
 ```ts
 async function createDatasourceMapper<Config, RouteOptions>(options: {
-    datasource: LivequeryDatasource<Config, RouteOptions>
+    datasource: MappedDatasource<RouteOptions>   // { init(routes), query(req, options) }
     watcher?: LivequeryDatasourceWatcher<Config, RouteOptions>
-    websocketGateway?: WebsocketGateway
-    routes: LivequeryRoute[] | LivequeryRouteRegistry
-    config: Config | Promise<Config>
+    realtime?: LivequeryRealtimeSink             // { next(update) }; websocketGateway is a deprecated alias
+    routes: LivequeryDatasourceRoute<RouteOptions>[] | LivequeryRouteRegistry
+    config?: Config | Promise<Config>
 }): Promise<(routeOptions: RouteOptions, mapper?: DatasourceMapper) => Handler>
 ```
 
-Initialises the datasource (`datasource.init(config, routes)`), optionally sets
-up a realtime watcher, then returns a `useDatasource(routeOptions, mapper?)` factory.
+Initialises the datasource (`datasource.init(routes)`), optionally pipes the watcher's change
+feed into `realtime`, then returns a `useDatasource(routeOptions, mapper?)` factory.
 
 Each handler from `useDatasource`:
 1. Reads `LivequeryRequest` from context.
@@ -245,9 +250,7 @@ type LivequeryRequest<I> = {
 }
 ```
 
-`@livequery/types` exports a *different* `LivequeryRequest` (used in
-`LivequeryDatasource.query`) with `doc_id`, `is_collection`, and `options` instead
-of `document_id`, and `query`. That type is for datasource implementations only.
+`MappedDatasource.query` receives this same core `LivequeryRequest`.
 
 ---
 

@@ -10,8 +10,16 @@ Hono framework adapter for the `@livequery` ecosystem. Provides request parsing 
 npm install @livequery/honojs @livequery/core hono
 ```
 
-Peer dependency: `hono >= 4.12`. Bun-specific discovery, gateway, and realtime
-transport are provided transitively by `@livequery/bunjs`.
+Peer dependency: `hono >= 4.12`.
+
+| Entry | Runtime | Contents |
+| --- | --- | --- |
+| `@livequery/honojs` | Any (Workers, Bun, Node) | Middleware, request/response helpers, route registry, datasource mapper |
+| `@livequery/honojs/bun` | Bun | Root + `HonoApiGateway*`, `HonoApiServiceLinker`, `WebsocketGateway` (`Bun.serve`) |
+| `@livequery/honojs/node` | Node.js | Root + the same gateway/linker, `WebsocketGateway` on `ws` (install `ws`) |
+
+The root entry loads no Node built-in, `ws` or UDP transport, so it is safe on Cloudflare
+Workers. For UDP discovery import `UdpDiscovery` from `@livequery/core/udp`.
 
 ---
 
@@ -27,11 +35,11 @@ import {
     livequeryJson,
     HonoApiServiceLinker,
     WebsocketGateway,
-} from '@livequery/honojs'
+} from '@livequery/honojs/bun'
 
 const app = new Hono()
 const websocketGateway = new WebsocketGateway()
-const livequery = createLivequery(app, { websocketGateway })
+const livequery = createLivequery(app, { realtime: websocketGateway })
 
 // Collection route
 livequery.get('/livequery/products', c => {
@@ -86,7 +94,7 @@ import {
     getLivequeryRequest,
     livequeryJson,
     HonoApiServiceLinker,
-} from '@livequery/honojs'
+} from '@livequery/honojs/bun'
 
 const app = new Hono()
 
@@ -113,11 +121,12 @@ Passing `routePath` to `livequery()` is required for correct `ref`, `collection_
 
 ## API gateway
 
-An API gateway auto-discovers upstream services over UDP and proxies HTTP requests. Client id headers (`x-lcid`, `x-lgid`) are forwarded so upstream services can register realtime subscriptions.
+An API gateway auto-discovers upstream services (HTTP discovery by default, or pass a
+`UdpDiscovery` from `@livequery/core/udp`) and proxies HTTP requests. Client id headers (`x-lcid`, `x-lgid`) are forwarded so upstream services can register realtime subscriptions.
 
 ```ts
 import { Hono } from 'hono'
-import { HonoApiGatewayLinker, WebsocketGateway } from '@livequery/honojs'
+import { HonoApiGatewayLinker, WebsocketGateway } from '@livequery/honojs/bun'
 
 const app = new Hono()
 const websocketGateway = new WebsocketGateway()
@@ -151,7 +160,7 @@ gateway.gateway.register({
 If you need to subclass `ApiGatewayHandler` directly, use `HonoApiGateway`:
 
 ```ts
-import { HonoApiGateway } from '@livequery/honojs'
+import { HonoApiGateway } from '@livequery/honojs/bun'
 
 class CustomGateway extends HonoApiGateway {}
 
@@ -170,14 +179,47 @@ GET /livequery/products
 x-lcid: client-abc123
 ```
 
-The middleware calls `websocketGateway.listen(...)` with the resource `ref` and client/gateway ids. No subscription is registered when cursor params (`:after`, `:before`, `:around`) are present — pagination requests are one-off fetches.
+The subscription is registered **after** the handler, and only when the response is 2xx, so
+a read that failed (403, 404, validation) never subscribes the caller. No subscription is
+registered when cursor params (`:after`, `:before`, `:around`) are present — pagination requests
+are one-off fetches.
+
+`realtime` takes one of two forms:
 
 ```ts
-// Just pass websocketGateway when creating the router — no extra code needed.
-const livequery = createLivequery(app, { websocketGateway })
+// Bun / Node: an in-process realtime gateway (any WebsocketGatewayBase)
+const livequery = createLivequery(app, { realtime: websocketGateway })
+
+// Cloudflare Workers: sockets live in a Durable Object, so register through the publisher.
+// Awaited before the response is sent. Requires x-lgid (the gid from the client's hello).
+import { CloudflareRealtimePublisher } from '@livequery/core/workers'
+
+const app = new Hono<{ Bindings: Env; Variables: { principal: string } }>()
+const livequery = createLivequery(app, {
+    realtime: (subscription, c) =>
+        createPublisher(c.env).register(subscription, c.get('principal')),
+})
 ```
 
-The `x-lgid` header can specify a gateway id when routing through multiple gateways. If absent, `websocketGateway.id` is used.
+With a gateway object, `x-lgid` names the gateway when routing through several; if absent the
+gateway's own `id` is used. `websocketGateway` is still accepted as a deprecated alias of `realtime`.
+
+## Datasources
+
+`createDatasourceMapper` accepts any datasource with `init(routes)` and `query(req, options)`:
+`MongoDatasource`, `PostgresDatasource` and `D1Datasource` fit without a cast.
+
+```ts
+import { D1Datasource } from '@livequery/d1'
+import { env } from 'cloudflare:workers'
+
+const datasource = new D1Datasource({ databases: { default: env.DB } })
+const use = await createDatasourceMapper({ datasource, routes })
+livequery.get('/livequery/tasks', use({ table: 'tasks', fields: ['title', 'status'] }))
+```
+
+Pass `watcher` and `realtime` to forward a change feed (Mongo change streams, Postgres NOTIFY)
+into the service's realtime gateway.
 
 ---
 
@@ -248,53 +290,41 @@ For collection routes (last route segment is not a `:param`), `document_id` is `
 For services backed by a typed datasource adapter, `createDatasourceMapper` generates Hono handlers without boilerplate.
 
 ```ts
-import { Subject } from 'rxjs'
-import { createDatasourceMapper, createLivequery, livequeryJson } from '@livequery/honojs'
-import type { LivequeryDatasource } from '@livequery/honojs'
-import type { LivequeryBaseEntity, LivequeryRequest, WebsocketSyncPayload } from '@livequery/types'
+import { Hono } from 'hono'
+import { createDatasourceMapper, createLivequery, type MappedDatasource } from '@livequery/honojs'
 
-type Product   = LivequeryBaseEntity & { name: string }
-type Config    = { db: Product[] }
-type RouteOpts = { collection: 'products' }
+type Product = { id: string; name: string }
+type RouteOptions = { collection: 'products' }
 
-class ProductDatasource
-    extends Subject<WebsocketSyncPayload<LivequeryBaseEntity>>
-    implements LivequeryDatasource<Config, RouteOpts>
-{
-    #config!: Config
+const PRODUCTS: Product[] = [{ id: 'p-1', name: 'Keyboard' }]
 
-    async init(config: Config): Promise<void> { this.#config = config }
-
-    async query(req: LivequeryRequest, opts: RouteOpts) {
-        const items = this.#config[opts.collection]
-        if (req.is_collection) return { items }
-        return { item: items.find(p => p.id === req.doc_id) }
-    }
+// Any object with init + query works; real services pass MongoDatasource, PostgresDatasource
+// or D1Datasource here.
+const datasource: MappedDatasource<RouteOptions> = {
+    async init() {},
+    async query(req) {
+        if (!req.document_id) return { items: PRODUCTS }
+        return { item: PRODUCTS.find(p => p.id === req.document_id) }
+    },
 }
 
 const app = new Hono()
 const livequery = createLivequery(app)
-
-// Placeholder handlers — replaced after async init
-let listHandler = (c: any) => livequeryJson(c, { items: [] })
-let itemHandler = (c: any) => livequeryJson(c, { item: {} })
-
-livequery.get('/livequery/products',     c => listHandler(c))
-livequery.get('/livequery/products/:id', c => itemHandler(c))
-
-const useDatasource = await createDatasourceMapper({
-    datasource: new ProductDatasource(),
-    routes: livequery.registry,
-    config: { db: [{ id: 'p-1', name: 'Keyboard' }] },
+const use = await createDatasourceMapper({
+    datasource,
+    routes: [
+        { method: 'GET', path: '/livequery/products', options: { collection: 'products' } },
+        { method: 'GET', path: '/livequery/products/:id', options: { collection: 'products' } },
+    ],
 })
 
-listHandler = useDatasource({ collection: 'products' })
-itemHandler = useDatasource({ collection: 'products' })
+livequery.get('/livequery/products', use({ collection: 'products' }))
+livequery.get('/livequery/products/:id', use({ collection: 'products' }))
 ```
 
-Note: the `LivequeryRequest` received in `datasource.query()` is from `@livequery/types`
-and has `doc_id`, `is_collection`, and `options` — distinct from the `@livequery/core`
-type returned by `getLivequeryRequest(c)`.
+`query` receives the `LivequeryRequest` from `@livequery/core` — the same object
+`getLivequeryRequest(c)` returns. Structured errors thrown by the datasource
+(`{ status, code, message }`) become the HTTP response.
 
 ---
 
@@ -313,11 +343,8 @@ import type {
     LivequeryDatasource,     // datasource contract
     LivequeryDatasourceInitConfig,
 
-    // Bun runtime contracts re-exported from @livequery/bunjs
     RealtimeSubscription,
-    UdpDiscoveryNode,
-    UdpDiscoveryOptions,
-    UdpDiscoveryPacket,
-    UdpDiscoveryStatus,
+    LivequeryRealtimeSubscriber,  // gateway object or (subscription, c) => unknown
+    MappedDatasource,             // { init(routes), query(req, options) }
 } from '@livequery/honojs'
 ```

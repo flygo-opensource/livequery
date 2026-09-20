@@ -1,4 +1,4 @@
-import type { Hono, Handler, MiddlewareHandler } from 'hono'
+import type { Env, Hono, Handler, MiddlewareHandler } from 'hono'
 import type { LivequeryRoute } from './types.js'
 import { livequery, type LivequeryMiddlewareOptions } from './middleware.js'
 
@@ -19,47 +19,50 @@ export class LivequeryRouteRegistry {
     }
 }
 
-export type LivequeryRouterOptions = LivequeryMiddlewareOptions
+export type LivequeryRouterOptions<E extends Env = any> = LivequeryMiddlewareOptions<E>
 
-export class LivequeryRouter {
+export class LivequeryRouter<E extends Env = any> {
     readonly registry = new LivequeryRouteRegistry()
 
     constructor(
-        readonly app: Hono,
-        readonly options: LivequeryRouterOptions = {}
+        readonly app: Hono<E>,
+        readonly options: LivequeryRouterOptions<E> = {}
     ) {}
 
-    get(path: string, ...handlers: Handler[]): void {
+    get(path: string, ...handlers: Handler<E>[]): void {
         this.#route('get', path, handlers)
     }
 
-    post(path: string, ...handlers: Handler[]): void {
+    post(path: string, ...handlers: Handler<E>[]): void {
         this.#route('post', path, handlers)
     }
 
-    put(path: string, ...handlers: Handler[]): void {
+    put(path: string, ...handlers: Handler<E>[]): void {
         this.#route('put', path, handlers)
     }
 
-    patch(path: string, ...handlers: Handler[]): void {
+    patch(path: string, ...handlers: Handler<E>[]): void {
         this.#route('patch', path, handlers)
     }
 
-    delete(path: string, ...handlers: Handler[]): void {
+    delete(path: string, ...handlers: Handler<E>[]): void {
         this.#route('delete', path, handlers)
     }
 
-    use(path: string, ...handlers: MiddlewareHandler[]): void {
+    use(path: string, ...handlers: MiddlewareHandler<E>[]): void {
         this.app.use(path, ...handlers)
     }
 
-    #route(method: HonoRouteMethod, path: string, handlers: Handler[]): void {
+    #route(method: HonoRouteMethod, path: string, handlers: Handler<E>[]): void {
         this.registry.add(method, path)
         this.app[method](path, livequery({ ...this.options, routePath: path }), ...handlers)
     }
 }
 
-export function createLivequery(app: Hono, options: LivequeryRouterOptions = {}): LivequeryRouter {
+export function createLivequery<E extends Env = any>(
+    app: Hono<E>,
+    options: LivequeryRouterOptions<E> = {}
+): LivequeryRouter<E> {
     return new LivequeryRouter(app, options)
 }
 
