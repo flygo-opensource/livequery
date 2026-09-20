@@ -1,5 +1,4 @@
-import { Subject } from 'rxjs'
-import type { LivequeryRequest, UpdatedData } from '@livequery/core'
+import type { LivequeryRequest } from '@livequery/core'
 
 export type Task = {
     id: string
@@ -27,11 +26,12 @@ function readStatus(value: unknown): Task['status'] {
 
 /**
  * In-memory task table. Stands in for MongoDB / Postgres / D1 so the example needs no database.
- * Every write is emitted on `changes$`; the service forwards it to its realtime gateway.
+ *
+ * It has no change feed: realtime comes from the write path, the way it must on D1 too. A store
+ * that does have one (Mongo change streams, Postgres NOTIFY) would push into a realtime gateway
+ * instead, and the routes would not change.
  */
 export class TaskStore {
-    readonly changes$ = new Subject<UpdatedData<Task>>()
-
     readonly #tasks = new Map<string, Task>()
 
     /** Collection read with `?status=` / `?title=` equality filters and `?:limit=`. */
@@ -62,7 +62,6 @@ export class TaskStore {
             created_at: Date.now(),
         }
         this.#tasks.set(item.id, item)
-        this.changes$.next({ ref: 'tasks', type: 'added', data: item })
         return { item }
     }
 
@@ -75,14 +74,12 @@ export class TaskStore {
             ...body.status !== undefined ? { status: readStatus(body.status) } : {},
         }
         this.#tasks.set(item.id, item)
-        this.changes$.next({ ref: 'tasks', type: 'modified', data: item })
         return { item }
     }
 
     delete(req: LivequeryRequest): { item: Task } {
         const item = this.#find(req)
         this.#tasks.delete(item.id)
-        this.changes$.next({ ref: 'tasks', type: 'removed', data: item })
         return { item }
     }
 

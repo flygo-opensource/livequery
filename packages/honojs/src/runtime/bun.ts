@@ -30,3 +30,9 @@ export function serve(app: FetchApp, options: ServeOptions = {}) {
         ...gateway ? { websocket: gateway.getBunWebsocketHandlers() } : {},
     }
 }
+
+/** The realtime gateway for this runtime: `BunWebsocketGateway`, on `Bun.serve`. */
+export async function realtimeGateway(options: Record<string, unknown> = {}) {
+    const { BunWebsocketGateway } = await import('@livequery/core/bun')
+    return new BunWebsocketGateway(options)
+}

@@ -41,7 +41,7 @@ Trên Bun đổi đường import thành `@livequery/core/bun`; `WebsocketGatewa
 `BunWebsocketGateway`.
 
 - [examples/api-gateway](examples/api-gateway/README.md): gateway và service API hoàn chỉnh
-  (CRUD + realtime) cho Node và Bun, có test e2e cho cả bốn tổ hợp runtime.
+  (CRUD + realtime). Cùng một file chạy trên cả Node lẫn Bun, có test e2e cho bốn tổ hợp runtime.
 - [examples/udp-auto-discovery](examples/udp-auto-discovery/README.md): discovery UDP trong LAN.
 
 ## Cloudflare

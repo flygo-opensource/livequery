@@ -2,6 +2,6 @@
 export const GATEWAY_PORT = Number(process.env.GATEWAY_PORT ?? 8080)
 export const SERVICE_PORT = Number(process.env.SERVICE_PORT ?? 8081)
 
-// The gateway runs the HTTP discovery registry on this port; services register with it.
-export const DISCOVERY_PORT = Number(process.env.OHAYO_DISCOVERY_PORT ?? 12001)
-export const DISCOVERY_URL = process.env.DISCOVERY_URL ?? `http://127.0.0.1:${DISCOVERY_PORT}`
+// Where the gateway reaches the service. routing.json carries the same default; this override
+// exists so tests (and containers) can move the service without editing the file.
+export const SERVICE_URL = process.env.SERVICE_URL ?? `http://127.0.0.1:${SERVICE_PORT}`

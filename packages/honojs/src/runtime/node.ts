@@ -56,3 +56,12 @@ export function serve(app: FetchApp, options: ServeOptions = {}): FetchApp {
     server.listen(options.port ?? 8080)
     return app
 }
+
+/**
+ * The realtime gateway for this runtime: `WebsocketGateway`, which needs the optional `ws` peer.
+ * Loaded on demand, so an app that serves no WebSockets never pulls it in.
+ */
+export async function realtimeGateway(options: Record<string, unknown> = {}) {
+    const { WebsocketGateway } = await import('@livequery/core/node')
+    return new WebsocketGateway(undefined, options)
+}

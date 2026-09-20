@@ -5,7 +5,8 @@
     "types": [
       "bun"
     ],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
   },
   "include": [
     "udp-auto-discovery/**/*.ts",
