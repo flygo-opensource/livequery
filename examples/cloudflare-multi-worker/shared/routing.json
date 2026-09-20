@@ -1,0 +1,12 @@
+{
+    "services": {
+        "tasks": { "binding": "TASKS_SERVICE" },
+        "incidents": { "binding": "INCIDENTS_SERVICE" }
+    },
+    "routes": {
+        "livequery": {
+            "tasks": { "$service": "tasks" },
+            "incidents": { "$service": "incidents" }
+        }
+    }
+}

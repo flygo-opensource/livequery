@@ -17,11 +17,13 @@ export { RealtimeGatewayDO } from './RealtimeGatewayDO.js'
 // enforces on filters, sorts and writes. Nothing outside it can reach SQL.
 
 // strictObject: an unknown body field is a client bug, so reject it instead of dropping it.
+// zod/mini has no `.partial()` method, so PATCH gets its schema explicitly.
 const Task = z.strictObject({
     title: z.string().check(z.minLength(1)),
     status: z._default(z.enum(['todo', 'done']), 'todo'),
     created_at: z.optional(z.int()),
 })
+const TaskPatch = z.partial(Task)
 
 // ─── App ────────────────────────────────────────────────────────────────────
 
@@ -58,15 +60,15 @@ const shards = {
 // validator → livequery → d1 → realtime: validate the input, parse the Livequery request, run the
 // D1 operation, then subscribe or publish. `d1()` reads the table from the collection ref.
 
-app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime(shards))
-app.post('/livequery/tasks', validator(Task), livequery(), d1(), realtime(shards))
-app.get('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
-app.put('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
-app.patch('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
+app.get('/livequery/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.post('/livequery/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.get('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.put('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.patch('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
 app.delete('/livequery/tasks/:id', livequery(), d1({ fields: Object.keys(Task.shape) }), realtime(shards))
 
 // Tasks filtered by status — the :status route key becomes WHERE status = ?
-app.get('/livequery/status/:status/tasks', validator(Task), livequery(), d1(), realtime(shards))
+app.get('/livequery/status/:status/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 //

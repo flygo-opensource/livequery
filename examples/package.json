@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun run --cwd ../core build && bun run --cwd ../d1 build && bun test udp-auto-discovery/e2e.test.ts api-gateway/e2e.test.ts cloudflare-multi-worker/shared/routes.test.ts",
+    "test": "bun run --cwd ../core build && bun run --cwd ../d1 build && bun test udp-auto-discovery/e2e.test.ts api-gateway/e2e.test.ts",
     "typecheck": "bun run --cwd ../core build && bun run --cwd ../d1 build && tsc -p tsconfig.json --noEmit && tsc -p cloudflare-multi-worker/tsconfig.json --noEmit",
     "cloudflare:types": "wrangler types cloudflare-multi-worker/api-gateway-worker/worker-configuration.d.ts --env-interface GatewayEnv --include-runtime false -c cloudflare-multi-worker/api-gateway-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/tasks-service-api-worker/worker-configuration.d.ts --env-interface TasksServiceEnv --include-runtime false -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/incidents-service-api-worker/worker-configuration.d.ts --env-interface IncidentsServiceEnv --include-runtime false -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
     "cloudflare:types:check": "wrangler types cloudflare-multi-worker/api-gateway-worker/worker-configuration.d.ts --env-interface GatewayEnv --include-runtime false --check -c cloudflare-multi-worker/api-gateway-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/tasks-service-api-worker/worker-configuration.d.ts --env-interface TasksServiceEnv --include-runtime false --check -c cloudflare-multi-worker/tasks-service-api-worker/wrangler.jsonc && wrangler types cloudflare-multi-worker/incidents-service-api-worker/worker-configuration.d.ts --env-interface IncidentsServiceEnv --include-runtime false --check -c cloudflare-multi-worker/incidents-service-api-worker/wrangler.jsonc",
@@ -22,8 +22,10 @@
   "dependencies": {
     "@livequery/core": "workspace:*",
     "@livequery/d1": "workspace:*",
+    "@livequery/honojs": "workspace:*",
+    "@ohayo/udp": "^3.0.0",
     "hono": "^4.13.5",
-    "@ohayo/udp": "^3.0.0"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260903.1",

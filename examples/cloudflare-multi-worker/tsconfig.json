@@ -5,7 +5,10 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
-    "types": ["@cloudflare/workers-types"]
+    "types": [
+      "@cloudflare/workers-types"
+    ],
+    "resolveJsonModule": true
   },
   "include": [
     "api-gateway-worker/src/**/*.ts",
@@ -16,5 +19,7 @@
     "incidents-service-api-worker/worker-configuration.d.ts",
     "shared/**/*.ts"
   ],
-  "exclude": ["shared/**/*.test.ts"]
+  "exclude": [
+    "shared/**/*.test.ts"
+  ]
 }

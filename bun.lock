@@ -65,8 +65,10 @@
       "dependencies": {
         "@livequery/core": "workspace:*",
         "@livequery/d1": "workspace:*",
+        "@livequery/honojs": "workspace:*",
         "@ohayo/udp": "^3.0.0",
         "hono": "^4.13.5",
+        "zod": "^4.0.0",
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^5.20260903.1",

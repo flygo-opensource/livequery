@@ -12,18 +12,26 @@ Client ── HTTP + WebSocket
             └─> livequery-incidents-service-api (private) ─> INCIDENTS_DB
 ```
 
-Gateway dùng HTTP Service Bindings để chuyển nguyên request đến đúng service. Hai service sử dụng Hono và mapper `@livequery/d1` thông qua đúng contract `LivequeryDatasource.init(routes)` và `LivequeryDatasource.handle(ctx)`.
+Gateway định tuyến **theo tiền tố path**, khai báo trong `shared/routing.json`:
 
-Realtime nằm hoàn toàn ở Gateway, hai service chỉ là REST Worker:
+```json
+{ "services": { "tasks": { "binding": "TASKS_SERVICE" } },
+  "routes": { "livequery": { "tasks": { "$service": "tasks" } } } }
+```
 
-- Client mở WebSocket tới `/livequery/realtime-updates?token=...`; Gateway chuyển upgrade vào
-  Durable Object shard theo principal (`CloudflareRealtimeRouter`).
-- Sau một GET thành công có `x-lcid` / `x-lgid`, Gateway đăng ký subscription
-  (`CloudflareRealtimePublisher.register`) trước khi trả response.
-- Sau một write thành công, Gateway lấy `item` trong response của service và phát change tới
-  mọi shard qua `waitUntil` (`CloudflareRealtimePublisher.publish`).
+Service sở hữu mọi route nằm dưới tiền tố của nó, nên **thêm route con chỉ cần deploy service**.
+Chỉ khi thêm service mới thì gateway mới phải deploy lại, vì cần thêm Service Binding.
 
-Mọi thứ realtime import từ `@livequery/core/workers`; không Worker nào cần `nodejs_compat`.
+Mỗi service là một chuỗi middleware (`shared/resource.ts`):
+
+```ts
+app.get('/livequery/tasks', validator(Task, { patch }), livequery(), d1({ binding, table }), realtime())
+```
+
+`realtime()` không tham số nên service chỉ gắn header `x-livequery-ref` (sau khi đọc) và
+`x-livequery-change` (sau khi ghi). Gateway đọc hai header đó để subscribe và publish, rồi xóa
+chúng trước khi trả về client. Nhờ vậy service không cần biết gì về Durable Object, và thứ tự
+deploy vẫn là service trước, gateway sau.
 
 ## Tài liệu
 

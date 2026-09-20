@@ -200,3 +200,61 @@ describe('realtime()', () => {
         expect(res.status).toBe(201)
     })
 })
+
+// ─── PATCH schemas ─────────────────────────────────────────────────────────────
+
+describe('validator() on PATCH', () => {
+    // A functional-API library (zod/mini, valibot) has no `.partial()` method on the schema.
+    const Strict: LivequerySchema = {
+        shape: { title: {}, status: {} },
+        '~standard': {
+            validate(value: unknown) {
+                const input = (value ?? {}) as Record<string, unknown>
+                return typeof input.title === 'string'
+                    ? { value: input }
+                    : { issues: [{ message: 'required', path: ['title'] }] }
+            },
+        },
+    }
+
+    test('an explicit patch schema is used for PATCH', async () => {
+        const seen: unknown[] = []
+        const patch: LivequerySchema = {
+            '~standard': { validate: (value: unknown) => { seen.push(value); return { value } } },
+        }
+        const app = new Hono()
+        app.patch('/livequery/tasks/:id', validator(Strict, { patch }), livequery(), fakeSource({ item: { id: 't1' } }))
+
+        const res = await app.request('/livequery/tasks/t1', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ status: 'done' }),
+        })
+        expect(res.status).toBe(200)
+        expect(seen).toEqual([{ status: 'done' }])
+    })
+
+    test('without one, a patch is not validated rather than rejected wholesale', async () => {
+        const app = new Hono()
+        app.patch('/livequery/tasks/:id', validator(Strict), livequery(), fakeSource({ item: { id: 't1' } }))
+
+        const res = await app.request('/livequery/tasks/t1', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ status: 'done' }),   // `title` missing; the full schema requires it
+        })
+        expect(res.status).toBe(200)
+    })
+
+    test('POST still uses the full schema', async () => {
+        const app = new Hono()
+        app.post('/livequery/tasks', validator(Strict), livequery(), fakeSource({ item: { id: 't1' } }))
+
+        const res = await app.request('/livequery/tasks', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ status: 'done' }),
+        })
+        expect(res.status).toBe(400)
+    })
+})

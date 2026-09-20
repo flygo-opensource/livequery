@@ -39,3 +39,9 @@ export const LIVEQUERY_VARS = {
     /** Datasource result, written by the datasource middleware before it calls next(). */
     result: 'livequery_result',
 } as const
+
+/** Header a service sets so its gateway can subscribe the caller to the ref it just read. */
+export const LIVEQUERY_REF_HEADER = 'x-livequery-ref'
+
+/** Header a service sets after a write: `<type> <collection_ref>`, e.g. `modified tasks`. */
+export const LIVEQUERY_CHANGE_HEADER = 'x-livequery-change'

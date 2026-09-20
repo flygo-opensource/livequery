@@ -52,6 +52,18 @@ Các symbol khác:
 - `decodeMsgpack`, `decodeRealtimeFrame`: giải mã frame realtime, không dependency.
 - `SocketLike`: WebSocket tối thiểu mà adapter phải bọc.
 
+### `matchService(routing, pathname)`
+
+Tìm service sở hữu một path, đi theo tree `ServiceRouting` từng đoạn một và giữ `$service` sâu
+nhất. Dùng cho gateway định tuyến theo tiền tố: service thêm route con không cần deploy lại
+gateway. `LIVEQUERY_REF_HEADER` và `LIVEQUERY_CHANGE_HEADER` là hai header service dùng để báo
+gateway cần subscribe hay publish.
+
+### `toLivequeryError(thrown)`
+
+Chuẩn hóa mọi thứ bị ném thành `Error` có `status` và `code`. Datasource ném object thuần
+`{ status, code, message }`, mà framework chỉ đưa `Error` vào error handler.
+
 ## `@livequery/core/node`
 
 ### `WebsocketGateway`

@@ -82,6 +82,48 @@ Notes on the order:
 Reads only subscribe when the client sent `x-lcid`, and pagination requests (`:after`, `:before`,
 `:around`) are skipped: they re-read a ref the client already watches.
 
+## Gateway
+
+`gateway()` proxies to the service that owns a path prefix, and runs realtime on its behalf.
+
+```ts
+import { gateway, errorHandler } from '@livequery/honojs'
+import routing from './routing.json'
+
+const app = new Hono<AppEnv>()
+app.onError(errorHandler())
+app.use('/livequery/*', auth())                       // your middleware; sets c.var.principal
+app.use('*', gateway({ routing, realtime: shards, principal: c => c.get('principal') }))
+```
+
+```json
+{
+    "services": {
+        "tasks":     { "binding": "TASKS_SERVICE", "url": "http://tasks:8081" },
+        "incidents": { "binding": "INCIDENTS_SERVICE" }
+    },
+    "routes": {
+        "livequery": {
+            "tasks": { "$service": "tasks" },
+            "customers": { ":customer_id": { "orders": { "$service": "orders" } } }
+        }
+    }
+}
+```
+
+- Keys starting with `$` are metadata; every other key is a path segment, and `:name` matches any
+  segment. `$service` and `$auth` are inherited downwards, and the **deepest** `$service` wins.
+- Routing is by prefix: a service can add routes under its own prefix without a gateway deploy.
+  Only a new service needs one, because it needs a new binding.
+- The target carries both `binding` (a Cloudflare Service Binding) and `url`; each runtime uses
+  what it has.
+- A path no service owns falls through to the next handler.
+
+The gateway learns what realtime to do from two response headers the service sets through
+`realtime()`: `x-livequery-ref` after a read and `x-livequery-change: <type> <ref>` after a write.
+It acts on them and strips them, so services stay plain REST workers and never bind to the
+realtime Durable Object.
+
 ## Quick start: simple service
 
 Use `createLivequery` to register routes. It automatically applies the livequery middleware to every route and tracks paths in a registry for service discovery.

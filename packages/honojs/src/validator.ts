@@ -53,8 +53,21 @@ function issuePath(issue: StandardIssue): string {
  * sends only the fields it changes. `GET` and `DELETE` carry no body: the schema is published for
  * the allowlist but nothing is validated.
  */
-export function validator<E extends Env = any>(schema: LivequerySchema): MiddlewareHandler<E, any> {
-    const partial = typeof schema.partial === 'function' ? schema.partial() : schema
+export type ValidatorOptions = {
+    /**
+     * Schema for PATCH, where only the changed fields are sent. Defaults to `schema.partial()`
+     * for libraries that expose it (zod). Libraries with a functional API have no such method —
+     * pass `z.partial(Schema)` (zod/mini) or `v.partial(Schema)` (valibot) here.
+     */
+    patch?: LivequerySchema
+}
+
+export function validator<E extends Env = any>(
+    schema: LivequerySchema,
+    options: ValidatorOptions = {}
+): MiddlewareHandler<E, any> {
+    const partial = options.patch ?? (typeof schema.partial === 'function' ? schema.partial() : undefined)
+    let warned = false
 
     return async (c, next) => {
         c.set(LIVEQUERY_VARS.schema as never, schema as never)
@@ -68,7 +81,20 @@ export function validator<E extends Env = any>(schema: LivequerySchema): Middlew
             return c.json({ error: { code: 'INVALID_JSON', message: 'Request body must be valid JSON' } }, 400)
         }
 
-        const target = PARTIAL_METHODS.has(c.req.method.toUpperCase()) ? partial : schema
+        const is_patch = PARTIAL_METHODS.has(c.req.method.toUpperCase())
+        if (is_patch && !partial) {
+            // Validating a patch against the full schema would reject every partial update, so
+            // skip it. Columns stay restricted to the schema's fields through the allowlist.
+            if (!warned) {
+                warned = true
+                console.warn('livequery: validator() cannot build a partial schema for PATCH; '
+                    + 'pass { patch: z.partial(Schema) } to validate patches too')
+            }
+            c.set(LIVEQUERY_VARS.body as never, body as never)
+            return next()
+        }
+
+        const target = is_patch && partial ? partial : schema
         const result = await target['~standard'].validate(body)
         if (result.issues?.length) {
             return c.json({

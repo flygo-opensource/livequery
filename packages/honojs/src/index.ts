@@ -8,6 +8,7 @@
 export * from './types.js'
 export * from './realtime.js'
 export * from './realtimeMiddleware.js'
+export * from './gateway.js'
 export * from './request.js'
 export * from './response.js'
 export * from './errorHandler.js'
@@ -16,6 +17,8 @@ export * from './validator.js'
 export * from './route-registry.js'
 export * from './datasource.js'
 export {
+    LIVEQUERY_CHANGE_HEADER,
+    LIVEQUERY_REF_HEADER,
     type LivequeryDatasource,
     type LivequeryDatasourceInitConfig,
     type LivequeryRequest,

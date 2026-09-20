@@ -1,5 +1,7 @@
 import type { Context, Env, MiddlewareHandler } from 'hono'
 import {
+    LIVEQUERY_CHANGE_HEADER,
+    LIVEQUERY_REF_HEADER,
     LIVEQUERY_VARS,
     type LivequeryRequest,
     type RealtimeSubscription,
@@ -7,10 +9,6 @@ import {
     type UpdatedDataType,
 } from '@livequery/core'
 
-/** Header a service sets so its gateway can register the caller for the ref it just read. */
-export const LIVEQUERY_REF_HEADER = 'x-livequery-ref'
-/** Header a service sets after a write: `<type> <collection_ref>`, e.g. `modified tasks`. */
-export const LIVEQUERY_CHANGE_HEADER = 'x-livequery-change'
 
 /**
  * Where realtime work goes:
