@@ -1,5 +1,5 @@
-// d1 depends on core, so core builds first.
-const packages = ['core', 'd1']
+// d1 and mongodb depend on core, so core builds first.
+const packages = ['core', 'd1', 'mongodb']
 
 for (const name of packages) {
   const process = Bun.spawn(['bun', 'run', 'build'], {

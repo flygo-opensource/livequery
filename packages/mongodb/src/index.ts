@@ -1,4 +1,5 @@
 export * from './MongoDatasource.js'
 export * from './DataChangePayload.js'
 export * from './MongodbRealtime.js'
+export * from './mongodb.js'
 export * from './MongodbCollection.js'

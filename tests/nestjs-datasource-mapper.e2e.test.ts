@@ -24,7 +24,7 @@ import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/
 // nestjs/src resolves (nestjs/node_modules), so the DI token used by the provider's
 // `inject: [..., WebsocketGateway]` and LivequeryInterceptor's @Inject matches.
 import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/node.js'
-import { ObjectId } from '../mongodb/node_modules/mongodb/lib/index.js'
+import { ObjectId } from 'mongodb'
 
 import { createDatasourceMapper } from '../nestjs/src/helpers/createDatasourceMapper.js'
 import { LivequeryDatasourceInterceptors } from '../nestjs/src/LivequeryDatasourceInterceptors.js'

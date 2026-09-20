@@ -22,6 +22,7 @@ For local development in this workspace, `@livequery/core` is installed as a dev
 export * from './MongoDatasource.js'
 export * from './DataChangePayload.js'
 export * from './MongodbRealtime.js'
+export * from './mongodb.js'
 export * from './MongodbCollection.js'
 ```
 
@@ -273,6 +274,40 @@ Returns:
 - The cached promise result.
 
 The collection cache key includes connection, database, and collection name to avoid reusing collection handles across tenants or connections.
+
+### `mongodb()`
+
+A datasource middleware for a Hono-shaped chain — the MongoDB twin of `d1()` in `@livequery/d1`.
+Use it when the service is written as middlewares instead of a `LivequeryContext` pipeline:
+
+```ts
+import { livequery, realtime, validator } from '@livequery/honojs'
+import { mongodb } from '@livequery/mongodb'
+
+const source = mongodb({ connection: db })       // a Db, or a MongoClient plus { db: 'name' }
+
+app.get('/livequery/todos', validator(Todo), livequery(), source, realtime(gateway))
+app.post('/livequery/todos', validator(Todo), livequery(), source)
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `connection` | — | `Db`, or `MongoClient` together with `db` |
+| `collection` | last segment of the request's collection ref | Collection name, or a resolver `(req) => string` |
+| `db` | `DB_NAME` env, else `main` | Database name when `connection` is a client |
+| `objectIdFields` | `[]` | Fields stored as ObjectId, converted before the query runs |
+| `fields` | fields of the route's `validator()` schema | Fields a client may filter, sort or search on |
+
+A query naming a field outside the allowlist is rejected with 400 `FIELD_NOT_ALLOWED`; keys
+starting with `:` (`:limit`, `:after`, `:search`, `::summary`) are the protocol's own and always
+pass. Without `fields` and without a `validator()` schema the middleware warns once and lets any
+field through.
+
+The middleware runs the operation, publishes `livequery_result` and builds the response *before*
+calling `next()`, so a `realtime()` after it can still add headers. It does not publish changes:
+a service that also runs `MongodbRealtime.watch()` gets those from the change stream, which also
+covers writes that never went through the API. See
+[`examples/todo-mongodb`](../examples/todo-mongodb/README.md) for the whole app.
 
 ### `MongodbRealtime`
 

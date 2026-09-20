@@ -16,7 +16,7 @@ import { writeWebResponse } from '../../core/build/src/helpers/writeWebResponse.
 import { createLivequery, createDatasourceMapper, getLivequeryRequest, livequeryJson, mapLivequeryResponse } from '../../honojs/src/index.js'
 import { LivequeryInterceptor, UseLivequeryInterceptor } from '../../nestjs/src/LivequeryInterceptor.js'
 import { MongoDatasource, MongodbRealtime, type RouteOptions } from '../../mongodb/src/index.js'
-import type { MongoClient, Db, Collection } from '../../mongodb/node_modules/mongodb/lib/index.js'
+import type { MongoClient, Db, Collection } from 'mongodb'
 
 import { DB_NAME } from './env.js'
 import { connectMongo, prepareCollection } from './mongo.js'

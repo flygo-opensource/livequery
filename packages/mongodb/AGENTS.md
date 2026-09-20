@@ -291,6 +291,30 @@ Fields:
 - `refs`: affected refs.
 - `new_doc`: new document state.
 
+### `mongodb()`
+
+Datasource middleware for a Hono-shaped chain, the MongoDB twin of `d1()` from `@livequery/d1`:
+
+```ts
+app.get('/livequery/todos', validator(Todo), livequery(), mongodb({ connection: db }), realtime(gateway))
+```
+
+Options: `connection` (a `Db`, or a `MongoClient` plus `db`), `collection` (default: the last
+segment of the request's collection ref), `db`, `objectIdFields`, `fields`.
+
+Behavior:
+
+- Reads `livequery_request` from the context and calls `MongoDatasource.query(req, options)`; it
+  never touches `init()`/`handle()`, so one middleware instance serves any route it is put on.
+- Rejects a query naming a field outside the allowlist with 400 `FIELD_NOT_ALLOWED`. The
+  allowlist is `fields`, or the shape of the route's `validator()` schema; keys starting with `:`
+  are the protocol's own and always pass.
+- Publishes `livequery_result`, builds the response (201 for POST, 200 otherwise) **before**
+  calling `next()`, so `realtime()` after it can still add headers, and throws
+  `toLivequeryError(e)` on failure so a framework error handler sees a real `Error`.
+- Does not publish changes. A service that also runs `MongodbRealtime.watch()` gets them from the
+  change stream, which covers writes that never went through this middleware.
+
 ### `MongodbRealtime`
 
 MongoDB change stream watcher for static realtime routes.

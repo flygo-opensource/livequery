@@ -6,6 +6,7 @@
     "core",
     "d1",
     "honojs",
+    "mongodb",
     "nestjs",
     "cf-worker",
     "examples"

@@ -6,7 +6,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { ObjectId } from '../mongodb/node_modules/mongodb/lib/index.js'
+import { ObjectId } from 'mongodb'
 import { buildNestMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { fetchJson } from './helpers/ws.js'

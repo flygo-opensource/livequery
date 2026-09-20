@@ -1,4 +1,4 @@
-import { MongoClient, type Db, type Collection } from '../../mongodb/node_modules/mongodb/lib/index.js'
+import { MongoClient, type Db, type Collection } from 'mongodb'
 import { AUTH_SOURCE, DB_NAME, MONGO_URL } from './env.js'
 
 export type MongoHandle = {

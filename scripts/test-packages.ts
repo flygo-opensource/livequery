@@ -1,4 +1,4 @@
-const packages = ['core', 'd1']
+const packages = ['core', 'd1', 'mongodb']
 
 for (const name of packages) {
   const process = Bun.spawn(['bun', 'test', 'tests/'], {
