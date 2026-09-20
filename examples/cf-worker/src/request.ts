@@ -1,8 +1,8 @@
 import type { Context } from 'hono'
-import { LivequeryRequestParser } from '@livequery/core'
-import type { LivequeryRequest } from '@livequery/core'
+import { LivequeryRequestParser, type LivequeryRequest } from '@livequery/core/workers'
+import type { AppEnv } from './types.js'
 
-export async function createLivequeryRequest(c: Context): Promise<LivequeryRequest | undefined> {
+export async function createLivequeryRequest(c: Context<AppEnv>): Promise<LivequeryRequest | undefined> {
     const body = await readBody(c)
     try {
         return LivequeryRequestParser.parse({
@@ -19,11 +19,7 @@ export async function createLivequeryRequest(c: Context): Promise<LivequeryReque
     }
 }
 
-export function getLivequeryRequest(c: Context): LivequeryRequest | undefined {
-    return c.get('livequery' as never) as LivequeryRequest | undefined
-}
-
-export async function readBody(c: Context): Promise<unknown> {
+async function readBody(c: Context<AppEnv>): Promise<unknown> {
     if (c.req.method === 'GET' || c.req.method === 'HEAD') return undefined
     const ct = c.req.header('content-type') ?? ''
     if (!ct.includes('application/json')) return undefined

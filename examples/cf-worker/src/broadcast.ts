@@ -1,31 +1,15 @@
-import type { UpdatedData } from '@livequery/core'
-import type { RealtimeSubscription } from '@livequery/core/workers'
+import type { Context } from 'hono'
+import type { UpdatedData } from '@livequery/core/workers'
+import { createRealtime } from './createRealtime.js'
+import type { AppEnv } from './types.js'
 
-const DO_NAME = 'main'
-
-function stub(gateway: DurableObjectNamespace) {
-    return gateway.get(gateway.idFromName(DO_NAME))
-}
-
-/** Notify subscribed clients of a data change. */
-export async function broadcast(gateway: DurableObjectNamespace, update: UpdatedData): Promise<void> {
-    await stub(gateway).fetch(new Request('http://internal/broadcast', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(update),
+/**
+ * Publish a change after the response is sent. `waitUntil` keeps the Worker alive until every
+ * shard has it; without it the runtime may cancel the fan-out once the response returns.
+ */
+export function broadcast(c: Context<AppEnv>, update: UpdatedData): void {
+    const { publisher } = createRealtime(c.env)
+    c.executionCtx.waitUntil(publisher.publish(update).catch(e => {
+        console.error(JSON.stringify({ event: 'realtime_publish_failed', ref: update.ref, message: String(e) }))
     }))
-}
-
-/** Register a server-side subscription (called from HTTP GET handlers). */
-export async function subscribe(gateway: DurableObjectNamespace, sub: RealtimeSubscription): Promise<void> {
-    await stub(gateway).fetch(new Request('http://internal/subscribe', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(sub),
-    }))
-}
-
-/** Derive the canonical Livequery ref from a table name and optional document id. */
-export function toRef(table: string, id?: string): string {
-    return id ? `${table}/${id}` : table
 }

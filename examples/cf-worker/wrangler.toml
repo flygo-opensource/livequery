@@ -1,17 +1,21 @@
 name = "livequery-worker"
 main = "src/index.ts"
-compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2026-09-03"
+# No nodejs_compat on purpose: the bundle must stay free of Node built-ins, and a stray
+# `node:*` import fails the build instead of being silently polyfilled.
 
+[vars]
+# Set API_TOKENS as a secret: `wrangler secret put API_TOKENS`.
+ALLOW_ANONYMOUS = "false"
+REALTIME_SHARDS = "4"
+
+[observability]
+enabled = true
+
+# database_id is filled in by `wrangler deploy`, which provisions the database on first deploy.
 [[d1_databases]]
 binding = "DB"
 database_name = "livequery"
-database_id = "local-dev"
-
-[[kv_namespaces]]
-binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
-preview_id = "YOUR_KV_PREVIEW_ID"
 
 [[durable_objects.bindings]]
 name = "GATEWAY"
@@ -19,4 +23,4 @@ class_name = "RealtimeGatewayDO"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RealtimeGatewayDO"]
+new_sqlite_classes = ["RealtimeGatewayDO"]

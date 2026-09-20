@@ -1,50 +1,35 @@
-import { EdgeWebsocketGateway } from '@livequery/core/workers'
-import type { UpdatedData } from '@livequery/core'
-import type { RealtimeSubscription } from '@livequery/core/workers'
+import { DurableObject } from 'cloudflare:workers'
+import { HibernatableWebsocketGateway } from '@livequery/core/workers'
+import type { Env } from './types.js'
 
 /**
- * Durable Object that owns WebSocket connections for realtime updates.
+ * One realtime shard. Sockets use the Hibernation API, so an idle shard is evicted from memory
+ * (and stops billing duration) while its clients stay connected.
  *
- * Endpoints (all via stub.fetch):
- *   GET  /ws          — WebSocket upgrade (client connects here)
- *   POST /broadcast   — Worker notifies the DO of a data change after a write
- *   POST /subscribe   — Worker registers a subscription on behalf of an HTTP GET
- *
- * wrangler.toml:
- *   [[durable_objects.bindings]]
- *   name = "GATEWAY"
- *   class_name = "RealtimeGatewayDO"
- *
- *   [[migrations]]
- *   tag = "v1"
- *   new_classes = ["RealtimeGatewayDO"]
+ * Reachable only through the `GATEWAY` binding: the Worker forwards authenticated WebSocket
+ * upgrades and calls the internal broadcast / subscribe endpoints.
  */
-export class RealtimeGatewayDO {
-    readonly #ws = new EdgeWebsocketGateway()
+export class RealtimeGatewayDO extends DurableObject<Env> {
+    readonly #gateway: HibernatableWebsocketGateway
 
-    async fetch(request: Request): Promise<Response> {
-        const url = new URL(request.url)
+    constructor(ctx: DurableObjectState, env: Env) {
+        super(ctx, env)
+        this.#gateway = new HibernatableWebsocketGateway(ctx)
+    }
 
-        if (url.pathname === '/ws') {
-            return this.#ws.handleRequest(request)
-        }
+    override fetch(request: Request): Promise<Response> {
+        return this.#gateway.fetch(request)
+    }
 
-        if (request.method !== 'POST') {
-            return new Response('Not found', { status: 404 })
-        }
+    override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+        this.#gateway.webSocketMessage(ws, message)
+    }
 
-        if (url.pathname === '/broadcast') {
-            const update = await request.json<UpdatedData>()
-            this.#ws.next(update)
-            return new Response(null, { status: 204 })
-        }
+    override webSocketClose(ws: WebSocket): void {
+        this.#gateway.webSocketClose(ws)
+    }
 
-        if (url.pathname === '/subscribe') {
-            const sub = await request.json<RealtimeSubscription>()
-            this.#ws.listen([sub])
-            return new Response(null, { status: 204 })
-        }
-
-        return new Response('Not found', { status: 404 })
+    override webSocketError(ws: WebSocket): void {
+        this.#gateway.webSocketError(ws)
     }
 }

@@ -6,17 +6,19 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run",
+    "db:init:local": "wrangler d1 execute DB --local --file schema.sql",
     "type-check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241205.0",
+    "@cloudflare/workers-types": "^5.20260903.1",
     "typescript": "^5.5.0",
-    "wrangler": "^3.99.0"
+    "wrangler": "^4.128.0"
   },
   "dependencies": {
-    "@livequery/core": "file:../core",
-    "@livequery/d1": "file:../d1",
-    "hono": "^4.12.0",
+    "@livequery/core": "workspace:*",
+    "@livequery/d1": "workspace:*",
+    "hono": "^4.13.5",
     "rxjs": "^7.8.2"
   }
 }

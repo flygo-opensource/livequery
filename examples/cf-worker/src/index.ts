@@ -1,85 +1,86 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
+import { LIVEQUERY_REALTIME_PATH } from '@livequery/core/workers'
 import { D1Datasource } from '@livequery/d1'
+import { broadcast } from './broadcast.js'
+import { createRealtime } from './createRealtime.js'
 import { livequery } from './middleware.js'
-import { getLivequeryRequest } from './request.js'
-import { broadcast, subscribe } from './broadcast.js'
-import type { Env } from './types.js'
+import { requireAuth } from './requireAuth.js'
+import { subscribe } from './subscribe.js'
+import type { AppEnv } from './types.js'
 
 // The Durable Object class must be a named export of the Worker module.
 export { RealtimeGatewayDO } from './RealtimeGatewayDO.js'
 
 // ─── App ────────────────────────────────────────────────────────────────────
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<AppEnv>()
 const ds = new D1Datasource()
 
 app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] }))
+app.use('/livequery/*', requireAuth())
 
 // ─── Error handler ──────────────────────────────────────────────────────────
 
-function apiError(e: unknown): { status: number; body: { error: { code: string; message: string } } } {
-    const err = e as { status?: number; code?: string; message?: string }
-    return {
-        status: typeof err.status === 'number' ? err.status : 500,
-        body: { error: { code: err.code ?? 'INTERNAL', message: err.message ?? 'Internal error' } },
+function apiError(e: unknown) {
+    const err = (typeof e === 'object' && e !== null ? e : {}) as { status?: number; code?: string; message?: string }
+    const status = typeof err.status === 'number' ? err.status : 500
+    if (status >= 500) {
+        // Database and runtime errors can carry SQL or internals; log them, never return them.
+        console.error(JSON.stringify({ event: 'request_failed', message: String(err.message ?? e) }))
+        return { status, body: { error: { code: 'INTERNAL', message: 'Internal error' } } }
     }
+    return { status, body: { error: { code: err.code ?? 'BAD_REQUEST', message: err.message ?? 'Bad request' } } }
 }
 
-// ─── WebSocket → Durable Object ─────────────────────────────────────────────
+function fail(c: Context<AppEnv>, e: unknown) {
+    const { status, body } = apiError(e)
+    return c.json(body, status as never)
+}
 
-app.get('/livequery/realtime-updates', c => {
-    const id = c.env.GATEWAY.idFromName('main')
-    const stub = c.env.GATEWAY.get(id)
-    const wsUrl = new URL(c.req.url)
-    wsUrl.pathname = '/ws'
-    return stub.fetch(new Request(wsUrl.toString(), c.req.raw))
-})
+// ─── WebSocket → Durable Object shard ───────────────────────────────────────
+
+app.get(LIVEQUERY_REALTIME_PATH, c => createRealtime(c.env).router.fetch(c.req.raw, c.get('principal')))
 
 // ─── Route factory ──────────────────────────────────────────────────────────
 //
 // Creates all 5 HTTP verbs for a (collection, document) pair backed by one table.
-// Realtime subscriptions are driven by the client's WS protocol — the client
-// sends { event: "subscribe", ref } through the WebSocket after each successful
-// GET that it wants to watch.
+// A successful GET registers the caller's socket (x-lcid / x-lgid) for that ref;
+// writes publish the change to every realtime shard.
 
 export function createRoutes(
-    hono: Hono<{ Bindings: Env }>,
+    hono: Hono<AppEnv>,
     collectionPath: string,
     docPath: string,
-    table: string
+    table: string,
+    fields: readonly string[]
 ) {
+    const options = { table, fields }
+
     // Collection ──────────────────────────────────────────────────────────────
 
     hono.get(collectionPath, livequery(), async c => {
         try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.query(c.env.DB, req, { table })
-            const clientId = c.req.header('x-lcid')
-            const gatewayId = c.req.header('x-lgid')
-            if (clientId && gatewayId) {
-                // req.ref is the LivequeryRequestParser-normalised ref (e.g. 'tasks'),
-                // which matches what RestTransporter passes to socket.listen().
-                subscribe(c.env.GATEWAY, { ref: req.ref, client_id: clientId, gateway_id: gatewayId, listener_node_id: gatewayId }).catch(() => {})
-            }
+            const req = c.get('livequery')
+            const result = await ds.query(c.env.DB, req, options)
+            // req.ref is the LivequeryRequestParser-normalised ref (e.g. 'tasks'),
+            // which matches what RestTransporter passes to socket.listen().
+            await subscribe(c, req.ref)
             return c.json(result)
         } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
+            return fail(c, e)
         }
     })
 
     hono.post(collectionPath, livequery(), async c => {
         try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.add(c.env.DB, req, { table })
-            const item = result.item as { id: string }
+            const req = c.get('livequery')
+            const result = await ds.add(c.env.DB, req, options)
             // req.ref for a collection POST equals req.collection_ref (e.g. 'tasks').
-            await broadcast(c.env.GATEWAY, { ref: req.ref, type: 'added', data: item })
+            broadcast(c, { ref: req.ref, type: 'added', data: result.item })
             return c.json(result, 201)
         } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
+            return fail(c, e)
         }
     })
 
@@ -87,73 +88,49 @@ export function createRoutes(
 
     hono.get(docPath, livequery(), async c => {
         try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.query(c.env.DB, req, { table })
-            const clientId = c.req.header('x-lcid')
-            const gatewayId = c.req.header('x-lgid')
-            if (clientId && gatewayId) {
-                subscribe(c.env.GATEWAY, { ref: req.ref, client_id: clientId, gateway_id: gatewayId, listener_node_id: gatewayId }).catch(() => {})
-            }
+            const req = c.get('livequery')
+            const result = await ds.query(c.env.DB, req, options)
+            await subscribe(c, req.ref)
             return c.json(result)
         } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
+            return fail(c, e)
         }
     })
 
-    hono.put(docPath, livequery(), async c => {
+    const write = (type: 'modified' | 'removed') => async (c: Context<AppEnv>) => {
         try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.update(c.env.DB, req, { table })
-            const item = result.item as { id: string }
+            const req = c.get('livequery')
+            const result = type === 'removed'
+                ? await ds.delete(c.env.DB, req, options)
+                : await ds.update(c.env.DB, req, options)
             // Broadcast on the COLLECTION ref — the gateway auto-fans-out to
             // 'collection_ref/id' subscribers via UpdatedData.data.id.
-            await broadcast(c.env.GATEWAY, { ref: req.collection_ref, type: 'modified', data: item })
+            broadcast(c, { ref: req.collection_ref ?? req.ref, type, data: result.item })
             return c.json(result)
         } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
+            return fail(c, e)
         }
-    })
+    }
 
-    hono.patch(docPath, livequery(), async c => {
-        try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.update(c.env.DB, req, { table })
-            const item = result.item as { id: string }
-            await broadcast(c.env.GATEWAY, { ref: req.collection_ref, type: 'modified', data: item })
-            return c.json(result)
-        } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
-        }
-    })
-
-    hono.delete(docPath, livequery(), async c => {
-        try {
-            const req = getLivequeryRequest(c)!
-            const result = await ds.delete(c.env.DB, req, { table })
-            const item = result.item as { id: string }
-            await broadcast(c.env.GATEWAY, { ref: req.collection_ref, type: 'removed', data: item })
-            return c.json(result)
-        } catch (e) {
-            const { status, body } = apiError(e)
-            return c.json(body, status as never)
-        }
-    })
+    hono.put(docPath, livequery(), write('modified'))
+    hono.patch(docPath, livequery(), write('modified'))
+    hono.delete(docPath, livequery(), write('removed'))
 }
 
 // ─── Register routes ────────────────────────────────────────────────────────
 
-// All tasks (no status filter)
-createRoutes(app, '/livequery/tasks', '/livequery/tasks/:id', 'tasks')
+const TASK_FIELDS = ['title', 'status', 'created_at']
 
-// Tasks filtered by status — D1Query maps key "status" → WHERE status = ?
+// All tasks (no status filter)
+createRoutes(app, '/livequery/tasks', '/livequery/tasks/:id', 'tasks', TASK_FIELDS)
+
+// Tasks filtered by status — the :status route key maps to WHERE status = ?
 createRoutes(
     app,
     '/livequery/status/:status/tasks',
     '/livequery/status/:status/tasks/:id',
-    'tasks'
+    'tasks',
+    TASK_FIELDS
 )
 
 export default app
