@@ -26,6 +26,8 @@ export type DurableObjectStateLike = {
         list<T>(options: { prefix: string }): Promise<Map<string, T>>
         put<T>(key: string, value: T): Promise<void>
         delete(keys: string[]): Promise<number>
+        getAlarm(): Promise<number | null>
+        setAlarm(scheduledTime: number | Date): Promise<void>
     }
     acceptWebSocket(ws: HibernatableWebSocket, tags?: string[]): void
     getWebSockets(tag?: string): HibernatableWebSocket[]

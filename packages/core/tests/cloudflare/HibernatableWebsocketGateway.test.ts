@@ -9,7 +9,11 @@ import type { DurableObjectStateLike, HibernatableWebSocket } from '../../src/wo
 
 type FakeWebSocket = HibernatableWebSocket & { sent: string[]; closed: boolean; attachment: unknown }
 
-type FakeState = DurableObjectStateLike & { sockets: FakeWebSocket[]; data: Map<string, unknown> }
+type FakeState = DurableObjectStateLike & {
+    sockets: FakeWebSocket[]
+    data: Map<string, unknown>
+    alarm: number | null
+}
 
 function makeSocket(): FakeWebSocket {
     const ws: FakeWebSocket = {
@@ -29,10 +33,11 @@ function makeSocket(): FakeWebSocket {
 }
 
 function makeState(id = 'do-1', data = new Map<string, unknown>(), sockets: FakeWebSocket[] = []): FakeState {
-    return {
+    const state: FakeState = {
         id: { toString: () => id },
         sockets,
         data,
+        alarm: null,
         storage: {
             async list<T>({ prefix }: { prefix: string }) {
                 return new Map([...data].filter(([k]) => k.startsWith(prefix))) as Map<string, T>
@@ -43,11 +48,14 @@ function makeState(id = 'do-1', data = new Map<string, unknown>(), sockets: Fake
                 for (const k of keys) if (data.delete(k)) n++
                 return n
             },
+            async getAlarm() { return state.alarm },
+            async setAlarm(at) { state.alarm = at instanceof Date ? at.getTime() : at },
         },
         acceptWebSocket(ws) { sockets.push(ws as FakeWebSocket) },
         getWebSockets() { return sockets.filter(ws => !ws.closed) },
         blockConcurrencyWhile: callback => callback(),
     }
+    return state
 }
 
 let pending_socket: FakeWebSocket | undefined
@@ -213,28 +221,99 @@ describe('HibernatableWebsocketGateway hibernation', () => {
         expect(data.has('sub:c1:tasks')).toBe(false)
     })
 
-    test('subscription whose socket vanished while evicted — detached after the grace window', async () => {
+    test('subscription whose socket vanished while evicted — kept until the alarm fires', async () => {
         const data = new Map<string, unknown>([
             ['sub:gone:tasks', { ref: 'tasks', client_id: 'gone', gateway_id: 'do-1', listener_node_id: 'do-1' }],
         ])
-        const gateway = new HibernatableWebsocketGateway(makeState('do-1', data), { disconnectGraceMs: 10 })
+        const state = makeState('do-1', data)
+        const gateway = new HibernatableWebsocketGateway(state, { disconnectGraceMs: 10 })
         await gateway.ready
+
+        // Restoring only arms the alarm; the record survives in case the client is reconnecting.
         expect(data.has('sub:gone:tasks')).toBe(true)
-        await tick(30)
+        expect(state.alarm).not.toBeNull()
+
+        await tick(20)
+        await gateway.alarm()
         expect(data.has('sub:gone:tasks')).toBe(false)
+        expect(data.has('expire:gone')).toBe(false)
     })
 
-    test('client reconnecting inside the grace window after a wake — keeps its subscriptions', async () => {
+    test('client reconnecting before the alarm — keeps its subscriptions', async () => {
         const data = new Map<string, unknown>([
             ['sub:c1:tasks', { ref: 'tasks', client_id: 'c1', gateway_id: 'do-1', listener_node_id: 'do-1' }],
         ])
         const gateway = new HibernatableWebsocketGateway(makeState('do-1', data), { disconnectGraceMs: 10 })
         const ws = await connect(gateway, 'c1')
-        await tick(30)
+        await tick(20)
+        await gateway.alarm()
         expect(data.has('sub:c1:tasks')).toBe(true)
 
         gateway.next({ ref: 'tasks', type: 'added', data: { id: 't1' } })
         await tick()
         expect(syncs(ws)).toHaveLength(1)
+    })
+})
+
+// ─── alarms ────────────────────────────────────────────────────────────────────
+
+describe('HibernatableWebsocketGateway alarms', () => {
+    test('a closed socket arms an alarm; the alarm detaches after the grace window', async () => {
+        const state = makeState('do-1')
+        const gateway = new HibernatableWebsocketGateway(state, { disconnectGraceMs: 10 })
+        const ws = await connect(gateway, 'c1')
+        gateway.register({ ref: 'tasks', client_id: 'c1', gateway_id: 'do-1', listener_node_id: 'do-1' })
+
+        gateway.webSocketClose(ws)
+        await tick()
+        expect(state.alarm).not.toBeNull()
+        expect(state.data.has('sub:c1:tasks')).toBe(true)     // kept during the grace window
+
+        await tick(20)
+        await gateway.alarm()
+        expect(state.data.has('sub:c1:tasks')).toBe(false)
+        expect(state.data.has('expire:c1')).toBe(false)
+    })
+
+    test('an alarm that fires early keeps the subscription and re-arms', async () => {
+        const state = makeState('do-1')
+        const gateway = new HibernatableWebsocketGateway(state, { disconnectGraceMs: 10_000 })
+        const ws = await connect(gateway, 'c1')
+        gateway.register({ ref: 'tasks', client_id: 'c1', gateway_id: 'do-1', listener_node_id: 'do-1' })
+        gateway.webSocketClose(ws)
+        await tick()
+
+        await gateway.alarm()
+        expect(state.data.has('sub:c1:tasks')).toBe(true)
+        expect(state.alarm).not.toBeNull()
+    })
+
+    test('a client that reconnects before the alarm clears its expiry', async () => {
+        const state = makeState('do-1')
+        const gateway = new HibernatableWebsocketGateway(state, { disconnectGraceMs: 10_000 })
+        const first = await connect(gateway, 'c1')
+        gateway.register({ ref: 'tasks', client_id: 'c1', gateway_id: 'do-1', listener_node_id: 'do-1' })
+        gateway.webSocketClose(first)
+        await tick()
+        expect(state.data.has('expire:c1')).toBe(true)
+
+        const second = await connect(gateway, 'c1')
+        await tick()
+        expect(state.data.has('expire:c1')).toBe(false)
+
+        gateway.next({ ref: 'tasks', type: 'added', data: { id: 't1' } })
+        await tick()
+        expect(syncs(second)).toHaveLength(1)                 // subscriptions resumed, no re-query
+    })
+
+    test('the alarm re-arms a sweep while subscriptions remain', async () => {
+        const state = makeState('do-1')
+        const gateway = new HibernatableWebsocketGateway(state)
+        await connect(gateway, 'c1')
+        gateway.register({ ref: 'tasks', client_id: 'c1', gateway_id: 'do-1', listener_node_id: 'do-1' })
+
+        state.alarm = null
+        await gateway.alarm()
+        expect(state.alarm).not.toBeNull()
     })
 })

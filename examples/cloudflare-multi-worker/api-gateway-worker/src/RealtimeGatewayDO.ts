@@ -28,4 +28,7 @@ export class RealtimeGatewayDO extends DurableObject<GatewayEnv> {
     override webSocketError(ws: WebSocket): void {
         this.#gateway.webSocketError(ws)
     }
+    override alarm(): Promise<void> {
+        return this.#gateway.alarm()
+    }
 }

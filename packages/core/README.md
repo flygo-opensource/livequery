@@ -118,6 +118,7 @@ export class RealtimeGatewayDO extends DurableObject<Env> {
     override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) { this.#gateway.webSocketMessage(ws, message) }
     override webSocketClose(ws: WebSocket) { this.#gateway.webSocketClose(ws) }
     override webSocketError(ws: WebSocket) { this.#gateway.webSocketError(ws) }
+    override alarm() { return this.#gateway.alarm() }
 }
 ```
 
@@ -145,6 +146,10 @@ survive eviction and redeploys. Each socket keeps its `client_id` and principal 
 its attachment and each subscription is a `sub:<client_id>:<ref>` storage key; a
 woken instance restores both inside `blockConcurrencyWhile`. Client pings are
 answered by the runtime (`setWebSocketAutoResponse`) without waking the object.
+
+The disconnect grace window is a Durable Object alarm, not a timer: the object can hibernate
+while it waits, the window survives eviction, and the same alarm sweeps subscriptions whose
+socket never came back. Forward `alarm()` from your Durable Object class.
 
 Trust model:
 

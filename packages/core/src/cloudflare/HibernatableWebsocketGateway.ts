@@ -32,6 +32,7 @@ import {
     LIVEQUERY_DO_SUBSCRIBE_PATH,
     LIVEQUERY_PRINCIPAL_HEADER,
     MAX_CLIENT_ID_LENGTH,
+    SUBSCRIPTION_SWEEP_MS,
 } from './const.js'
 import type { DurableObjectStateLike, HibernatableWebSocket } from './types.js'
 
@@ -55,6 +56,8 @@ declare class WebSocketRequestResponsePair {
 }
 
 const SUBSCRIPTION_PREFIX = 'sub:'
+// When a disconnected client's subscriptions expire, as a Durable Object alarm time.
+const EXPIRY_PREFIX = 'expire:'
 const WEBSOCKET_OPEN = 1
 
 // The client pings every minute with this exact JSON frame; answering it from the runtime keeps
@@ -64,6 +67,10 @@ const PONG_FRAME = '{"event":"pong"}'
 
 function subscriptionKey(client_id: string, ref: string): string {
     return `${SUBSCRIPTION_PREFIX}${client_id}:${ref}`
+}
+
+function expiryKey(client_id: string): string {
+    return `${EXPIRY_PREFIX}${client_id}`
 }
 
 function decodeFrame(raw: string | ArrayBuffer | ArrayBufferView): ClientFrame | undefined {
@@ -170,6 +177,56 @@ export class HibernatableWebsocketGateway extends WebsocketGatewayBase {
         this.#drop(ws)
     }
 
+    /**
+     * Durable Object alarm handler. Detaches clients whose grace window has passed and sweeps
+     * subscriptions whose socket never came back, then re-arms itself while any remain.
+     */
+    async alarm(): Promise<void> {
+        await this.ready
+        const now = Date.now()
+        const expiries = await this.#state.storage.list<number>({ prefix: EXPIRY_PREFIX })
+        const done: string[] = []
+        let next: number | undefined
+
+        for (const [key, at] of expiries) {
+            const client_id = key.slice(EXPIRY_PREFIX.length)
+            if (this._connections.has(client_id)) { done.push(key); continue }
+            if (at > now) { next = next === undefined ? at : Math.min(next, at); continue }
+            this.detach(client_id, this.#refsOf(client_id))
+            done.push(key)
+        }
+
+        // A client that vanished while the object was evicted has no expiry record, so give it
+        // one now; the next alarm removes it if it has not come back.
+        for (const client_id of this.#orphanedClients()) {
+            if (expiries.has(expiryKey(client_id))) continue
+            const at = now + this._disconnectGraceMs
+            await this.#state.storage.put(expiryKey(client_id), at)
+            next = next === undefined ? at : Math.min(next, at)
+        }
+
+        if (done.length > 0) await this.#state.storage.delete(done)
+        await this.#arm(next ?? (this._subscriptions.size > 0 ? now + SUBSCRIPTION_SWEEP_MS : undefined))
+    }
+
+    // ── Detach scheduling ──────────────────────────────────────────────────────
+    // A Durable Object can be evicted mid-grace, which would drop a pending setTimeout and leave
+    // the subscription in storage forever. Alarms survive eviction and let the object hibernate.
+
+    protected override _scheduleDetach(client_id: string, _refs: string[]): void {
+        const at = Date.now() + this._disconnectGraceMs
+        this.#state.storage.put(expiryKey(client_id), at)
+            .then(() => this.#arm(at))
+            .catch(e => console.error('livequery: failed to schedule detach', e))
+    }
+
+    protected override _cancelDetach(client_id: string): boolean {
+        // The alarm re-checks `_connections`, so a stale record is harmless; drop it anyway.
+        this.#state.storage.delete([expiryKey(client_id)])
+            .catch(e => console.error('livequery: failed to cancel detach', e))
+        return this.#hasSubscriptions(client_id)
+    }
+
     override onMessage(socket: SocketLike, raw: string | ArrayBuffer | ArrayBufferView): void {
         if (socket.gateway) {
             super.onMessage(socket, raw)
@@ -250,10 +307,28 @@ export class HibernatableWebsocketGateway extends WebsocketGatewayBase {
 
         for (const ws of this.#state.getWebSockets()) this.#wrap(ws)
 
-        // A client that dropped while the object was evicted lost its grace timer with the old
-        // instance. Give it a fresh grace window instead of detaching at once, so a client that is
+        // A client that dropped while the object was evicted lost its grace window with the old
+        // instance. Give it a fresh one instead of detaching at once, so a client that is
         // reconnecting right now keeps its subscriptions.
-        for (const client_id of this.#orphanedClients()) this.#scheduleDetach(client_id)
+        const orphans = this.#orphanedClients()
+        if (orphans.size === 0) return
+        const at = Date.now() + this._disconnectGraceMs
+        for (const client_id of orphans) await this.#state.storage.put(expiryKey(client_id), at)
+        await this.#arm(at)
+    }
+
+    /** Move the alarm earlier when needed; never push an existing one back. */
+    async #arm(at: number | undefined): Promise<void> {
+        if (at === undefined) return
+        const current = await this.#state.storage.getAlarm()
+        if (current !== null && current <= at) return
+        await this.#state.storage.setAlarm(at)
+    }
+
+    #refsOf(client_id: string): string[] {
+        return [...this._subscriptions]
+            .filter(([, map]) => map.has(client_id))
+            .map(([ref]) => ref)
     }
 
     #wrap(ws: HibernatableWebSocket): GatewaySocket {
@@ -306,15 +381,4 @@ export class HibernatableWebsocketGateway extends WebsocketGatewayBase {
         return orphans
     }
 
-    #scheduleDetach(client_id: string): void {
-        const timer = setTimeout(() => {
-            this._pendingDisconnects.delete(client_id)
-            if (this._connections.has(client_id)) return
-            const refs = [...this._subscriptions]
-                .filter(([, map]) => map.has(client_id))
-                .map(([ref]) => ref)
-            this.detach(client_id, refs)
-        }, this._disconnectGraceMs)
-        this._pendingDisconnects.set(client_id, timer)
-    }
 }

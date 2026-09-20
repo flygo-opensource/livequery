@@ -9,3 +9,7 @@ export const LIVEQUERY_DO_SUBSCRIBE_PATH = '/__livequery/subscribe'
 
 // Longest client id accepted in `start`. Client ids are UUIDs; the cap keeps storage keys small.
 export const MAX_CLIENT_ID_LENGTH = 128
+
+// How often a woken object sweeps subscriptions whose socket never came back, so records cannot
+// pile up in storage when nothing else wakes the object.
+export const SUBSCRIPTION_SWEEP_MS = 10 * 60 * 1000

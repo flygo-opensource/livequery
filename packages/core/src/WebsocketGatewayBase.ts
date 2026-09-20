@@ -197,10 +197,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
         // Reconnect within the grace window: cancel the pending cleanup and rebuild
         // this socket's ref set from the subscriptions we kept alive, so a later
         // disconnect detaches correctly and realtime resumes with no re-query.
-        const pending = this._pendingDisconnects.get(id)
-        if (pending) {
-            clearTimeout(pending)
-            this._pendingDisconnects.delete(id)
+        if (this._cancelDetach(id)) {
             for (const [ref, map] of this._subscriptions) {
                 if (map.has(id)) socket.refs.add(ref)
             }
@@ -242,21 +239,38 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
         if (this._connections.get(clientId) === socket) this._connections.delete(clientId)
         if (refs.length === 0) return
 
-        const existing = this._pendingDisconnects.get(clientId)
-        if (existing) clearTimeout(existing)
+        this._cancelDetach(clientId)
 
         if (this._disconnectGraceMs <= 0) {
             this.detach(clientId, refs)
             return
         }
 
+        this._scheduleDetach(clientId, refs)
+    }
+
+    /**
+     * Detach `refs` once the grace window passes, unless the client reconnects first.
+     * Adapters whose instance can be evicted (a hibernating Durable Object) override this with
+     * a mechanism that survives eviction, such as a Durable Object alarm.
+     */
+    protected _scheduleDetach(client_id: string, refs: string[]): void {
         const timer = setTimeout(() => {
-            this._pendingDisconnects.delete(clientId)
-            if (this._connections.has(clientId)) return // reconnected in time — keep subs
-            this.detach(clientId, refs)
+            this._pendingDisconnects.delete(client_id)
+            if (this._connections.has(client_id)) return // reconnected in time — keep subs
+            this.detach(client_id, refs)
         }, this._disconnectGraceMs)
         ;(timer as { unref?: () => void }).unref?.()
-        this._pendingDisconnects.set(clientId, timer)
+        this._pendingDisconnects.set(client_id, timer)
+    }
+
+    /** Cancel a scheduled detach. Returns true when one was pending. */
+    protected _cancelDetach(client_id: string): boolean {
+        const timer = this._pendingDisconnects.get(client_id)
+        if (timer === undefined) return false
+        clearTimeout(timer)
+        this._pendingDisconnects.delete(client_id)
+        return true
     }
 
     // ── Public protocol API ────────────────────────────────────────────────────

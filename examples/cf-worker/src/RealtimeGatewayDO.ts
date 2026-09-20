@@ -32,4 +32,7 @@ export class RealtimeGatewayDO extends DurableObject<Env> {
     override webSocketError(ws: WebSocket): void {
         this.#gateway.webSocketError(ws)
     }
+    override alarm(): Promise<void> {
+        return this.#gateway.alarm()
+    }
 }

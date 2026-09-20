@@ -102,7 +102,8 @@ Gateway chạy trong Durable Object, dùng WebSocket Hibernation API. Gateway id
 của Durable Object, socket lưu `client_id` và principal trong attachment,
 subscription lưu trong storage, nên object bị evict hay deploy lại vẫn giữ realtime.
 `fetch()` xử lý upgrade và hai endpoint nội bộ broadcast/subscribe; `register()`
-từ chối subscription khác principal.
+từ chối subscription khác principal. `alarm()` xóa subscription của client hết cửa sổ chờ
+reconnect và quét định kỳ bản ghi không còn socket, nên object ngủ được trong lúc chờ.
 
 ### `CloudflareRealtimeRouter`
 
