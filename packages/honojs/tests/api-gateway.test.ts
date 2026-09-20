@@ -57,11 +57,12 @@ describe('HonoApiGateway', () => {
             items: [{ id: 'p-1', name: 'Product 1' }],
         }))
 
-        const service = await startService((req, res) => {
-            serviceApp.fetch(toRequest(req)).then(async response => {
-                res.writeHead(response.status, Object.fromEntries(response.headers.entries()))
-                res.end(Buffer.from(await response.arrayBuffer()))
-            })
+        const service = await startService(async (req, res) => {
+            const response = await serviceApp.fetch(toRequest(req))
+            const headers: Record<string, string> = {}
+            response.headers.forEach((value, key) => { headers[key] = value })
+            res.writeHead(response.status, headers)
+            res.end(Buffer.from(await response.arrayBuffer()))
         })
 
         const serviceDiscovery = new UdpDiscovery<ServiceApiMetadata>({
@@ -136,7 +137,7 @@ function sleep(ms: number): Promise<void> {
 function toRequest(req: http.IncomingMessage): Request {
     const host = req.headers.host ?? '127.0.0.1'
     return new Request(`http://${host}${req.url ?? '/'}`, {
-        method: req.method,
+        method: req.method ?? 'GET',
         headers: req.headers as HeadersInit,
     })
 }
