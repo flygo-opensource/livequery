@@ -1,8 +1,18 @@
 import type { LivequeryRequest } from '@livequery/core'
 
+export type D1DatasourceConfig = {
+    databases: Record<string, D1Database>
+}
+
 export type D1RouteOptions = {
     table: string | ((req: LivequeryRequest) => string | Promise<string>)
+    database?: string | ((req: LivequeryRequest) => string | Promise<string>)
     realtime?: boolean
+    /**
+     * Columns a client may filter, sort or write. `id` and route keys are always allowed.
+     * Leave unset only when every column of the table is safe to expose.
+     */
+    fields?: readonly string[]
 }
 
 export type QueryPlan = {

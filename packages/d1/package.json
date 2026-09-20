@@ -23,14 +23,16 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
-    "@livequery/core": "file:../core",
+    "@livequery/core": "^3.0.0",
     "typescript": "^5.5.0"
   },
   "scripts": {
     "build": "rm -rf build && tsc -b .",
+    "test": "bun test tests/",
     "type-check": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@cloudflare/workers-types": "^4"
+    "@cloudflare/workers-types": "^4",
+    "@livequery/core": "^3.0.0"
   }
 }

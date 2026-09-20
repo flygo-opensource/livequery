@@ -1,10 +1,20 @@
 import type { LivequeryRequest } from '@livequery/core'
+import { MAX_IN_VALUES } from './const.js'
 import { Cursor } from './Cursor.js'
+import { assertColumn } from './helpers/assertColumn.js'
+import { assertTable } from './helpers/assertTable.js'
 import type { D1CollectionResult, D1DocumentResult, QueryPlan } from './types.js'
 
 type SqlFragment = { clause: string; params: unknown[] }
 type Sort = { field: string; asc: boolean }
 
+/**
+ * Builds and runs the SQL for one D1 table.
+ *
+ * Every table and column name is validated with `assertTable` / `assertColumn` before it is
+ * interpolated, because D1 can only bind values. Pass `fields` to restrict which columns a
+ * client may filter, sort or write; without it any well-formed identifier is accepted.
+ */
 export class D1Query {
 
     static #parseArray(value: unknown): unknown[] {
@@ -18,17 +28,29 @@ export class D1Query {
         }
     }
 
+    static #parseInValues(field: string, value: unknown): unknown[] {
+        const arr = this.#parseArray(value)
+        if (arr.length > MAX_IN_VALUES) {
+            throw {
+                status: 400,
+                code: 'TOO_MANY_VALUES',
+                message: `Filter "${field}" accepts at most ${MAX_IN_VALUES} values`,
+            }
+        }
+        return arr
+    }
+
     static #getLimit(query: Record<string, unknown>): number {
         const l = Number(query[':limit'])
         if (isNaN(l) || l < 1) return 10
         return Math.min(l, 100)
     }
 
-    static #getSorts(query: Record<string, unknown>): Sort[] {
+    static #getSorts(query: Record<string, unknown>, fields?: readonly string[]): Sort[] {
         const sorts: Sort[] = []
         for (const [k, v] of Object.entries(query)) {
             if (!k.endsWith(':sort')) continue
-            const field = k.slice(0, -5)
+            const field = assertColumn(k.slice(0, -5), fields)
             if (field === 'id') {
                 // id sort goes at the end as tiebreaker
                 continue
@@ -71,33 +93,30 @@ export class D1Query {
 
             const prefixParams = sorts.slice(0, i).map(s => cursor[s.field])
 
-            if (i < sorts.length - 1) {
-                const clause = prefix
-                    ? `(${prefix} AND ${field} ${mainOp} ?)`
-                    : `(${field} ${mainOp} ?)`
-                branches.push(clause)
-                params.push(...prefixParams, cursor[field])
-            } else {
-                const clause = prefix
-                    ? `(${prefix} AND ${field} ${mainOp} ?)`
-                    : `(${field} ${mainOp} ?)`
-                branches.push(clause)
-                params.push(...prefixParams, cursor[field])
-            }
+            const clause = prefix
+                ? `(${prefix} AND ${field} ${mainOp} ?)`
+                : `(${field} ${mainOp} ?)`
+            branches.push(clause)
+            params.push(...prefixParams, cursor[field])
         }
 
         if (branches.length === 0) return { clause: '', params: [] }
         return { clause: `(${branches.join(' OR ')})`, params }
     }
 
-    static #buildWhere(query: Record<string, unknown>, keys: Record<string, unknown>): SqlFragment {
+    static #buildWhere(
+        query: Record<string, unknown>,
+        keys: Record<string, unknown>,
+        fields?: readonly string[]
+    ): SqlFragment {
         const clauses: string[] = []
         const params: unknown[] = []
 
-        // Route keys (e.g. user_id from /livequery/users/:user_id/posts) — skip `id` (used for doc lookup)
+        // Route keys (e.g. user_id from /livequery/users/:user_id/posts) — skip `id` (used for doc lookup).
+        // Route keys come from the route definition, not the client, so they bypass the allowlist.
         for (const [k, v] of Object.entries(keys)) {
             if (k === 'id') continue
-            clauses.push(`${k} = ?`)
+            clauses.push(`${assertColumn(k)} = ?`)
             params.push(v)
         }
 
@@ -108,7 +127,7 @@ export class D1Query {
             if (key.endsWith(':select')) continue
 
             if (key.endsWith(':like')) {
-                const field = key.slice(0, -5)
+                const field = assertColumn(key.slice(0, -5), fields)
                 clauses.push(`LOWER(${field}) LIKE LOWER(?)`)
                 params.push(`%${value}%`)
                 continue
@@ -116,12 +135,12 @@ export class D1Query {
 
             const colonIdx = key.lastIndexOf(':')
             if (colonIdx === -1) {
-                clauses.push(`${key} = ?`)
+                clauses.push(`${assertColumn(key, fields)} = ?`)
                 params.push(value)
                 continue
             }
 
-            const field = key.slice(0, colonIdx)
+            const field = assertColumn(key.slice(0, colonIdx), fields)
             const op = key.slice(colonIdx + 1)
 
             switch (op) {
@@ -150,19 +169,21 @@ export class D1Query {
                 case 'neq-null':
                     clauses.push(`${field} IS NOT NULL`); break
                 case 'in': {
-                    const arr = this.#parseArray(value)
+                    const arr = this.#parseInValues(field, value)
                     if (arr.length === 0) { clauses.push('0 = 1'); break }
                     clauses.push(`${field} IN (${arr.map(() => '?').join(', ')})`)
                     params.push(...arr)
                     break
                 }
                 case 'nin': {
-                    const arr = this.#parseArray(value)
+                    const arr = this.#parseInValues(field, value)
                     if (arr.length === 0) break
                     clauses.push(`${field} NOT IN (${arr.map(() => '?').join(', ')})`)
                     params.push(...arr)
                     break
                 }
+                default:
+                    throw { status: 400, code: 'INVALID_OPERATOR', message: `Unknown filter operator "${op}"` }
             }
         }
 
@@ -172,23 +193,31 @@ export class D1Query {
         }
     }
 
+    static #buildKeyWhere(id: string, keys: Record<string, unknown>): SqlFragment {
+        const extra_keys = Object.entries(keys).filter(([k]) => k !== 'id')
+        return {
+            clause: ['id = ?', ...extra_keys.map(([k]) => `${assertColumn(k)} = ?`)].join(' AND '),
+            params: [id, ...extra_keys.map(([, v]) => v)],
+        }
+    }
+
     static #buildQueryPlan(
         table: string,
-        req: LivequeryRequest,
         query: Record<string, unknown>,
         keys: Record<string, unknown>,
         limit: number,
-        sorts: Sort[]
+        sorts: Sort[],
+        fields?: readonly string[]
     ): QueryPlan {
-        const where = this.#buildWhere(query, keys)
+        const where = this.#buildWhere(query, keys, fields)
         const orderBy = this.#buildOrderBy(sorts)
 
         const after = query[':after'] as string | undefined
         const before = query[':before'] as string | undefined
 
         if (after) {
-            const cursor = Cursor.decode(after)
-            const cursorCondition = this.#buildCursorCondition(sorts, cursor!, true)
+            const cursor = Cursor.decode(after) ?? {}
+            const cursorCondition = this.#buildCursorCondition(sorts, cursor, true)
             const afterWhere = cursorCondition.clause
                 ? `${where.clause ? where.clause + ' AND ' : 'WHERE '}${cursorCondition.clause}`
                 : where.clause
@@ -196,7 +225,7 @@ export class D1Query {
             const itemsSql = `SELECT * FROM ${table} ${afterWhere} ${orderBy} LIMIT ?`
             const itemsParams = [...where.params, ...cursorCondition.params, limit + 1]
 
-            const beforeCursor = this.#buildCursorCondition(sorts, cursor!, false)
+            const beforeCursor = this.#buildCursorCondition(sorts, cursor, false)
             const beforeWhere = beforeCursor.clause
                 ? `${where.clause ? where.clause + ' AND ' : 'WHERE '}${beforeCursor.clause}`
                 : where.clause
@@ -206,12 +235,21 @@ export class D1Query {
             const nextCountSql = `SELECT COUNT(*) as count FROM ${table} ${afterWhere}`
             const nextCountParams = [...where.params, ...cursorCondition.params]
 
-            return { itemsSql, itemsParams, prevCountSql, prevCountParams, nextCountSql, nextCountParams, limit, reverseItems: false }
+            return {
+                itemsSql,
+                itemsParams,
+                prevCountSql,
+                prevCountParams,
+                nextCountSql,
+                nextCountParams,
+                limit,
+                reverseItems: false,
+            }
         }
 
         if (before) {
-            const cursor = Cursor.decode(before)
-            const cursorCondition = this.#buildCursorCondition(sorts, cursor!, false)
+            const cursor = Cursor.decode(before) ?? {}
+            const cursorCondition = this.#buildCursorCondition(sorts, cursor, false)
             const beforeWhere = cursorCondition.clause
                 ? `${where.clause ? where.clause + ' AND ' : 'WHERE '}${cursorCondition.clause}`
                 : where.clause
@@ -220,7 +258,7 @@ export class D1Query {
             const itemsSql = `SELECT * FROM ${table} ${beforeWhere} ${reversedOrderBy} LIMIT ?`
             const itemsParams = [...where.params, ...cursorCondition.params, limit + 1]
 
-            const afterCursor = this.#buildCursorCondition(sorts, cursor!, true)
+            const afterCursor = this.#buildCursorCondition(sorts, cursor, true)
             const afterWhere = afterCursor.clause
                 ? `${where.clause ? where.clause + ' AND ' : 'WHERE '}${afterCursor.clause}`
                 : where.clause
@@ -230,7 +268,16 @@ export class D1Query {
             const prevCountSql = `SELECT COUNT(*) as count FROM ${table} ${beforeWhere}`
             const prevCountParams = [...where.params, ...cursorCondition.params]
 
-            return { itemsSql, itemsParams, prevCountSql, prevCountParams, nextCountSql, nextCountParams, limit, reverseItems: true }
+            return {
+                itemsSql,
+                itemsParams,
+                prevCountSql,
+                prevCountParams,
+                nextCountSql,
+                nextCountParams,
+                limit,
+                reverseItems: true,
+            }
         }
 
         // First page (no cursor)
@@ -254,19 +301,21 @@ export class D1Query {
     static async queryCollection<T extends { id: string }>(
         db: D1Database,
         table: string,
-        req: LivequeryRequest
+        req: LivequeryRequest,
+        fields?: readonly string[]
     ): Promise<D1CollectionResult<T>> {
+        assertTable(table)
         const query = req.query ?? {}
         const keys = req.keys ?? {}
         const limit = this.#getLimit(query)
-        const sorts = this.#getSorts(query)
+        const sorts = this.#getSorts(query, fields)
 
         // Page-based pagination (non-cursor)
         const page = query[':page']
         if (page) {
             const p = Math.max(1, Number(page) || 1)
             const offset = (p - 1) * limit
-            const where = this.#buildWhere(query, keys)
+            const where = this.#buildWhere(query, keys, fields)
             const orderBy = this.#buildOrderBy(sorts)
 
             const [itemsResult, countResult] = await db.batch([
@@ -291,7 +340,7 @@ export class D1Query {
             }
         }
 
-        const plan = this.#buildQueryPlan(table, req, query, keys, limit, sorts)
+        const plan = this.#buildQueryPlan(table, query, keys, limit, sorts, fields)
         const isFirstPage = !query[':after'] && !query[':before']
 
         let batchStatements: D1PreparedStatement[]
@@ -354,9 +403,10 @@ export class D1Query {
         table: string,
         req: LivequeryRequest
     ): Promise<D1DocumentResult<T>> {
+        assertTable(table)
         const { id, ...keysWithoutId } = req.keys ?? {}
         const extraClauses = Object.keys(keysWithoutId)
-            .map(k => `${k} = ?`)
+            .map(k => `${assertColumn(k)} = ?`)
             .join(' AND ')
         const extraParams = Object.values(keysWithoutId)
 
@@ -372,11 +422,13 @@ export class D1Query {
     static async insert<T extends { id: string }>(
         db: D1Database,
         table: string,
-        data: Record<string, unknown>
+        data: Record<string, unknown>,
+        fields?: readonly string[]
     ): Promise<T> {
+        assertTable(table)
         const id = data.id ?? crypto.randomUUID()
         const row: Record<string, unknown> = { ...data, id }
-        const cols = Object.keys(row)
+        const cols = Object.keys(row).map(k => assertColumn(k, fields))
         const placeholders = cols.map(() => '?').join(', ')
         const values = cols.map(k => row[k])
 
@@ -392,24 +444,20 @@ export class D1Query {
         table: string,
         id: string,
         data: Record<string, unknown>,
-        keys: Record<string, unknown> = {}
+        keys: Record<string, unknown> = {},
+        fields?: readonly string[]
     ): Promise<T> {
+        assertTable(table)
         const { id: _id, ...clean } = data
-        const setCols = Object.keys(clean)
+        const setCols = Object.keys(clean).map(k => assertColumn(k, fields))
         if (setCols.length === 0) throw { status: 400, code: 'EMPTY_UPDATE', message: 'No fields to update' }
 
         const setClause = setCols.map(k => `${k} = ?`).join(', ')
-        const extraKeys = Object.entries(keys).filter(([k]) => k !== 'id')
-        const whereClause = extraKeys.length
-            ? `id = ? AND ${extraKeys.map(([k]) => `${k} = ?`).join(' AND ')}`
-            : 'id = ?'
-        const whereParams = extraKeys.length
-            ? [id, ...extraKeys.map(([, v]) => v)]
-            : [id]
+        const where = this.#buildKeyWhere(id, keys)
 
         await db.prepare(
-            `UPDATE ${table} SET ${setClause} WHERE ${whereClause}`
-        ).bind(...setCols.map(k => clean[k]), ...whereParams).run()
+            `UPDATE ${table} SET ${setClause} WHERE ${where.clause}`
+        ).bind(...setCols.map(k => clean[k]), ...where.params).run()
 
         return { ...keys, ...clean, id } as unknown as T
     }
@@ -420,17 +468,12 @@ export class D1Query {
         id: string,
         keys: Record<string, unknown> = {}
     ): Promise<T> {
-        const extraKeys = Object.entries(keys).filter(([k]) => k !== 'id')
-        const whereClause = extraKeys.length
-            ? `id = ? AND ${extraKeys.map(([k]) => `${k} = ?`).join(' AND ')}`
-            : 'id = ?'
-        const whereParams = extraKeys.length
-            ? [id, ...extraKeys.map(([, v]) => v)]
-            : [id]
+        assertTable(table)
+        const where = this.#buildKeyWhere(id, keys)
 
         await db.prepare(
-            `DELETE FROM ${table} WHERE ${whereClause}`
-        ).bind(...whereParams).run()
+            `DELETE FROM ${table} WHERE ${where.clause}`
+        ).bind(...where.params).run()
 
         return { ...keys, id } as unknown as T
     }
