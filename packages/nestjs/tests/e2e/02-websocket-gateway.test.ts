@@ -16,7 +16,8 @@ type GatewayHandle = {
 
 async function startGateway(): Promise<GatewayHandle> {
     const server = http.createServer()
-    const gateway = new WebsocketGateway(server)
+    // These tests drive the wire protocol directly, so client `subscribe` frames are opted in.
+    const gateway = new WebsocketGateway(server, { allowClientSubscribe: true })
     await new Promise<void>(r => server.listen(0, r))
     const port = (server.address() as AddressInfo).port
     return { server, gateway, port, wsUrl: `ws://127.0.0.1:${port}${WEBSOCKET_PATH}` }

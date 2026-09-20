@@ -16,9 +16,13 @@ export function nodeRequestToWebRequest(
         ? undefined
         : req.rawBody
             ? new Uint8Array(req.rawBody)
-            // Nothing buffered the body (plain http.createServer): stream it instead of dropping it.
-            // Node's web-stream type is runtime-compatible with fetch but not with the DOM lib type.
-            : typeof req.on === 'function' ? Readable.toWeb(req) as unknown as BodyInit : undefined
+            // Nothing buffered the body (plain http.createServer): stream it instead of dropping
+            // it. A stream that was already read to the end — a caller that buffered an empty
+            // body, or a bodyless DELETE — must stay undefined, or fetch rejects the request.
+            // Node's web-stream type is runtime-compatible with fetch but not with the DOM type.
+            : typeof req.on === 'function' && req.readableEnded !== true
+                ? Readable.toWeb(req) as unknown as BodyInit
+                : undefined
 
     return new Request(`http://${host}${req.url}`, {
         method: req.method,

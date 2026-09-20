@@ -9,7 +9,7 @@
 import { afterEach, beforeAll, afterAll, describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
-import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/node.js'
 import { sleep, waitFor } from './helpers/wait.js'
 import { sendJson, wsStart } from './helpers/ws.js'
 

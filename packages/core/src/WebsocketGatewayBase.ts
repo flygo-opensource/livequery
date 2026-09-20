@@ -84,6 +84,12 @@ export type WebsocketGatewayOptions = {
      * Default true.
      */
     binary?: boolean
+    /**
+     * Honour `subscribe` frames sent by plain clients. Default false: subscriptions are registered
+     * server-side after an authorized read (`handle(ctx)` / `listen(...)`), so a client cannot
+     * subscribe to a ref it was never allowed to read. Turn it on only for a trusted network.
+     */
+    allowClientSubscribe?: boolean
 }
 
 function randomId(): string {
@@ -110,11 +116,13 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     public readonly id: string
     public readonly auth = randomId()
     protected readonly _binary: boolean
+    protected readonly _allowClientSubscribe: boolean
 
     constructor(options: WebsocketGatewayOptions = {}) {
         super()
         this.id = options.id ?? randomId()
         this._binary = options.binary ?? true
+        this._allowClientSubscribe = options.allowClientSubscribe ?? false
         this._disconnectGraceMs = options.disconnectGraceMs ?? 5000
 
         // Broadcast UpdatedData to all subscribed sockets
@@ -173,7 +181,12 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             const msg = decodeRealtimeFrame(raw) as LivequeryRealtimeEvent
             if (msg.event === 'start') this._onStart(socket, msg.data)
             else if (msg.event === 'unsubscribe') this.unsubscribe_client(socket, msg.data)
-            else if (msg.event === 'subscribe') this.listen([msg])
+            // A `subscribe` frame carries its own ref and client_id, so honouring it from a plain
+            // client would let anyone listen to any ref without passing the read authorization
+            // that registers subscriptions server-side. Only peer gateways may send it.
+            else if (msg.event === 'subscribe' && (socket.gateway || this._allowClientSubscribe)) {
+                this.listen([msg])
+            }
         } catch { /* malformed message, ignore */ }
     }
 
@@ -329,7 +342,8 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
 
     unsubscribe_client(socket: SocketLike, body: { ref?: string; refs?: string[]; client_id?: string }): void {
         if (this._closed) return
-        const client_id = body.client_id ?? socket.id
+        // A client may only drop its own subscriptions, whatever client_id it sends.
+        const client_id = socket.gateway ? body.client_id ?? socket.id : socket.id
         const refs = [...body.ref ? [body.ref] : [], ...body.refs ?? []]
         this.detach(client_id, refs)
     }

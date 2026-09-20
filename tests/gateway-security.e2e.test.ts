@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
-import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/node.js'
 import { MongodbRealtime } from '../mongodb/src/index.js'
 import { connectMongo, prepareCollection, uniqueCollection, type MongoHandle } from './helpers/mongo.js'
 import { DB_NAME } from './helpers/env.js'
@@ -72,24 +72,25 @@ describe('Gateway security & isolation e2e', () => {
         await mongo?.close()
     }, 30000)
 
-    // ── #2 WS subscribe bypass ──────────────────────────────────────────────────
-    // The gateway dispatches a raw `subscribe` frame straight into listen(). There
-    // is NO auth check at the WS layer — whatever guards a ref (validating the GET
-    // that registers it) is bypassed if a client sends `subscribe` directly. This
-    // test DOCUMENTS that current behavior so any future hardening is a deliberate
-    // change, not a silent regression.
-    test('a raw subscribe frame from a plain client IS honoured (documents the bypass)', async () => {
+    // ── #2 WS subscribe is server-side only ─────────────────────────────────────
+    // A `subscribe` frame carries its own ref and client_id, so honouring it from a plain client
+    // would bypass whatever guards a ref (the GET that registers it). The gateway ignores it
+    // unless `allowClientSubscribe` is set for a trusted network.
+    test('a raw subscribe frame from a plain client is ignored', async () => {
         const clientId = 'bypass-client'
         const { ws } = await wsStart(wsUrl, clientId)
         try {
-            // no HTTP GET — the client self-subscribes over the socket
+            // no HTTP GET — the client tries to self-subscribe over the socket
             sendJson(ws, { event: 'subscribe', ref: 'tasks', client_id: clientId, gateway_id: gateway.id, listener_node_id: gateway.id })
             await sleep(150)
 
-            const p = waitForWsMessage<any>(ws, m => m.event === 'sync' && m.data.changes.some((c: any) => c.data?.title === 'bypassed-sub'))
-            await collection.insertOne({ title: 'bypassed-sub' })
-            const sync = await p
-            expect(sync.data.changes.find((c: any) => c.data?.title === 'bypassed-sub')).toBeDefined()
+            let received = false
+            ws.addEventListener('message', (e: MessageEvent) => {
+                try { if (JSON.parse(e.data).event === 'sync') received = true } catch { /* noop */ }
+            })
+            await collection.insertOne({ title: 'not-delivered' })
+            await sleep(700)
+            expect(received).toBe(false)
         } finally {
             ws.close()
         }

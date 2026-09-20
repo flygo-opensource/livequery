@@ -43,6 +43,22 @@ describe('HTTP helpers', () => {
         }
     })
 
+    test('nodeRequestToWebRequest omits the body when the stream was already consumed', async () => {
+        const server = http.createServer(async (req, res) => {
+            for await (const _chunk of req) { /* a caller buffered the (empty) body first */ }
+            const request = nodeRequestToWebRequest(req as http.IncomingMessage & { url: string; method: string })
+            res.end(JSON.stringify({ body: request.body === null }))
+        })
+        await new Promise<void>(resolve => server.listen(0, resolve))
+        const { port } = server.address() as { port: number }
+        try {
+            const response = await fetch(`http://127.0.0.1:${port}/livequery/posts/p1`, { method: 'DELETE' })
+            expect(await response.json()).toEqual({ body: true })
+        } finally {
+            server.close()
+        }
+    })
+
     test('nodeRequestToWebRequest omits body for GET requests', async () => {
         const req = {
             url: '/livequery/posts',

@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
-import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../core/build/src/node.js'
 import { MongodbRealtime } from '../mongodb/src/index.js'
 import { connectMongo, prepareCollection, uniqueCollection, type MongoHandle } from './helpers/mongo.js'
 import { DB_NAME } from './helpers/env.js'

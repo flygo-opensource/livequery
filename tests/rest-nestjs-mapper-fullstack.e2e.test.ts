@@ -25,7 +25,7 @@ import { DiscoveryModule, NestFactory } from '../nestjs/node_modules/@nestjs/cor
 import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/index.js'
 
 // Same copy of @livequery/core as nestjs/src resolves — DI token identity.
-import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/node.js'
 import { ObjectId } from '../mongodb/node_modules/mongodb/lib/index.js'
 
 import { createDatasourceMapper } from '../nestjs/src/helpers/createDatasourceMapper.js'

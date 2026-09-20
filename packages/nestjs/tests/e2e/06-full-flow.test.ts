@@ -78,7 +78,8 @@ async function buildApp(): Promise<{
     const httpServer = http.createServer()
     await new Promise<void>(r => httpServer.listen(0, r))
     const port = (httpServer.address() as AddressInfo).port
-    const gateway = new WebsocketGateway(httpServer)
+    // These tests drive the wire protocol directly, so client `subscribe` frames are opted in.
+    const gateway = new WebsocketGateway(httpServer, { allowClientSubscribe: true })
 
     @Module({
         controllers: [TodoController, MessageController],

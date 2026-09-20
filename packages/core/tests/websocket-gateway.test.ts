@@ -77,13 +77,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         gateway.next({
             ref: 'posts',
@@ -115,13 +109,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts/p1',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts/p1', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         gateway.next({
             ref: 'posts',
@@ -153,13 +141,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         gateway.next({
             ref: 'posts',
@@ -210,20 +192,8 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'comments',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
+        gateway.listen([{ ref: 'comments', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
 
         gateway.detach('client-1', 'posts')
@@ -307,13 +277,7 @@ describe('WebsocketGateway', () => {
 
         await startClient(ws, 'client-1')
         ws.send('{not-json')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         gateway.next({
             ref: 'posts',
@@ -332,18 +296,12 @@ describe('WebsocketGateway', () => {
         })
     })
 
-    test('ignores subscribe messages sent before start', async () => {
+    test('ignores a subscription registered before the client connects', async () => {
         const { server, gateway, port } = await startGateway()
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await once(ws, 'open')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         ws.send(JSON.stringify({ event: 'start', data: { id: 'client-1', auth: '' } }))
         await nextJson(ws)
@@ -357,6 +315,75 @@ describe('WebsocketGateway', () => {
         ws.close()
         gateway.close()
         await closeServer(server)
+    })
+
+    test('a subscribe frame from a plain client is ignored', async () => {
+        const { server, gateway, port } = await startGateway()
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        // Honouring this would let any client listen to a ref it was never allowed to read.
+        ws.send(JSON.stringify({
+            event: 'subscribe',
+            ref: 'posts',
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        await sleep(10)
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+
+        await expectNoMessage(ws)
+        ws.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
+    test('allowClientSubscribe honours the frame again for trusted networks', async () => {
+        const { server, gateway, port } = await startGateway({ allowClientSubscribe: true })
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        ws.send(JSON.stringify({
+            event: 'subscribe',
+            ref: 'posts',
+            client_id: 'client-1',
+            gateway_id: gateway.id,
+            listener_node_id: gateway.id,
+        }))
+        await sleep(10)
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+
+        expect(await nextJson(ws)).toMatchObject({ event: 'sync' })
+        ws.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
+    test('a client cannot unsubscribe another client', async () => {
+        const { server, gateway, port } = await startGateway()
+        const received: string[] = []
+
+        // One at a time: `ws` emits `open` once, so a socket opened before its listener is
+        // attached would never resolve.
+        const victim = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(victim, 'victim')
+        const attacker = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(attacker, 'attacker')
+        victim.on('message', raw => received.push(String(raw)))
+        gateway.listen([{ ref: 'posts', client_id: 'victim', gateway_id: gateway.id, listener_node_id: gateway.id }])
+        await sleep(10)
+
+        attacker.send(JSON.stringify({ event: 'unsubscribe', data: { ref: 'posts', client_id: 'victim' } }))
+        await sleep(10)
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+        await sleep(50)
+
+        victim.close()
+        attacker.close()
+        gateway.close()
+        await closeServer(server)
+        expect(received.map(frame => JSON.parse(frame).event)).toEqual(['sync'])
     })
 
     test('ignores listen events where the client id equals the gateway id', async () => {
@@ -387,13 +414,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         await gateway.link('posts', () => of({
             ref: 'posts',
@@ -426,13 +447,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         const closed = once(ws, 'close')
         ws.close()
@@ -457,13 +472,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         const closed = once(ws, 'close')
         ws.close()
@@ -486,13 +495,7 @@ describe('WebsocketGateway', () => {
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
 
         await startClient(ws, 'client-1')
-        ws.send(JSON.stringify({
-            event: 'subscribe',
-            ref: 'posts',
-            client_id: 'client-1',
-            gateway_id: gateway.id,
-            listener_node_id: gateway.id,
-        }))
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
         await sleep(10)
         const closed = once(ws, 'close')
         ws.close()
@@ -581,7 +584,9 @@ describe('WebsocketGateway', () => {
     })
 })
 
-async function startGateway(options?: { disconnectGraceMs?: number }): Promise<{ server: http.Server; gateway: WebsocketGateway; port: number }> {
+async function startGateway(
+    options?: { disconnectGraceMs?: number; allowClientSubscribe?: boolean }
+): Promise<{ server: http.Server; gateway: WebsocketGateway; port: number }> {
     const server = http.createServer()
     const gateway = new WebsocketGateway(server, options)
     await listen(server)

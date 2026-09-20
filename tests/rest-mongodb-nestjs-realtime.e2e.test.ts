@@ -9,7 +9,7 @@ import { MongoClient, type Db, type Collection } from '../mongodb/node_modules/m
 import { Controller, Get, Module, Req } from '../nestjs/node_modules/@nestjs/common/index.js'
 import { NestFactory } from '../nestjs/node_modules/@nestjs/core/index.js'
 import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/index.js'
-import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/node.js'
 import { LivequeryInterceptor, UseLivequeryInterceptor } from '../nestjs/src/LivequeryInterceptor.js'
 import { MongoDatasource, MongodbRealtime } from '../mongodb/src/index.js'
 import { RestTransporter } from '../rest/src/RestTransporter.js'

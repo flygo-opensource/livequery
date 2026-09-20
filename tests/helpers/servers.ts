@@ -10,7 +10,7 @@ import { Controller, Delete, Get, Module, Patch, Post, Req } from '../../nestjs/
 import { NestFactory } from '../../nestjs/node_modules/@nestjs/core/index.js'
 import { ExpressAdapter } from '../../nestjs/node_modules/@nestjs/platform-express/index.js'
 
-import { WebsocketGateway, WEBSOCKET_PATH } from '../../core/build/src/index.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '../../core/build/src/node.js'
 import { nodeRequestToWebRequest } from '../../core/build/src/helpers/nodeRequestToWebRequest.js'
 import { writeWebResponse } from '../../core/build/src/helpers/writeWebResponse.js'
 import { createLivequery, createDatasourceMapper, getLivequeryRequest, livequeryJson, mapLivequeryResponse } from '../../honojs/src/index.js'
