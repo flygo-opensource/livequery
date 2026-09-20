@@ -149,6 +149,4 @@ lớn nên chuyển sang shard theo tenant hoặc thêm một sổ đăng ký re
 
 - Trên Worker, ghi thẳng vào D1 (script, migration, dashboard) không sinh realtime. Muốn có thì
   phải tự gọi publish.
-- `@livequery/mongodb` còn một lỗi đã biết: thay đổi thành viên của một field dạng mảng không
-  fan-out đúng `added`/`removed` theo từng parent.
 - Publish fan-out tới mọi shard; xem mục 6 cho hướng mở rộng.

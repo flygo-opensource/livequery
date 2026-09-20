@@ -51,10 +51,10 @@ Notes to revisit before the next compatibility pass.
 ## MongodbRealtime
 
 - [x] Ref-changing update semantics updated for nested refs that include document fields, for example `status/:status/videos`.
-- [x] MongoDB `update`/`replace` events now emit `modified` only, including one `modified` event for the old ref and one for the new ref when a ref field changes. This keeps realtime event types aligned with MongoDB operation type instead of list membership interpretation.
-- [x] Unit tests cover scalar ref field changes (`running -> stopped`) and array membership ref changes.
-- Re-check this behavior against a real MongoDB replica set with `fullDocumentBeforeChange` available.
-- Re-check fallback behavior when MongoDB pre-images are missing; only the new ref can be inferred in that case.
+- [x] An `update`/`replace` that moves a document between parents now emits `removed` under the old ref and `added` under the new one, with `modified` only for a parent the document stayed in. A ref is a list, so its subscribers need membership events, not the raw MongoDB operation type.
+- [x] Unit tests cover scalar ref field changes (`running -> stopped`) and array membership changes.
+- [x] Verified against a real MongoDB replica set with `fullDocumentBeforeChange` available (`tests/realtime-nested-ref.e2e.test.ts`).
+- Re-check fallback behavior when MongoDB pre-images are missing; only the new ref can be inferred in that case, so a document leaving a parent is invisible.
 
 ## MongodbCollection API
 

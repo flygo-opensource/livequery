@@ -148,7 +148,7 @@ describe('MongodbRealtime', () => {
         }])
     })
 
-    test('emits modified events for old and new scalar refs when a ref field changes', async () => {
+    test('a scalar ref field changing removes the document from the old parent and adds it to the new', async () => {
         const videos = createWatchableCollection('videos')
         const db = createDb({ videos })
         const realtime = new MongodbRealtime({ enablePreAndPostImages: false })
@@ -176,12 +176,13 @@ describe('MongodbRealtime', () => {
         expect(await results).toEqual([
             {
                 ref: 'status/running/videos',
-                type: 'modified',
-                data: { id: 'video1', status: 'stopped', amount: 0 },
+                type: 'removed',
+                data: { id: 'video1' },
             },
             {
+                // The document is new to this ref, so it carries the whole document.
                 ref: 'status/stopped/videos',
-                type: 'modified',
+                type: 'added',
                 data: { id: 'video1', status: 'stopped', amount: 0 },
             },
         ])
@@ -324,7 +325,7 @@ describe('MongodbRealtime', () => {
         expect(tenantDb.collectionCalls).toEqual(['products'])
     })
 
-    test('formats nested array ref changes as modified events for all affected refs', async () => {
+    test('array membership changes fan out removed / modified / added per parent', async () => {
         const posts = createWatchableCollection('posts')
         const db = createDb({ posts })
         const realtime = new MongodbRealtime({ enablePreAndPostImages: false })
@@ -351,19 +352,19 @@ describe('MongodbRealtime', () => {
 
         expect(await results).toEqual([
             {
-                ref: 'users/user1/posts',
+                ref: 'users/user1/posts',                       // left the group
+                type: 'removed',
+                data: { id: 'post1' },
+            },
+            {
+                ref: 'users/user2/posts',                       // stayed, only the field changed
                 type: 'modified',
                 data: { id: 'post1', userIds: ['user2', 'user3'] },
             },
             {
-                ref: 'users/user2/posts',
-                type: 'modified',
-                data: { id: 'post1', userIds: ['user2', 'user3'] },
-            },
-            {
-                ref: 'users/user3/posts',
-                type: 'modified',
-                data: { id: 'post1', userIds: ['user2', 'user3'] },
+                ref: 'users/user3/posts',                       // joined, so it needs the document
+                type: 'added',
+                data: { id: 'post1', userIds: ['user2', 'user3'], title: 'Hello' },
             },
         ])
     })

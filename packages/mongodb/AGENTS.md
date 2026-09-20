@@ -335,7 +335,9 @@ Responsibilities:
 - Enable MongoDB pre/post images by default before opening a change stream.
 - Convert MongoDB change stream events to Livequery websocket sync payloads.
 - Format nested refs from `schema` params: each `:param` reads the document field of the same name (`id` maps to `_id`). The schema comes pre-parsed from `@livequery/core`, so the document-id segment is already stripped.
-- Support array membership refs automatically when the document field is an array.
+- Fan out per parent when a ref field changes: the document is `removed` under the parent it left,
+  `added` (carrying the whole document) under the one it joined, and `modified` under a parent it
+  stayed in. Works the same for a scalar ref field and for membership of an array field.
 
 ### `MongodbCollection`
 
@@ -390,7 +392,7 @@ Rules:
 - `collection` is required.
 - `collection`, `db`, and `connection` may be strings or resolver functions.
 - Resolver functions receive the normalized adapter request.
-- Nested route params read the document field of the same name (`id` maps to `_id`); array fields fan out per element.
+- Nested route params read the document field of the same name (`id` maps to `_id`); array fields fan out per element, one `added`/`removed`/`modified` per parent.
 - `objectIdFields` converts top-level matching fields in `req.keys` and `req.body`.
 - Nested ObjectId conversion is not implemented.
 

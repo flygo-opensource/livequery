@@ -210,25 +210,44 @@ export class MongodbRealtime {
             .filter(key => event.fields.has(key))
             .reduce((acc, key) => ({ ...acc, [key]: event.new_data?.[key] }), { id: merged.id } as Record<string, any>)
 
+        const toValues = (value: unknown): string[] =>
+            Array.isArray(value) ? value.map(item => String(item)) : value == null ? [] : [String(value)]
+
         const buildRefs = ([{ collection, field }, ...fields]: RefMetadata[]): Array<{ refs: string[], type: MongoRealtimeChangeType }> => {
             if (fields.length === 0 || !field) return [{ refs: [collection], type: event.type }]
-            const oldValues = event.old_data?.[field]
-            const newValues = event.new_data?.[field]
-            const values: string[] = Array.isArray(oldValues) || Array.isArray(newValues)
-                ? [...new Set([
-                    ...(Array.isArray(oldValues) ? oldValues : []).map((item: any) => String(item)),
-                    ...(Array.isArray(newValues) ? newValues : []).map((item: any) => String(item)),
-                ])]
-                : event.type === 'modified'
-                    ? [...new Set([oldValues, newValues].filter(value => value != null).map(value => String(value)))]
-                    : [merged[field] ?? '-']
 
-            return values.flatMap(value => {
+            const before = new Set(toValues(event.old_data?.[field]))
+            const after = new Set(toValues(event.new_data?.[field]))
+            // A parent ref is a list of its own: when an update moves a document between
+            // parents — a scalar owner changing, or an element leaving or joining an array —
+            // the document is `removed` under the parent it left and `added` under the one it
+            // joined. Only a parent it stayed under sees `modified`.
+            const fallback = () => {
+                const values = toValues(merged[field])
+                return values.length > 0 ? values : ['-']
+            }
+            const values = event.type === 'modified'
+                ? [...new Set([...before, ...after])].map(value => ({
+                    value,
+                    type: (before.has(value) && after.has(value) ? 'modified'
+                        : after.has(value) ? 'added'
+                            : 'removed') as MongoRealtimeChangeType,
+                }))
+                // An insert carries no pre-image and a delete no post-image, so there is
+                // nothing to diff: every parent sees the event as it is.
+                : [...(event.type === 'added' ? after : before)]
+                    .reduce<string[]>((p, c) => [...p, c], [])
+                    .map(value => ({ value, type: event.type }))
+
+            const resolved = values.length > 0
+                ? values
+                : fallback().map(value => ({ value, type: event.type }))
+
+            return resolved.flatMap(({ value, type }) => {
                 return buildRefs(fields).map(next => ({
-                    type: event.type == 'added' || event.type == 'removed'
-                        ? event.type
-                        : 'modified',
-                    refs: [collection, String(value), ...next.refs],
+                    // A deeper parent only refines a ref the document stayed under.
+                    type: type === 'modified' ? next.type : type,
+                    refs: [collection, value, ...next.refs],
                 }))
             })
         }

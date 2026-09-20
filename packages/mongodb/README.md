@@ -377,7 +377,19 @@ For nested collection refs, name the route param after the document field that h
 }
 ```
 
-If the document field is an array (one document belongs to many parents), the change is fanned out to one ref per array element. MongoDB `update`/`replace` events emit `modified` for every affected old and new ref, so realtime event types stay aligned with the database operation type. Insert and delete events still emit `added` and `removed`.
+If the document field is an array (one document belongs to many parents), the change is fanned out to one ref per array element.
+
+A parent ref is a list of its own, so an `update`/`replace` that moves a document between parents is reported as membership, not as the raw MongoDB operation type: the document is `removed` under the parent it left, `added` under the one it joined, and `modified` only under a parent it stayed in. The same holds for a scalar ref field. Insert and delete events emit `added` and `removed` for every parent.
+
+Updating `{ groupIds: ['g1', 'g2'] }` to `{ groupIds: ['g2', 'g3'] }` emits:
+
+```ts
+{ ref: 'groups/g1/posts', type: 'removed', data: { id: 'post1' } }
+{ ref: 'groups/g2/posts', type: 'modified', data: { id: 'post1', groupIds: ['g2', 'g3'] } }
+{ ref: 'groups/g3/posts', type: 'added', data: { id: 'post1', groupIds: ['g2', 'g3'], title: 'Hello' } }
+```
+
+A ref the document is new to carries the whole document, because its subscribers have never seen it. Detecting what a document left needs the pre-image: without `fullDocumentBeforeChange`, only the parents it joined can be inferred.
 
 An inserted `{ _id: 'post1', userId: 'user1', title: 'Hello' }` emits:
 
