@@ -35,6 +35,8 @@ import type {
     RealtimeSubscription,
 } from './LivequeryRealtime.js'
 
+import { decodeRealtimeFrame } from './helpers/decodeRealtimeFrame.js'
+
 export type { RealtimeSubscription } from './LivequeryRealtime.js'
 
 
@@ -71,6 +73,17 @@ export type WebsocketGatewayOptions = {
      * resumes realtime without re-querying. Default 5000.
      */
     disconnectGraceMs?: number
+    /**
+     * Stable gateway id announced in `hello`. Defaults to a random id per instance. Adapters whose
+     * instance can be recreated while clients stay connected (e.g. a hibernated Durable Object) must
+     * pass a stable id so `x-lgid` keeps pointing at the same gateway.
+     */
+    id?: string
+    /**
+     * Value of `binary` in the `hello` event. Clients switch to msgpack frames when it is true.
+     * Default true.
+     */
+    binary?: boolean
 }
 
 function randomId(): string {
@@ -78,16 +91,6 @@ function randomId(): string {
     if (g.crypto?.randomUUID) return g.crypto.randomUUID()
     // Fallback for older runtimes — sufficient uniqueness for gateway/auth ids.
     return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join('-')
-}
-
-function decodeMessage(data: string | BinaryMessage): string {
-    if (typeof data === 'string') return data
-    if (data instanceof ArrayBuffer) return new TextDecoder().decode(data)
-    return new TextDecoder().decode(new Uint8Array(
-        data.buffer,
-        data.byteOffset,
-        data.byteLength,
-    ))
 }
 
 
@@ -104,11 +107,14 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     protected readonly _disconnectGraceMs: number
     protected _closed = false
 
-    public readonly id = randomId()
+    public readonly id: string
     public readonly auth = randomId()
+    protected readonly _binary: boolean
 
     constructor(options: WebsocketGatewayOptions = {}) {
         super()
+        this.id = options.id ?? randomId()
+        this._binary = options.binary ?? true
         this._disconnectGraceMs = options.disconnectGraceMs ?? 5000
 
         // Broadcast UpdatedData to all subscribed sockets
@@ -164,8 +170,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     onMessage(socket: SocketLike, raw: string | BinaryMessage): void {
         if (this._closed) return
         try {
-            const text = decodeMessage(raw)
-            const msg = JSON.parse(text) as LivequeryRealtimeEvent
+            const msg = decodeRealtimeFrame(raw) as LivequeryRealtimeEvent
             if (msg.event === 'start') this._onStart(socket, msg.data)
             else if (msg.event === 'unsubscribe') this.unsubscribe_client(socket, msg.data)
             else if (msg.event === 'subscribe') this.listen([msg])
@@ -201,7 +206,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
             }
         }
 
-        const hello: LivequeryHelloEvent = { event: 'hello', gid: this.id, binary: true }
+        const hello: LivequeryHelloEvent = { event: 'hello', gid: this.id, binary: this._binary }
         socket.send(JSON.stringify(hello))
     }
 
@@ -389,8 +394,7 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                 fromEvent<MessageEvent<string | BinaryMessage> | { data: string | BinaryMessage }>(ws, 'message').pipe(
                     map((e: any) => {
                         const data = (e?.data ?? e) as string | BinaryMessage
-                        const text = decodeMessage(data)
-                        const parsed = JSON.parse(text) as LivequeryRealtimeEvent
+                        const parsed = decodeRealtimeFrame(data) as LivequeryRealtimeEvent
 
                         if (parsed.event === 'hello') {
                             const old_id = gateway$.getValue().id

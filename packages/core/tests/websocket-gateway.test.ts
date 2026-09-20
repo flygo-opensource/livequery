@@ -3,7 +3,8 @@ import * as http from 'http'
 import type { AddressInfo } from 'net'
 import { of } from 'rxjs'
 import { WebSocket } from 'ws'
-import { WEBSOCKET_PATH, WebsocketGateway } from '../src/index.js'
+import { encode } from '@msgpack/msgpack'
+import { WEBSOCKET_PATH, WebsocketGateway } from '../src/node.js'
 
 describe('WebsocketGateway', () => {
     test('close shuts down active websocket connections', async () => {
@@ -177,6 +178,26 @@ describe('WebsocketGateway', () => {
             type: 'added',
             data: { id: 'p2' },
         } as any)
+
+        await expectNoMessage(ws)
+        ws.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
+    test('msgpack unsubscribe after a binary hello — stops later sync updates', async () => {
+        const { server, gateway, port } = await startGateway()
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+
+        await startClient(ws, 'client-1')
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+        expect(await nextJson(ws)).toMatchObject({ event: 'sync' })
+
+        // The client encodes every frame with msgpack once hello says binary: true.
+        ws.send(encode({ event: 'unsubscribe', data: { ref: 'posts' } }))
+        await sleep(10)
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p2' } } as any)
 
         await expectNoMessage(ws)
         ws.close()
