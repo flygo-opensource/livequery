@@ -22,6 +22,7 @@
 import { decodeRealtimeFrame } from '../helpers/decodeRealtimeFrame.js'
 import type { UpdatedData } from '../LivequeryBaseEntity.js'
 import type { RealtimeSubscription } from '../LivequeryRealtime.js'
+import { LIVEQUERY_PING_FRAME, LIVEQUERY_PONG_FRAME } from '../const.js'
 import {
     WebsocketGatewayBase,
     type SocketLike,
@@ -60,11 +61,6 @@ const SUBSCRIPTION_PREFIX = 'sub:'
 const EXPIRY_PREFIX = 'expire:'
 const WEBSOCKET_OPEN = 1
 
-// The client pings every minute with this exact JSON frame; answering it from the runtime keeps
-// idle connections from waking the object.
-const PING_FRAME = '{"event":"ping"}'
-const PONG_FRAME = '{"event":"pong"}'
-
 function subscriptionKey(client_id: string, ref: string): string {
     return `${SUBSCRIPTION_PREFIX}${client_id}:${ref}`
 }
@@ -99,7 +95,7 @@ export class HibernatableWebsocketGateway extends WebsocketGatewayBase {
         this.#state = state
         const Pair = (globalThis as { WebSocketRequestResponsePair?: typeof WebSocketRequestResponsePair })
             .WebSocketRequestResponsePair
-        if (Pair) state.setWebSocketAutoResponse?.(new Pair(PING_FRAME, PONG_FRAME))
+        if (Pair) state.setWebSocketAutoResponse?.(new Pair(LIVEQUERY_PING_FRAME, LIVEQUERY_PONG_FRAME))
         this.ready = state.blockConcurrencyWhile(() => this.#restore())
     }
 

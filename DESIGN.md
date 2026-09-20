@@ -112,6 +112,10 @@ Socket nằm trong Durable Object, chia shard theo principal:
 - **Chờ reconnect bằng alarm, không bằng timer.** Object ngủ được trong lúc chờ, và cửa sổ chờ
   sống sót qua eviction. Cùng alarm đó quét dọn bản ghi không còn socket.
 - **Ping do runtime trả lời** (`setWebSocketAutoResponse`), nên client rảnh không đánh thức object.
+  Runtime so khớp **nguyên văn chuỗi**, nên hai frame keep-alive là hằng số của giao thức
+  (`LIVEQUERY_PING_FRAME` / `LIVEQUERY_PONG_FRAME`), không phải chi tiết nội bộ: client gửi đúng
+  chuỗi đó chứ không mã hóa lại `{ event: 'ping' }`. Sai lệch không gây lỗi nào nhìn thấy được —
+  chỉ là mỗi ping lại đánh thức object — nên `tests/keepalive-frame.test.ts` ghim hai đầu với nhau.
 
 Mô hình tin cậy: chỉ Worker chạm được Durable Object; router luôn ghi đè header principal nên
 client không tự chọn danh tính; `register` từ chối khi socket thuộc principal khác; và một

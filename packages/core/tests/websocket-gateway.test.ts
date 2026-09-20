@@ -4,9 +4,32 @@ import type { AddressInfo } from 'net'
 import { of } from 'rxjs'
 import { WebSocket } from 'ws'
 import { encode } from '@msgpack/msgpack'
-import { WEBSOCKET_PATH, WebsocketGateway } from '../src/node.js'
+import { LIVEQUERY_PING_FRAME, LIVEQUERY_PONG_FRAME, WEBSOCKET_PATH, WebsocketGateway } from '../src/node.js'
 
 describe('WebsocketGateway', () => {
+    test('answers the exact keep-alive frame with the exact pong frame', async () => {
+        const { server, gateway, port } = await startGateway()
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(ws, 'ping-client')
+
+        const raw = await new Promise<string>((resolve, reject) => {
+            ws.once('message', (data: Buffer) => resolve(data.toString()))
+            ws.once('error', reject)
+            ws.send(LIVEQUERY_PING_FRAME)
+        })
+        // Byte for byte: on Workers this exchange is done by the runtime, which matches strings.
+        expect(raw).toBe(LIVEQUERY_PONG_FRAME)
+
+        ws.close()
+        gateway.close()
+        server.close()
+    })
+
+    test('the keep-alive frames are the canonical JSON encodings', () => {
+        expect(LIVEQUERY_PING_FRAME).toBe(JSON.stringify({ event: 'ping' }))
+        expect(LIVEQUERY_PONG_FRAME).toBe(JSON.stringify({ event: 'pong' }))
+    })
+
     test('close shuts down active websocket connections', async () => {
         const { server, gateway, port } = await startGateway()
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)

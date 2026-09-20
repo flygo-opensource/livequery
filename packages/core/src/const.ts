@@ -30,3 +30,17 @@ export const LIVEQUERY_REF_HEADER = 'x-livequery-ref'
 
 /** Header a service sets after a write: `<type> <collection_ref>`, e.g. `modified tasks`. */
 export const LIVEQUERY_CHANGE_HEADER = 'x-livequery-change'
+
+/**
+ * Keep-alive frames, byte for byte.
+ *
+ * On Cloudflare the runtime answers a ping itself through `setWebSocketAutoResponse`, which
+ * compares the incoming frame as an **exact string** — so these two literals are part of the wire
+ * protocol, not an implementation detail. A client must send this literal and nothing else: extra
+ * whitespace, a different key order, an added field or a msgpack encoding of the same object all
+ * stop matching, and then every idle ping wakes the Durable Object. Nothing breaks visibly; the
+ * bill just grows. Change these only together with every client, and keep `tests/keepalive-frame`
+ * green.
+ */
+export const LIVEQUERY_PING_FRAME = '{"event":"ping"}'
+export const LIVEQUERY_PONG_FRAME = '{"event":"pong"}'

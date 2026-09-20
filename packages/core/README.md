@@ -140,7 +140,10 @@ Hibernation: the gateway id is the Durable Object id, so `hello.gid` and `x-lgid
 survive eviction and redeploys. Each socket keeps its `client_id` and principal in
 its attachment and each subscription is a `sub:<client_id>:<ref>` storage key; a
 woken instance restores both inside `blockConcurrencyWhile`. Client pings are
-answered by the runtime (`setWebSocketAutoResponse`) without waking the object.
+answered by the runtime (`setWebSocketAutoResponse`) without waking the object. The runtime matches
+the frame as an exact string, so `LIVEQUERY_PING_FRAME` and `LIVEQUERY_PONG_FRAME` are protocol
+constants: a client sends that literal rather than re-encoding `{ event: 'ping' }`, and every
+gateway answers it the same way, on every runtime.
 
 The disconnect grace window is a Durable Object alarm, not a timer: the object can hibernate
 while it waits, the window survives eviction, and the same alarm sweeps subscriptions whose

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { decode, encode } from "@msgpack/msgpack";
 import { firstValueFrom } from "rxjs";
-import { Socket } from "../src/Socket.js";
+import { LIVEQUERY_PING_FRAME, Socket } from "../src/Socket.js";
 
 const originalWebSocket = globalThis.WebSocket;
 
@@ -51,6 +51,13 @@ afterEach(() => {
 });
 
 describe("Socket", () => {
+    test("the keep-alive frame is the canonical JSON encoding, sent as a raw string", () => {
+        // A Cloudflare Durable Object answers this frame in the runtime, matching it as an exact
+        // string — so it must never go through the msgpack encoder, and no field may be added.
+        expect(LIVEQUERY_PING_FRAME).toBe(JSON.stringify({ event: "ping" }));
+        expect(typeof LIVEQUERY_PING_FRAME).toBe("string");
+    });
+
     test("dispatches JSON hello messages", async () => {
         const socket = new Socket("wss://api.example.com/ws");
         await tick();

@@ -23,7 +23,7 @@ import {
     tap, map, switchMap, filter, finalize, mergeAll, retry, takeWhile,
 } from 'rxjs/operators'
 import { UpdatedData, LivequeryBaseEntity } from './LivequeryBaseEntity.js'
-import { LIVEQUERY_API_GATEWAY_DEBUG } from './const.js'
+import { LIVEQUERY_API_GATEWAY_DEBUG, LIVEQUERY_PONG_FRAME } from './const.js'
 import { LivequeryContext, LivequeryHandler } from './LivequeryContext.js'
 import type {
     LivequeryHelloEvent,
@@ -36,6 +36,7 @@ import type {
 } from './LivequeryRealtime.js'
 
 import { decodeRealtimeFrame } from './helpers/decodeRealtimeFrame.js'
+import { isPingFrame } from './helpers/isPingFrame.js'
 
 export type { RealtimeSubscription } from './LivequeryRealtime.js'
 
@@ -177,6 +178,13 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     /** Forward a frame received from the wire into the protocol. */
     onMessage(socket: SocketLike, raw: string | BinaryMessage): void {
         if (this._closed) return
+        // Keep-alive, answered before anything is decoded. On Workers the runtime replies to this
+        // exact frame without waking the Durable Object; here the gateway does it, so a client
+        // sees the same protocol on every runtime.
+        if (isPingFrame(raw)) {
+            socket.send(LIVEQUERY_PONG_FRAME)
+            return
+        }
         try {
             const msg = decodeRealtimeFrame(raw) as LivequeryRealtimeEvent
             if (msg.event === 'start') this._onStart(socket, msg.data)

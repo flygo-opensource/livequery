@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
     HibernatableWebsocketGateway,
+    LIVEQUERY_PING_FRAME,
+    LIVEQUERY_PONG_FRAME,
     LIVEQUERY_DO_BROADCAST_PATH,
     LIVEQUERY_DO_SUBSCRIBE_PATH,
     LIVEQUERY_PRINCIPAL_HEADER,
@@ -13,6 +15,7 @@ type FakeState = DurableObjectStateLike & {
     sockets: FakeWebSocket[]
     data: Map<string, unknown>
     alarm: number | null
+    autoResponse: { request: string; response: string } | undefined
 }
 
 function makeSocket(): FakeWebSocket {
@@ -38,6 +41,7 @@ function makeState(id = 'do-1', data = new Map<string, unknown>(), sockets: Fake
         sockets,
         data,
         alarm: null,
+        autoResponse: undefined,
         storage: {
             async list<T>({ prefix }: { prefix: string }) {
                 return new Map([...data].filter(([k]) => k.startsWith(prefix))) as Map<string, T>
@@ -50,6 +54,9 @@ function makeState(id = 'do-1', data = new Map<string, unknown>(), sockets: Fake
             },
             async getAlarm() { return state.alarm },
             async setAlarm(at) { state.alarm = at instanceof Date ? at.getTime() : at },
+        },
+        setWebSocketAutoResponse(pair?: unknown) {
+            state.autoResponse = pair as { request: string; response: string } | undefined
         },
         acceptWebSocket(ws) { sockets.push(ws as FakeWebSocket) },
         getWebSockets() { return sockets.filter(ws => !ws.closed) },
@@ -110,6 +117,27 @@ describe('HibernatableWebsocketGateway handshake', () => {
         const ws = await connect(gateway, 'c1')
         expect(JSON.parse(ws.sent[0])).toEqual({ event: 'hello', gid: 'do-abc', binary: false })
         expect(ws.attachment).toEqual({ id: 'c1', principal: undefined })
+    })
+
+    test('registers the keep-alive pair so an idle ping never wakes the object', () => {
+        class Pair {
+            constructor(public request: string, public response: string) { }
+        }
+        const global = globalThis as { WebSocketRequestResponsePair?: unknown }
+        const previous = global.WebSocketRequestResponsePair
+        global.WebSocketRequestResponsePair = Pair
+        try {
+            const state = makeState('do-ping')
+            new HibernatableWebsocketGateway(state)
+            // Byte for byte: the runtime matches the request frame as an exact string, so a
+            // client that re-encodes its ping stops being answered for free.
+            expect(state.autoResponse).toEqual({
+                request: LIVEQUERY_PING_FRAME,
+                response: LIVEQUERY_PONG_FRAME,
+            })
+        } finally {
+            global.WebSocketRequestResponsePair = previous
+        }
     })
 
     test('start with an oversized client id — socket closed', async () => {

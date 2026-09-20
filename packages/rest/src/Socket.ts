@@ -4,6 +4,18 @@ import type { DataChangeEvent } from '@livequery/client'
 import { v7 as uuidv7 } from 'uuid';
 import { decode, encode } from '@msgpack/msgpack';
 
+/**
+ * Keep-alive frame, byte for byte. This is a copy of `LIVEQUERY_PING_FRAME` in `@livequery/core`,
+ * kept as a literal so a browser bundle does not pull in the server package — `tests/keepalive-frame`
+ * fails if the two ever drift apart.
+ *
+ * It is sent as this exact string, never through `#send`: a Cloudflare Durable Object answers the
+ * ping in the runtime through `setWebSocketAutoResponse`, which matches the frame as an exact
+ * string. Re-encoding it — msgpack in binary mode, a different key order, any added field — still
+ * "works", but then every idle ping wakes the object instead of being answered for free.
+ */
+export const LIVEQUERY_PING_FRAME = '{"event":"ping"}'
+
 export type LivequerySocketMetadata = {
     client_id: string
     gateway_id?: string
@@ -45,7 +57,7 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 fromEvent(ws, 'error').pipe(map(e => { throw e })),
                 fromEvent(ws, 'open').pipe(
                     switchMap(() => interval(60000)),
-                    tap(() => this.#send(ws, { event: 'ping' }))
+                    tap(() => ws.send(LIVEQUERY_PING_FRAME))
                 ),
                 fromEvent(ws, 'open').pipe(
                     tap(() => {
