@@ -18,22 +18,30 @@
   },
   "exports": {
     ".": {
-      "import": {
+      "workerd": {
+        "types": "./build/src/runtime/workers.d.ts",
+        "default": "./build/src/runtime/workers.js"
+      },
+      "bun": {
+        "types": "./build/src/runtime/bun.d.ts",
+        "default": "./build/src/runtime/bun.js"
+      },
+      "node": {
+        "types": "./build/src/runtime/node.d.ts",
+        "default": "./build/src/runtime/node.js"
+      },
+      "default": {
         "types": "./build/src/index.d.ts",
         "default": "./build/src/index.js"
       }
     },
     "./bun": {
-      "import": {
-        "types": "./build/src/bun.d.ts",
-        "default": "./build/src/bun.js"
-      }
+      "types": "./build/src/bun.d.ts",
+      "default": "./build/src/bun.js"
     },
     "./node": {
-      "import": {
-        "types": "./build/src/node.d.ts",
-        "default": "./build/src/node.js"
-      }
+      "types": "./build/src/node.d.ts",
+      "default": "./build/src/node.js"
     }
   },
   "type": "module",

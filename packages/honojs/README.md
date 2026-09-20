@@ -14,9 +14,26 @@ Peer dependency: `hono >= 4.12`.
 
 | Entry | Runtime | Contents |
 | --- | --- | --- |
-| `@livequery/honojs` | Any (Workers, Bun, Node) | Middleware, request/response helpers, route registry, datasource mapper |
+| `@livequery/honojs` | Any | Middleware, request/response helpers, route registry, datasource mapper, `gateway()`, and a `serve()` built for whichever runtime imports it |
 | `@livequery/honojs/bun` | Bun | Root + `HonoApiGateway*`, `HonoApiServiceLinker`, `WebsocketGateway` (`Bun.serve`) |
 | `@livequery/honojs/node` | Node.js | Root + the same gateway/linker, `WebsocketGateway` on `ws` (install `ws`) |
+
+### One file, three runtimes
+
+The root entry ships three builds; the runtime picks its own through the `workerd`, `bun` and
+`node` export conditions, so nothing in your code has to test for a runtime:
+
+```ts
+import { serve } from '@livequery/honojs'
+
+export default serve(app, { port: 8080, realtime: gateway })
+```
+
+| | Workers | Bun | Node |
+| --- | --- | --- | --- |
+| What `serve()` returns | the app (the platform owns the port) | a `Bun.serve` definition: `{ port, fetch, websocket }` | the app, after starting `http.createServer().listen(port)` |
+| `realtime` | ignored; sockets live in a Durable Object | `attachBunUpgrade` + websocket handlers | attached to the same HTTP server |
+| Node built-ins in the bundle | none (a Workers bundle stays ~70 KB) | — | — |
 
 The root entry loads no Node built-in, `ws` or UDP transport, so it is safe on Cloudflare
 Workers. For UDP discovery import `UdpDiscovery` from `@livequery/core/udp`.
