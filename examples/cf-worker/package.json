@@ -18,7 +18,9 @@
   "dependencies": {
     "@livequery/core": "workspace:*",
     "@livequery/d1": "workspace:*",
+    "@livequery/honojs": "workspace:*",
     "hono": "^4.13.5",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "zod": "^4.0.0"
   }
 }

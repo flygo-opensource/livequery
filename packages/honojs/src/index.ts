@@ -7,9 +7,12 @@
 
 export * from './types.js'
 export * from './realtime.js'
+export * from './realtimeMiddleware.js'
 export * from './request.js'
 export * from './response.js'
+export * from './errorHandler.js'
 export * from './middleware.js'
+export * from './validator.js'
 export * from './route-registry.js'
 export * from './datasource.js'
 export {

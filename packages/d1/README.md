@@ -2,6 +2,25 @@
 
 Cloudflare D1 datasource adapter for Livequery.
 
+## Hono middleware
+
+```ts
+import { d1 } from '@livequery/d1'
+
+app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime())
+```
+
+`d1()` picks the operation from the method and the ref: a collection GET lists, a document GET
+reads, POST inserts (201), PUT/PATCH update, DELETE removes. It resolves the binding from
+`env.DB` (override with `d1({ binding: 'TASKS_DB' })`) and the table from the collection ref
+(override with `d1({ table })`). Columns come from the route's `validator()` schema, or from
+`d1({ fields })`.
+
+The result is published as `livequery_result`, the response is built, and then the rest of the
+chain runs — so `realtime()` and any other trailing middleware see the result and can add
+headers. A failing query throws a normalized error, so nothing downstream publishes a change
+that never happened.
+
 ## Core datasource integration
 
 ```ts

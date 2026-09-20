@@ -1,4 +1,5 @@
 import type { Env, MiddlewareHandler } from 'hono'
+import { LIVEQUERY_VARS } from '@livequery/core'
 import type { LivequeryRealtimeSubscriber } from './realtime.js'
 import { createLivequeryRequest } from './request.js'
 
@@ -10,12 +11,12 @@ export type LivequeryMiddlewareOptions<E extends Env = any> = {
     routePath?: string
 }
 
-export function livequery<E extends Env = any>(options: LivequeryMiddlewareOptions<E> = {}): MiddlewareHandler<E> {
+export function livequery<E extends Env = any>(options: LivequeryMiddlewareOptions<E> = {}): MiddlewareHandler<E, any> {
     const realtime = options.realtime ?? options.websocketGateway
     return async (c, next) => {
         const requestOptions = options.routePath ? { routePath: options.routePath } : {}
         const livequeryRequest = await createLivequeryRequest(c, requestOptions)
-        c.set('livequery' as never, livequeryRequest as never)
+        c.set(LIVEQUERY_VARS.request as never, livequeryRequest as never)
 
         await next()
 

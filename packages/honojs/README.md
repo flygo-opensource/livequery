@@ -23,6 +23,65 @@ Workers. For UDP discovery import `UdpDiscovery` from `@livequery/core/udp`.
 
 ---
 
+## Middleware chain
+
+The shortest way to serve a Livequery resource: validate, parse, run the datasource, then
+subscribe or publish. Each step is an ordinary Hono middleware, so your own middlewares slot in
+anywhere.
+
+```ts
+import { Hono } from 'hono'
+import { errorHandler, livequery, realtime, validator } from '@livequery/honojs'
+import { d1 } from '@livequery/d1'
+import { z } from 'zod'
+
+const Task = z.strictObject({
+    title: z.string().min(1),
+    status: z.enum(['todo', 'done']).default('todo'),
+})
+
+const app = new Hono<{ Bindings: Env }>()
+app.onError(errorHandler())
+
+app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime())
+app.post('/livequery/tasks', validator(Task), livequery(), d1(), realtime())
+app.get('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime())
+app.patch('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime())
+app.delete('/livequery/tasks/:id', livequery(), d1(), realtime())
+```
+
+| Middleware | Reads | Writes to the context | Answers? |
+| --- | --- | --- | --- |
+| `validator(Schema)` | raw body | the schema (the route's column allowlist) and the validated body | only on invalid input (400) |
+| `livequery()` | the request and the validated body | `livequery`: ref, keys, document_id, query, body | no |
+| `d1()` (from `@livequery/d1`) | `livequery`, the schema, `env` | `livequery_result` | builds the response, then runs the rest of the chain |
+| `realtime(target?)` | `livequery`, `livequery_result` | — | no; adds headers or calls the gateway |
+
+Notes on the order:
+
+- `validator` runs **before** `livequery`, which then parses the validated body, so schema
+  defaults and transforms survive. `PATCH` validates against `schema.partial()` when the schema
+  offers it.
+- The schema doubles as the column allowlist: only its fields may be filtered, sorted or written.
+  Without a validator, `d1()` warns once per table and falls back to rejecting malformed column
+  names only.
+- The datasource middleware builds the response **before** calling `next()`, which is why
+  `realtime()` sits at the end and can still set headers.
+- Your own middlewares are plain Hono: put them between `livequery()` and the datasource to
+  shape the request (`c.var.livequery.keys.owner_id = c.var.user.id` becomes a WHERE clause), or
+  before `validator` for auth.
+
+### realtime()
+
+| Argument | Where | What it does |
+| --- | --- | --- |
+| none | a service behind a gateway | Adds `x-livequery-ref` after a read and `x-livequery-change: <type> <ref>` after a write; the gateway registers and publishes |
+| a realtime gateway | Node or Bun, sockets in this process | `listen(...)` after a read, `next(change)` after a write |
+| `{ register, publish }` | Cloudflare Workers | Hands the work to `CloudflareRealtimePublisher`, whose sockets live in a Durable Object |
+
+Reads only subscribe when the client sent `x-lcid`, and pagination requests (`:after`, `:before`,
+`:around`) are skipped: they re-read a ref the client already watches.
+
 ## Quick start: simple service
 
 Use `createLivequery` to register routes. It automatically applies the livequery middleware to every route and tracks paths in a registry for service discovery.

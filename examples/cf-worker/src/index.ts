@@ -1,136 +1,78 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
+import * as z from 'zod/mini'
 import { LIVEQUERY_REALTIME_PATH } from '@livequery/core/workers'
-import { D1Datasource } from '@livequery/d1'
-import { broadcast } from './broadcast.js'
+import { errorHandler, livequery, realtime, validator } from '@livequery/honojs'
+import { d1 } from '@livequery/d1'
 import { createRealtime } from './createRealtime.js'
-import { livequery } from './middleware.js'
 import { requireAuth } from './requireAuth.js'
-import { subscribe } from './subscribe.js'
 import type { AppEnv } from './types.js'
 
 // The Durable Object class must be a named export of the Worker module.
 export { RealtimeGatewayDO } from './RealtimeGatewayDO.js'
 
+// ─── Schema ─────────────────────────────────────────────────────────────────
+//
+// One schema per resource: it validates writes and doubles as the column allowlist that `d1()`
+// enforces on filters, sorts and writes. Nothing outside it can reach SQL.
+
+// strictObject: an unknown body field is a client bug, so reject it instead of dropping it.
+const Task = z.strictObject({
+    title: z.string().check(z.minLength(1)),
+    status: z._default(z.enum(['todo', 'done']), 'todo'),
+    created_at: z.optional(z.int()),
+})
+
 // ─── App ────────────────────────────────────────────────────────────────────
 
 const app = new Hono<AppEnv>()
-const ds = new D1Datasource()
 
-app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] }))
+app.use('*', cors({
+    origin: '*',
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization', 'x-lcid', 'x-lgid'],
+}))
 app.use('/livequery/*', requireAuth())
 
-// ─── Error handler ──────────────────────────────────────────────────────────
-
-function apiError(e: unknown) {
-    const err = (typeof e === 'object' && e !== null ? e : {}) as { status?: number; code?: string; message?: string }
-    const status = typeof err.status === 'number' ? err.status : 500
-    if (status >= 500) {
-        // Database and runtime errors can carry SQL or internals; log them, never return them.
-        console.error(JSON.stringify({ event: 'request_failed', message: String(err.message ?? e) }))
-        return { status, body: { error: { code: 'INTERNAL', message: 'Internal error' } } }
-    }
-    return { status, body: { error: { code: err.code ?? 'BAD_REQUEST', message: err.message ?? 'Bad request' } } }
-}
-
-function fail(c: Context<AppEnv>, e: unknown) {
-    const { status, body } = apiError(e)
-    return c.json(body, status as never)
-}
-
-// ─── WebSocket → Durable Object shard ───────────────────────────────────────
+// ─── Realtime ───────────────────────────────────────────────────────────────
+//
+// Sockets live in sharded Durable Objects. Reads register through the publisher (awaited, so no
+// change slips between the read and the registration); writes publish through waitUntil, which
+// keeps the Worker alive for the fan-out after the response is sent.
 
 app.get(LIVEQUERY_REALTIME_PATH, c => createRealtime(c.env).router.fetch(c.req.raw, c.get('principal')))
 
-// ─── Route factory ──────────────────────────────────────────────────────────
-//
-// Creates all 5 HTTP verbs for a (collection, document) pair backed by one table.
-// A successful GET registers the caller's socket (x-lcid / x-lgid) for that ref;
-// writes publish the change to every realtime shard.
-
-export function createRoutes(
-    hono: Hono<AppEnv>,
-    collectionPath: string,
-    docPath: string,
-    table: string,
-    fields: readonly string[]
-) {
-    const options = { table, fields }
-
-    // Collection ──────────────────────────────────────────────────────────────
-
-    hono.get(collectionPath, livequery(), async c => {
-        try {
-            const req = c.get('livequery')
-            const result = await ds.query(c.env.DB, req, options)
-            // req.ref is the LivequeryRequestParser-normalised ref (e.g. 'tasks'),
-            // which matches what RestTransporter passes to socket.listen().
-            await subscribe(c, req.ref)
-            return c.json(result)
-        } catch (e) {
-            return fail(c, e)
-        }
-    })
-
-    hono.post(collectionPath, livequery(), async c => {
-        try {
-            const req = c.get('livequery')
-            const result = await ds.add(c.env.DB, req, options)
-            // req.ref for a collection POST equals req.collection_ref (e.g. 'tasks').
-            broadcast(c, { ref: req.ref, type: 'added', data: result.item })
-            return c.json(result, 201)
-        } catch (e) {
-            return fail(c, e)
-        }
-    })
-
-    // Document ────────────────────────────────────────────────────────────────
-
-    hono.get(docPath, livequery(), async c => {
-        try {
-            const req = c.get('livequery')
-            const result = await ds.query(c.env.DB, req, options)
-            await subscribe(c, req.ref)
-            return c.json(result)
-        } catch (e) {
-            return fail(c, e)
-        }
-    })
-
-    const write = (type: 'modified' | 'removed') => async (c: Context<AppEnv>) => {
-        try {
-            const req = c.get('livequery')
-            const result = type === 'removed'
-                ? await ds.delete(c.env.DB, req, options)
-                : await ds.update(c.env.DB, req, options)
-            // Broadcast on the COLLECTION ref — the gateway auto-fans-out to
-            // 'collection_ref/id' subscribers via UpdatedData.data.id.
-            broadcast(c, { ref: req.collection_ref ?? req.ref, type, data: result.item })
-            return c.json(result)
-        } catch (e) {
-            return fail(c, e)
-        }
-    }
-
-    hono.put(docPath, livequery(), write('modified'))
-    hono.patch(docPath, livequery(), write('modified'))
-    hono.delete(docPath, livequery(), write('removed'))
+const shards = {
+    register: (subscription: Parameters<ReturnType<typeof createRealtime>['publisher']['register']>[0],
+        c: Context<AppEnv>) => createRealtime(c.env).publisher.register(subscription, c.get('principal')),
+    publish: (update: Parameters<ReturnType<typeof createRealtime>['publisher']['publish']>[0],
+        c: Context<AppEnv>) => {
+        c.executionCtx.waitUntil(createRealtime(c.env).publisher.publish(update).catch(e => {
+            console.error(JSON.stringify({ event: 'realtime_publish_failed', message: String(e) }))
+        }))
+    },
 }
 
-// ─── Register routes ────────────────────────────────────────────────────────
+// ─── Routes ─────────────────────────────────────────────────────────────────
+//
+// validator → livequery → d1 → realtime: validate the input, parse the Livequery request, run the
+// D1 operation, then subscribe or publish. `d1()` reads the table from the collection ref.
 
-const TASK_FIELDS = ['title', 'status', 'created_at']
+app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime(shards))
+app.post('/livequery/tasks', validator(Task), livequery(), d1(), realtime(shards))
+app.get('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
+app.put('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
+app.patch('/livequery/tasks/:id', validator(Task), livequery(), d1(), realtime(shards))
+app.delete('/livequery/tasks/:id', livequery(), d1({ fields: Object.keys(Task.shape) }), realtime(shards))
 
-// All tasks (no status filter)
-createRoutes(app, '/livequery/tasks', '/livequery/tasks/:id', 'tasks', TASK_FIELDS)
+// Tasks filtered by status — the :status route key becomes WHERE status = ?
+app.get('/livequery/status/:status/tasks', validator(Task), livequery(), d1(), realtime(shards))
 
-// Tasks filtered by status — the :status route key maps to WHERE status = ?
-createRoutes(
-    app,
-    '/livequery/status/:status/tasks',
-    '/livequery/status/:status/tasks/:id',
-    'tasks',
-    TASK_FIELDS
-)
+// ─── Errors ─────────────────────────────────────────────────────────────────
+//
+// 4xx keeps its code and message; 5xx is logged and answered generically, so a D1 error never
+// leaks SQL to the client.
+
+app.onError(errorHandler())
 
 export default app

@@ -14,13 +14,24 @@ client ── HTTP ──▶ Worker ── D1Datasource ──▶ D1
    └── WebSocket ──▶ Worker ── router (shard theo principal) ──▶ RealtimeGatewayDO
 ```
 
-- `src/index.ts`: route Hono, allowlist cột `TASK_FIELDS`, xử lý lỗi (lỗi 5xx chỉ
-  ghi log, không trả chi tiết cho client).
+- `src/index.ts`: schema `Task`, chuỗi middleware cho từng route, xử lý lỗi.
 - `src/authenticate.ts`, `src/requireAuth.ts`: xác thực bearer token.
 - `src/createRealtime.ts`: router và publisher, số shard lấy từ `REALTIME_SHARDS`.
-- `src/subscribe.ts`: đăng ký subscription, được `await` trước khi trả response GET.
-- `src/broadcast.ts`: phát change qua `waitUntil` để runtime không hủy giữa chừng.
-- `src/RealtimeGatewayDO.ts`: một shard realtime.
+- `src/RealtimeGatewayDO.ts`: một shard realtime (hibernation + alarm).
+
+Mỗi route là một chuỗi middleware:
+
+```ts
+app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime(shards))
+```
+
+- `validator(Task)` kiểm tra body, và schema đó cũng là danh sách cột được phép lọc, sắp xếp, ghi.
+- `livequery()` phân tích request thành `c.var.livequery`.
+- `d1()` chạy thao tác tương ứng với method, dựng response, rồi chạy tiếp phần còn lại của chuỗi.
+- `realtime(shards)` đăng ký client sau khi đọc, và publish sau khi ghi (qua `waitUntil`).
+
+Schema dùng `zod/mini` cho nhẹ: bundle 239 KB. Bản `zod` đầy đủ tốn thêm khoảng 110 KB sau gzip.
+Thư viện nào theo chuẩn Standard Schema cũng dùng được (zod, valibot, arktype).
 
 ## Cấu hình
 

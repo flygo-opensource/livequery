@@ -5,6 +5,7 @@
   "workspaces": [
     "core",
     "d1",
+    "honojs",
     "nestjs",
     "cf-worker",
     "examples"

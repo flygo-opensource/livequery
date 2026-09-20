@@ -23,3 +23,19 @@ export const WEBSOCKET_PATH = env('REALTIME_UPDATE_SOCKET_PATH') || '/livequery/
 // (and its sockets/file-descriptors) open forever. Invalid / non-positive values fall back to 30s.
 const GATEWAY_TIMEOUT_SECONDS = Number(env('LIVEQUERY_GATEWAY_TIMEOUT'))
 export const LIVEQUERY_GATEWAY_TIMEOUT_MS = (GATEWAY_TIMEOUT_SECONDS > 0 ? GATEWAY_TIMEOUT_SECONDS : 30) * 1000
+
+/**
+ * Hono context variable names shared by the Livequery middlewares. A datasource middleware writes
+ * `livequery_result`; `realtime()` reads it. Using names instead of imports keeps the datasource
+ * packages independent of the Hono adapter.
+ */
+export const LIVEQUERY_VARS = {
+    /** Parsed request, written by `livequery()`. */
+    request: 'livequery',
+    /** Validation schema for the route, written by `validator()`; doubles as the column allowlist. */
+    schema: 'livequery_schema',
+    /** Body after validation, so defaults and transforms survive. */
+    body: 'livequery_body',
+    /** Datasource result, written by the datasource middleware before it calls next(). */
+    result: 'livequery_result',
+} as const
