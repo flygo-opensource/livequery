@@ -20,29 +20,29 @@ Quy chuẩn viết TypeScript: [CODE_STYLE.md](CODE_STYLE.md).
 | Entry | Dùng khi |
 | --- | --- |
 | `@livequery/core` | Chỉ cần contract, parser, protocol. Chạy mọi runtime |
-| `@livequery/core/node` | Server Node: gateway `ws`, discovery HTTP, API gateway |
-| `@livequery/core/bun` | Server Bun: gateway `Bun.serve`, discovery HTTP, API gateway |
-| `@livequery/core/udp` | Discovery UDP trong LAN (cần `@ohayo/udp`) |
+| `@livequery/core/node` | Server Node: realtime gateway trên `ws`, helper http ↔ Fetch |
+| `@livequery/core/bun` | Server Bun: realtime gateway trên `Bun.serve` |
 | `@livequery/core/workers` | Cloudflare Worker và Durable Object |
 
-`ws` và `@ohayo/udp` là optional peer dependency. Worker không import `/node`, `/bun` hay
-`/udp`: các entry đó kéo `ws`, `http` hoặc `dgram` vào bundle.
+`ws` là optional peer dependency, chỉ cần cho `/node`. Worker không import `/node` hay `/bun`.
 
 ## Node.js và Bun
 
-Service tự công bố host, port và route qua discovery; gateway nghe discovery, proxy
-HTTP và nối WebSocket tới realtime gateway của từng service.
+Service là một app Hono; gateway định tuyến tới nó theo tiền tố path và giữ WebSocket của client.
+Cùng một file chạy trên cả hai runtime, vì `serve()` và `realtimeGateway()` đến từ bản build của
+runtime đang chạy.
 
 ```ts
-import { ApiGatewayHandler, HttpDiscovery, WebsocketGateway } from '@livequery/core/node'
-```
+// service
+app.get('/livequery/tasks', validator(Task), livequery(), d1(), realtime())
 
-Trên Bun đổi đường import thành `@livequery/core/bun`; `WebsocketGateway` khi đó là
-`BunWebsocketGateway`.
+// gateway
+app.use('*', gateway({ routing, realtime: await realtimeGateway() }))
+export default serve(app, { port: 8080, realtime })
+```
 
 - [examples/api-gateway](examples/api-gateway/README.md): gateway và service API hoàn chỉnh
   (CRUD + realtime). Cùng một file chạy trên cả Node lẫn Bun, có test e2e cho bốn tổ hợp runtime.
-- [examples/udp-auto-discovery](examples/udp-auto-discovery/README.md): discovery UDP trong LAN.
 
 ## Cloudflare
 

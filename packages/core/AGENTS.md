@@ -35,42 +35,37 @@ That file is the canonical framework- and database-independent definition of:
 
 ## Current Public API
 
-The public entrypoint is `src/index.ts`.
+Entry points, each in `src/`:
 
-It exports:
+| Entry | File | Exports |
+| --- | --- | --- |
+| `@livequery/core` | `index.ts` | `const.ts`, `LivequeryContext.ts`, `LivequeryDatasource.ts`, `LivequeryQuery.ts`, `LivequeryRealtime.ts`, `LivequeryRequestParser.ts`, `LivequeryBaseEntity.ts`, `WebsocketGatewayBase.ts`, `RealtimeBroker.ts`, `gateway/` (prefix routing), `helpers/` |
+| `@livequery/core/node` | `node.ts` | root + `WebsocketGateway.ts` (`ws`) + the http ↔ Fetch helpers |
+| `@livequery/core/bun` | `bun.ts` | root + `BunWebsocketGateway.ts` |
+| `@livequery/core/workers` | `workers.ts` | root + `cloudflare/` (hibernating gateway, router, publisher) + `EdgeWebsocketGateway.ts` |
 
-- `const.ts`
-- `Discovery.ts`
-- `HttpDiscovery.ts`
-- `UdpDiscovery.ts`
-- `WebsocketGateway.ts`
-- `ApiGatewayHandler.ts`
-- `ApiServiceLinker.ts`
-- `LivequeryContext.ts`
-- `LivequeryDatasource.ts`
-- `LivequeryRequestParser.ts`
-- `helpers/hidePrivateFields.ts`
+The root must stay runtime-neutral: `tests/root-entrypoint.test.ts` walks its import graph and
+fails on a Node built-in, `ws`, or a runtime entry.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   Client["Client HTTP/WebSocket"]
-  Gateway["ApiGatewayHandler + WebsocketGateway"]
-  Discovery["HttpDiscovery / UdpDiscovery"]
-  ServiceLinker["ApiServiceLinker"]
-  Service["Service HTTP API"]
+  Gateway["Hono gateway() — prefix routing"]
+  Realtime["WebsocketGateway / BunWebsocketGateway / Durable Object"]
+  Service["Service: validator → livequery → datasource → realtime"]
   Parser["LivequeryRequestParser"]
-  Datasource["LivequeryDatasource / custom handler"]
+  Datasource["LivequeryDatasource (d1, mongodb, postgres)"]
 
-  ServiceLinker --> Discovery
-  Gateway --> Discovery
   Client --> Gateway
+  Client --> Realtime
   Gateway --> Service
   Service --> Parser
   Parser --> Datasource
-  Service --> Gateway
-  Gateway --> Client
+  Service -- "x-livequery-ref / x-livequery-change" --> Gateway
+  Gateway --> Realtime
+  Realtime --> Client
 ```
 
 ## Module Guide
@@ -122,115 +117,11 @@ A datasource must:
 
 This file defines types only. It does not export a runtime class.
 
-### `src/ApiGatewayHandler.ts`
+### `src/gateway/matchService.ts`
 
-HTTP gateway and reverse proxy.
-
-Public methods:
-
-- `register({ node_id, hostname, port, paths })`
-- `deregister(node_id)`
-- `fetch(request: Request): Promise<Response>`
-- `fetch(req, res, extraHeaders?): Promise<void>`
-- `fetchRequest(request)`
-- `close()`
-
-Behavior to preserve:
-
-- Discovery only accepts metadata with `role === 'service'`.
-- Metadata must match `API_GATEWAY_NAMESPACE`.
-- Stale metadata is ignored when its discovery `seq` is older or equal.
-- Newer metadata with the same service definition updates metadata and host only.
-- Newer metadata with a changed service definition removes old routes and joins again.
-- Offline discovery events remove the service from every route.
-- Route matching supports static segments, wildcard `:`, and prefix-param segments such as `post:`.
-- Route hosts are selected by round-robin.
-- Forwarded headers remove `content-length` and `host`.
-- When `ws` exists in options, realtime forwarding headers are set from `x-lcid`, `socket_id`, and `x-lgid`.
-
-Error responses:
-
-- `404 API_NOT_FOUND`
-- `503 API_OFFLINE`
-- `502 SERVICE_API_OFFLINE`
-
-### `src/ApiServiceLinker.ts`
-
-Service-side metadata publisher.
-
-Public methods:
-
-- `start(name, port)`
-- `close()`
-
-Behavior:
-
-- Publishes Ohayo discovery messages whose `data.role` is `service`.
-- Includes configured `paths`.
-- Includes websocket metadata when options include `ws`.
-- When it sees a gateway in the same namespace, it bumps metadata `version`/`seq` and broadcasts again.
-
-### `src/Discovery.ts`
-
-Shared discovery abstraction.
-
-- `DiscoveryMessage<T>` is the Ohayo envelope with `node_id`, `namespace`, `tags`, `version`, `created_at`, `seq`, and app-specific `data`.
-- `Discovery<T>` extends `Observable<DiscoveryEvent<T>>` and exposes `broadcast(message)` plus `close()`.
-- `DiscoveryOfflineData` uses `{ status: 'offline' }` for TTL or deregister events.
-- Discovery implementations filter namespace exactly and tags with contains-all semantics.
-
-### `src/HttpDiscovery.ts`
-
-Ohayo HTTP discovery adapter.
-
-Public API:
-
-- Constructor: `new HttpDiscovery<T>({ namespace, tags, node_id?, key?, port?, gateways?, listen?, heartbeatMs?, ttlMs?, requestTimeoutMs? })`
-- `status$`
-- `port`
-- `broadcast(message)`
-- `close()`
-
-Behavior:
-
-- Gateway-side discovery listens for `POST /register`, `DELETE /register/:node_id`, `GET /health`, and `GET /nodes`.
-- Registry requests use `Authorization: Bearer <OHAYO_DISCOVERY_KEY>`.
-- Service-side discovery uses `OHAYO_API_GATEWAY` when `gateways` is not provided.
-- Heartbeats rebroadcast the last message with bumped `version`, `created_at`, and `seq`.
-- TTL expiry emits an offline discovery event.
-- `close()` sends best-effort deregistration for the last broadcast message.
-- Transport must keep Livequery metadata inside `data`; it may attach transport metadata such as `remote_host` at the envelope level.
-
-### `src/UdpDiscovery.ts`
-
-Compatibility re-export of the shared `@ohayo/udp` implementation. UDP socket,
-packet codec, HMAC, multicast and peer behavior must be changed in `@ohayo/udp`,
-not duplicated in core. Runnable integration belongs in
-`examples/udp-auto-discovery`, not a Livequery UDP wrapper package.
-
-Public API:
-
-- Constructor: `new UdpDiscovery<T>({ namespace, tags, node_id?, key?, port?, peers?, multicastAddress?, packetTtlMs?, broadcastCopies? })`
-- `status$`
-- `broadcast(message, targetIp?)`
-- `close()`
-
-Behavior:
-
-- Implements the shared `Discovery<T>` contract.
-- Packets are msgpack encoded.
-- Packet shape is `{ version, sender_id, timestamp, message, signature }`.
-- `message` is the Ohayo `DiscoveryMessage<T>` envelope; app metadata must stay inside `message.data`.
-- Packets are signed with HMAC SHA-256.
-- Packets older than 30 seconds are rejected.
-- Packets with invalid signatures are rejected.
-- Inbound and outbound messages are filtered by exact `namespace` and contains-all `tags`.
-- When `node_id` is configured, outbound messages must use it and inbound messages from the same id are ignored.
-- Duplicate valid packets are emitted. Consumers handle dedupe.
-- `seq` and `version` ordering is not handled in UDP transport. Consumers handle staleness.
-- `close()` is idempotent.
-
-UDP tests should use random ports to avoid conflicts.
+Prefix routing for a gateway: walks the `ServiceRouting` tree segment by segment, keeps the
+deepest `$service`, and matches any segment against a `:name` key. A service owns everything under
+its prefix, so adding a route inside a service needs no gateway change.
 
 ### `src/WebsocketGateway.ts`
 
@@ -288,7 +179,7 @@ Behavior:
 - When changing public classes or functions, update tests, `README.md`, and this file.
 - Tests use `bun:test`.
 - Test type-checking uses `tests/tsconfig.json`.
-- Close `UdpDiscovery`, `ApiGatewayHandler`, `ApiServiceLinker`, and `WebsocketGateway` instances in tests to avoid socket leaks.
+- Close `WebsocketGateway` instances in tests to avoid socket leaks.
 - UDP tests should use random ports.
 - HTTP server tests should close servers and active connections.
 

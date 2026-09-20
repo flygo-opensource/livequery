@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { dirname, resolve } from 'path'
 
-const FORBIDDEN = /^(node:|ws$|http2?$|https$|crypto$|dgram$|net$|os$|fs$|@ohayo\/udp$|@livequery\/core\/(node|bun|udp)$)/
+const FORBIDDEN = /^(node:|ws$|http2?$|https$|crypto$|dgram$|net$|os$|fs$|@livequery\/core\/(node|bun)$)/
 
 // Follows relative imports from an entry and collects every bare specifier it reaches.
 function collectSpecifiers(entry: string): Set<string> {

@@ -9,7 +9,6 @@
     "resolveJsonModule": true
   },
   "include": [
-    "udp-auto-discovery/**/*.ts",
     "api-gateway/**/*.ts"
   ],
   "exclude": [

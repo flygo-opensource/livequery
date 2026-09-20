@@ -4,7 +4,7 @@ Hono framework adapter for the `@livequery` ecosystem. Protocol contracts come
 from `@livequery/core`; Bun discovery, gateway, and realtime runtime code comes
 from `@livequery/core/bun` via the `/bun` and `/node` entries; the root entry is runtime-neutral. Provides middleware,
 route registration helpers, a route registry, response utilities, an API gateway,
-and a service linker for building livequery-compatible REST APIs.
+plus a prefix-routing gateway, for building Livequery REST APIs.
 
 ---
 
@@ -17,8 +17,8 @@ and a service linker for building livequery-compatible REST APIs.
 | `src/middleware.ts` | Hono middleware (`livequery()`) that runs the parser and optionally registers realtime subscriptions |
 | `src/route-registry.ts` | `LivequeryRouter` wrapper, `LivequeryRouteRegistry`, `createLivequery()`, `collectServicePaths()` |
 | `src/response.ts` | `livequeryJson()` and `mapLivequeryResponse()` — strip private fields before sending |
-| `src/api-gateway.ts` | `HonoApiGateway` (thin subclass) and `HonoApiGatewayLinker` (opaque wrapper with Hono handler) |
-| `src/api-service-linker.ts` | `HonoApiServiceLinker` — wraps Bun runtime `ApiServiceLinker`, accepts a registry or plain array |
+| `src/gateway.ts` | `gateway()` — prefix routing to services, and realtime on their behalf |
+| `src/validator.ts`, `src/realtimeMiddleware.ts`, `src/errorHandler.ts` | The rest of the middleware chain |
 | `src/datasource.ts` | `createDatasourceMapper()` — initialises a typed datasource and returns a `useDatasource()` handler factory |
 | `src/index.ts` | Re-exports all of the above plus protocol symbols from `@livequery/core` and runtime symbols live in `src/bun.ts` / `src/node.ts` (root stays Worker-safe) |
 
@@ -123,7 +123,7 @@ function collectServicePaths(app: Hono): LivequeryRoute[]
 
 Reads `app.routes` directly from a plain Hono app (without `LivequeryRouter`).
 Returns the same normalised `{ method, path }` shape. Use when routes are
-registered with `app.get()` directly and you still need the path list for a linker.
+registered with `app.get()` directly and you still need the path list.
 
 ### `livequeryJson(c, response, status?)`
 
@@ -146,63 +146,6 @@ element in `response.items`. Items with a `toJSON()` method are serialised first
 - `_id` → renamed to `id` (only if `id` is not already set).
 - Any other `_`-prefixed key → removed entirely.
 - All other keys → preserved.
-
-### `HonoApiGateway`
-
-```ts
-class HonoApiGateway extends ApiGatewayHandler {
-    constructor(options?: { websocketGateway?: WebsocketGatewayBase; discovery?: Discovery<ServiceApiMetadata>; node_id?: string })
-}
-```
-
-Thin subclass of Bun runtime `ApiGatewayHandler`. Exposes all runtime methods including
-`.register()`, `.deregister()`, `.fetch(request)`, and `.close()`. Use when
-you need direct control or subclassing.
-
-Constructor maps `websocketGateway` → core's `ws` option internally.
-
-### `HonoApiGatewayLinker`
-
-```ts
-class HonoApiGatewayLinker {
-    constructor(options?: { websocketGateway?: WebsocketGatewayBase; discovery?: Discovery<ServiceApiMetadata>; node_id?: string })
-    get gateway(): ApiGatewayHandler
-    handler(): Handler           // Hono Handler: async c => this.fetch(c)
-    fetch(c: Context): Promise<Response>
-    close(): void
-}
-```
-
-Opaque wrapper designed for drop-in use as a Hono catch-all handler. Owns an
-`ApiGatewayHandler` internally; exposes it via `.gateway` for introspection.
-
-**`HonoApiGateway` vs `HonoApiGatewayLinker`:**
-
-| | `HonoApiGateway` | `HonoApiGatewayLinker` |
-|---|---|---|
-| Relationship to Bun runtime | Subclass | Composition |
-| Direct runtime API access | Yes | Via `.gateway` |
-| Hono handler | Call `.fetch(request)` directly | `.handler()` returns a Hono `Handler` |
-| Intended use | Tests, custom setups | `app.all('*', linker.handler())` |
-
-### `HonoApiServiceLinker`
-
-```ts
-class HonoApiServiceLinker {
-    constructor(options: {
-        routes: LivequeryRoute[] | LivequeryRouteRegistry
-        websocketGateway?: WebsocketGatewayBase
-        discovery?: Discovery<ServiceApiMetadata>   // HttpDiscovery by default, or UdpDiscovery from @livequery/core/udp
-        node_id?: string
-    })
-    start(name: string, port: number): void
-    close(): void
-}
-```
-
-Exported from `/bun` and `/node` only. Wraps core's `ApiServiceLinker`. Accepts a
-`LivequeryRouteRegistry` (reads `.routes`) or a plain array. Publishes service metadata through
-the given discovery transport so gateways can find it.
 
 ### `createDatasourceMapper(options)`
 
@@ -269,7 +212,6 @@ type LivequeryRequest<I> = {
 - `livequeryJson` only strips private fields on `item` and `items`; other top-level
   keys pass through unchanged.
 
-- `HonoApiGatewayLinker.handler()` returns a new closure each call — call once
   and store the result.
 
 - `createDatasourceMapper` must be `await`ed before routes are exercised.

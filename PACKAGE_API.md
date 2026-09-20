@@ -7,14 +7,11 @@ Node built-in, `ws` hay UDP.
 | Entry | Chạy trên | Nội dung |
 | --- | --- | --- |
 | `@livequery/core` | Mọi runtime | Contract, parser, realtime protocol engine |
-| `@livequery/core/node` | Node.js | Root + gateway `ws`, discovery HTTP, API gateway |
-| `@livequery/core/bun` | Bun | Root + gateway `Bun.serve`, discovery HTTP, API gateway |
-| `@livequery/core/udp` | Node.js, Bun | `UdpDiscovery` (cần `@ohayo/udp`) |
+| `@livequery/core/node` | Node.js | Root + `WebsocketGateway` (`ws`) và helper http ↔ Fetch |
+| `@livequery/core/bun` | Bun | Root + `BunWebsocketGateway` |
 | `@livequery/core/workers` | Cloudflare Workers | Root + gateway Durable Object, router, publisher |
 
-`ws` và `@ohayo/udp` là optional peer dependency: cài `ws` khi dùng
-`WebsocketGateway` của `/node`, cài `@ohayo/udp` khi dùng `/udp`. Import `/node` hay `/bun` không
-bao giờ nạp `@ohayo/udp`.
+`ws` là optional peer dependency, chỉ cần khi dùng `WebsocketGateway` của `/node`.
 
 Package ngoài core: datasource (`@livequery/d1`, `@livequery/mongodb`,
 `@livequery/postgres`) và framework adapter (`@livequery/nestjs`,
@@ -72,29 +69,6 @@ Adapter Node kế thừa `WebsocketGatewayBase`, dùng package `ws` và gắn v�
 `http.Server`. `attach()` hỗ trợ bind/rebind; `close()` đóng client và tháo
 WebSocket server.
 
-### `ApiGatewayHandler`
-
-API gateway cho Node/Bun. Nghe discovery để dựng bảng route, proxy HTTP tới
-`host:port` của service với timeout, round-robin giữa bản sao, cô lập node lỗi và
-mở WebSocket gateway-to-gateway tới realtime gateway của từng service.
-
-### `ApiServiceLinker`
-
-Phía service: phát metadata (host, port, route, thông tin WebSocket gateway) qua
-discovery và phát lại khi thấy gateway mới.
-
-### `HttpDiscovery<T>`
-
-Transport discovery qua HTTP, hai chế độ: gateway `listen: true` mở registry, service
-`listen: false` gửi register/heartbeat tới `gateways`.
-
-## `@livequery/core/udp`
-
-### `UdpDiscovery`
-
-Re-export từ `@ohayo/udp`: discovery multicast có ký trong LAN. Tách entry riêng để `/node` và
-`/bun` không phụ thuộc `@ohayo/udp`.
-
 ## `@livequery/core/bun`
 
 ### `BunWebsocketGateway`
@@ -104,7 +78,8 @@ mở `Bun.serve` riêng; `attachBunUpgrade()` và `getBunWebsocketHandlers()` d�
 chung server có sẵn. `path` quy định endpoint được upgrade. Cũng được export với
 tên `WebsocketGateway` để đổi từ `/node` sang `/bun` chỉ cần đổi đường import.
 
-Entry này còn export `ApiGatewayHandler`, `ApiServiceLinker`, `HttpDiscovery` như `/node`.
+Entry này cũng export `WebsocketGateway` (chính là `BunWebsocketGateway`) và helper http ↔ Fetch,
+nên đổi giữa `/node` và `/bun` chỉ là đổi đường import.
 
 ## `@livequery/core/workers`
 

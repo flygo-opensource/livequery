@@ -42,18 +42,11 @@
         "types": "./build/src/workers.d.ts",
         "default": "./build/src/workers.js"
       }
-    },
-    "./udp": {
-      "import": {
-        "types": "./build/src/udp.d.ts",
-        "default": "./build/src/udp.js"
-      }
     }
   },
   "type": "module",
   "devDependencies": {
     "@msgpack/msgpack": "^3.0.0",
-    "@ohayo/udp": "^3.0.0",
     "@types/bun": "latest",
     "@types/node": "x",
     "@types/ws": "^8",
@@ -66,13 +59,9 @@
     "rxjs": "x"
   },
   "peerDependencies": {
-    "@ohayo/udp": "^3.0.0",
     "ws": "^8.18.0"
   },
   "peerDependenciesMeta": {
-    "@ohayo/udp": {
-      "optional": true
-    },
     "ws": {
       "optional": true
     }

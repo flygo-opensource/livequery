@@ -29,7 +29,6 @@
   "devDependencies": {
     "@livequery/core": "^3.0.0",
     "@nestjs/platform-express": "^11.1.19",
-    "@ohayo/udp": "^3.0.0",
     "@types/express": "x",
     "@types/node": "x",
     "@types/ws": "^8.5.10",
@@ -46,8 +45,7 @@
     "@nestjs/platform-ws": "^11.0.10",
     "@nestjs/websockets": "^10.3.7",
     "express": "^4.21.2",
-    "ws": "^8.18.0",
-    "@ohayo/udp": "^3.0.0"
+    "ws": "^8.18.0"
   },
   "dependencies": {
     "msgpackr": "^1.11.9"

@@ -4,7 +4,7 @@ import * as http from 'http'
 import type { AddressInfo } from 'net'
 import type { Subscription } from 'rxjs'
 
-import { Hono } from '../../honojs/node_modules/hono/dist/index.js'
+import { Hono } from '../../node_modules/hono/dist/index.js'
 import express from '../../nestjs/node_modules/express/index.js'
 import { Controller, Delete, Get, Module, Patch, Post, Req } from '../../nestjs/node_modules/@nestjs/common/index.js'
 import { NestFactory } from '../../nestjs/node_modules/@nestjs/core/index.js'

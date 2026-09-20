@@ -3,7 +3,7 @@ import { readFileSync } from 'fs'
 import { dirname, resolve } from 'path'
 import * as root from '../src/index.js'
 
-const FORBIDDEN = /^(node:|ws$|http2?$|https$|crypto$|dgram$|net$|os$|fs$|@ohayo\/udp$)/
+const FORBIDDEN = /^(node:|ws$|http2?$|https$|crypto$|dgram$|net$|os$|fs$)/
 
 // Follows relative imports from an entry file and collects every bare specifier it reaches.
 function collectSpecifiers(entry: string): Map<string, string> {
@@ -35,15 +35,12 @@ describe('root entrypoint', () => {
         expect(typeof root.hidePrivateFields).toBe('function')
         expect(root.WEBSOCKET_PATH).toBe('/livequery/realtime-updates')
         expect('WebsocketGateway' in root).toBe(false)
-        expect('UdpDiscovery' in root).toBe(false)
-        expect('ApiGatewayHandler' in root).toBe(false)
+        expect('BunWebsocketGateway' in root).toBe(false)
     })
 
-    test('the /node and /bun entries never load the optional @ohayo/udp peer', () => {
-        for (const entry of ['node.ts', 'bun.ts']) {
-            const specifiers = collectSpecifiers(resolve(import.meta.dir, `../src/${entry}`))
-            expect(specifiers.has('@ohayo/udp')).toBe(false)
-        }
+    test('the /bun entry never loads ws', () => {
+        const specifiers = collectSpecifiers(resolve(import.meta.dir, '../src/bun.ts'))
+        expect(specifiers.has('ws')).toBe(false)
     })
 
     test('the /workers entry is runtime-neutral too', () => {

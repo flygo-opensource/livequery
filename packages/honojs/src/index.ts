@@ -1,9 +1,10 @@
-// Default entry — runtime-neutral: Hono middleware, request/response helpers, route registry and
-// datasource mapper. Safe on Cloudflare Workers; loads no Node built-in, `ws` or UDP transport.
+// Default entry — runtime-neutral: the Livequery middlewares (validator, livequery, realtime,
+// gateway), request/response helpers, route registry and datasource mapper. Safe on Cloudflare
+// Workers; loads no Node built-in and no `ws`.
 //
-// Server-side gateway and service linker:
-//   import { HonoApiGateway, HonoApiServiceLinker, WebsocketGateway } from '@livequery/honojs/bun'
-//   import { HonoApiGateway, HonoApiServiceLinker, WebsocketGateway } from '@livequery/honojs/node'
+// The realtime gateway that holds client sockets is runtime-specific:
+//   import { WebsocketGateway } from '@livequery/honojs/node'   // ws
+//   import { WebsocketGateway } from '@livequery/honojs/bun'    // Bun.serve
 
 export * from './types.js'
 export * from './realtime.js'

@@ -1,12 +1,9 @@
-export { ApiServiceLinker } from './ApiServiceLinker.js'
 export { listPaths } from './helpers/listPaths.js'
 export { WebsocketGateway, type RealtimeSubscription } from '@livequery/core/node'
-export { UdpDiscovery, type UdpDiscoveryOptions, type UdpDiscoveryPacket, type UdpDiscoveryStatus } from '@livequery/core/udp'
 export { LivequeryRequest } from './LivequeryRequest.js'
 export { LivequeryInterceptor, UseLivequeryInterceptor } from './LivequeryInterceptor.js'
 export * from './helpers/createDatasourceMapper.js'
 export * from './LivequeryDatasourceInterceptors.js'
-export { ApiGateway, ApiGateway as ApiGatewayLinker } from './ApiGatewayLinker.js'
 
 // Shared type surface, re-exported from @livequery/core (previously from @livequery/types).
 // `LivequeryRequest` is intentionally omitted — the nestjs-specific version is exported

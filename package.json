@@ -13,8 +13,5 @@
   "scripts": {
     "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck && bun run --cwd cf-worker type-check",
     "test": "bun scripts/test-packages.ts && bun run --cwd examples test"
-  },
-  "overrides": {
-    "@ohayo/udp": "file:../ohayo/udp"
   }
 }

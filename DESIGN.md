@@ -1,5 +1,10 @@
 # Livequery Deployment Architecture
 
+> **Trạng thái 3.0.** Discovery lúc chạy (UDP, HTTP registry) và `ApiGatewayHandler` đã bị gỡ khỏi
+> `@livequery/core`. Gateway hiện là một app Hono định tuyến theo tiền tố path, khai báo trong một
+> file routing; service không tự công bố nữa. Các mục bàn về discovery bên dưới giữ lại làm lý do
+> thiết kế và bối cảnh lịch sử, không còn mô tả code hiện tại.
+
 ## 1. Mục tiêu
 
 Thiết kế Livequery phải cho phép một service giữ nguyên mã nguồn và container image
@@ -553,10 +558,8 @@ chia theo entry point để mỗi runtime chỉ kéo đúng phần của nó:
 ```text
 @livequery/core            Contract, parser, realtime protocol engine, discovery
                            contract. Không import Node built-in, ws hay UDP.
-@livequery/core/node       + WebsocketGateway (ws), HttpDiscovery,
-                           ApiGatewayHandler, ApiServiceLinker.
-@livequery/core/bun        + BunWebsocketGateway và các thành phần gateway/service.
-@livequery/core/udp        + UdpDiscovery (re-export từ @ohayo/udp).
+@livequery/core/node       + WebsocketGateway (ws) và helper http ↔ Fetch.
+@livequery/core/bun        + BunWebsocketGateway.
 @livequery/core/workers    + HibernatableWebsocketGateway, CloudflareRealtimeRouter,
                            CloudflareRealtimePublisher.
 
@@ -571,9 +574,9 @@ hai lần, nên các package đó đã được gom lại vào `core`. Ranh gi�
 giữ bằng entry point; `core/tests/root-entrypoint.test.ts` kiểm tra đồ thị import
 của root và `/workers` không chạm module Node.
 
-UDP transport chỉ có một implementation trong `@ohayo/udp`. `@livequery/core/udp`
-re-export `UdpDiscovery`; tách entry riêng để `/node` và `/bun` không bắt buộc cài
-`@ohayo/udp` (optional peer dependency). Cách tích hợp và E2E nằm trong `examples/udp-auto-discovery`.
+Định tuyến của gateway là một tree tiền tố (`matchService`): service sở hữu mọi route dưới tiền tố
+của nó, nên thêm route con không cần deploy lại gateway. Service báo việc cần làm cho realtime qua
+hai response header, nên nó không phải biết socket nằm ở đâu.
 
 Trên Cloudflare không có discovery lúc chạy: gateway gọi service qua Service
 Binding khai báo lúc deploy, realtime nằm trong Durable Object (xem `cf-worker`).
