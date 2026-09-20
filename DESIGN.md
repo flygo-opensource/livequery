@@ -1,610 +1,154 @@
-# Livequery Deployment Architecture
+# Thiết kế Livequery
 
-> **Trạng thái 3.0.** Discovery lúc chạy (UDP, HTTP registry) và `ApiGatewayHandler` đã bị gỡ khỏi
-> `@livequery/core`. Gateway hiện là một app Hono định tuyến theo tiền tố path, khai báo trong một
-> file routing; service không tự công bố nữa. Các mục bàn về discovery bên dưới giữ lại làm lý do
-> thiết kế và bối cảnh lịch sử, không còn mô tả code hiện tại.
+Tài liệu này mô tả kiến trúc hiện tại: một API vừa trả REST vừa đẩy realtime, chạy được trên
+Node.js, Bun và Cloudflare Workers với cùng một cách viết.
 
 ## 1. Mục tiêu
 
-Thiết kế Livequery phải cho phép một service giữ nguyên mã nguồn và container image
-khi hệ thống thay đổi lớp API Gateway:
+1. **Một giao thức cho cả đọc lẫn realtime.** Client gọi `GET /livequery/tasks` như REST thường,
+   và nhận thay đổi của đúng tập dữ liệu đó qua WebSocket, không phải tự khai báo subscription.
+2. **Service không phụ thuộc hạ tầng.** Cùng một file service chạy trên Node, Bun hay Worker;
+   chỉ datasource là khác.
+3. **Mọi giới hạn đều lộ ra ở chỗ khai báo.** Cột nào được lọc, ai được đọc, publish đi đâu — tất
+   cả nằm trên dòng khai báo route, không nằm rải trong thân hàm.
+4. **Không có bước ẩn.** Không sinh mã, không quét thư mục, không decorator ma thuật. Một request
+   đi qua một chuỗi middleware đọc được từ trên xuống.
 
-- Livequery API Gateway của repository.
-- Nginx.
-- Kong.
-- Kubernetes Gateway/Ingress.
-- Cloudflare Workers.
-
-Service chỉ công bố một `ServiceManifest` trung lập. Cách phát hiện service và cách
-cấu hình gateway là trách nhiệm của publisher, registry và gateway controller.
-
-Thiết kế cũng phải hỗ trợ hai nhu cầu khác nhau:
-
-- Local hoặc pure Linux: service tự xuất hiện và biến mất bằng discovery runtime.
-- Production có control plane: cấu hình gateway được reconcile từ desired state,
-  có kiểm tra conflict, audit và rollback.
-
-## 2. Nguyên tắc kiến trúc
-
-1. Service không biết đang chạy sau Nginx, Kong hay Livequery Gateway.
-2. Manifest là source of truth chung; cấu hình theo vendor là output được sinh ra.
-3. Service discovery và load balancing là hai trách nhiệm khác nhau.
-4. Trên Kubernetes, gateway trỏ đến logical `Service`, không đăng ký từng Pod.
-5. HTTP API Gateway và WebSocket Gateway dùng chung protocol nhưng không chia sẻ
-   lifecycle hoặc state bắt buộc.
-6. Auto-discovery được ưu tiên cho development và bare-metal; production phải có
-   validation, ownership, authentication và desired-state reconciliation.
-7. Các header nội bộ phải do gateway ghi đè, không được tin dữ liệu từ client.
-
-## 3. Mô hình thành phần
+## 2. Hình dạng một request
 
 ```text
-Application service
-        |
-        | ServiceManifest
-        v
-ApiServiceLinker
-        |
-        +-- FileServicePublisher -----> Manifest Agent
-        |
-        +-- HttpServicePublisher -----> Service Registry
-        |
-        `-- NoopServicePublisher ------> CI/CD-only registration
-
-Manifest consumers
-        |
-        +-- LivequeryGatewayController -> ApiGatewayHandler
-        +-- KongGatewayController ------> Kong desired state
-        +-- NginxGatewayController -----> nginx.conf + safe reload
-        +-- KubernetesController -------> HTTPRoute/Ingress
-        `-- CloudflareController --------> Worker bindings/config/routes
+validator(Schema) ─▶ livequery() ─▶ datasource ─▶ realtime()
+   kiểm tra body        phân tích       chạy truy vấn     subscribe sau khi đọc
+   công bố allowlist    thành ref,      dựng response     publish sau khi ghi
+                        keys, query     rồi next()
 ```
 
-`ApiServiceLinker` là API cấp cao được service sử dụng. Publisher là transport có
-thể thay thế. Gateway controller là consumer và không chạy bên trong application
-service.
+Điểm quan trọng nhất của thứ tự này: **datasource dựng response trước rồi mới gọi `next()`**.
+Hono bỏ qua giá trị trả về của handler một khi response đã tồn tại, và trả 404 khi chuỗi kết thúc
+bằng một `next()` không ai xử lý. Dựng trước tránh cả hai, và nhờ đó `realtime()` đứng cuối vẫn
+gắn được header lên response.
 
-## 4. ServiceManifest
+Schema đóng hai vai: kiểm tra dữ liệu ghi, và **là danh sách cột được phép** lọc, sắp xếp, ghi.
+Không có hai nguồn sự thật cho cùng một câu hỏi "client được chạm vào cột nào".
 
-Manifest không chứa object phụ thuộc Bun, Hono, NestJS, Kong hoặc Nginx.
+## 3. Realtime
 
-```ts
-export type ServiceManifest = {
-  schemaVersion: 1
-  serviceId: string
-  instanceId: string
-  version: string
-  protocolVersion: string
-  endpoint: {
-    kind?: 'network'
-    protocol: 'http' | 'https'
-    host: string
-    port: number
-  } | {
-    kind: 'binding'
-    binding: string
-  }
-  routes: Array<{
-    id: string
-    method: string
-    path: string
-    targetPath?: string
-    auth: 'public' | 'required' | 'internal'
-    timeoutMs?: number
-  }>
-  health?: {
-    livenessPath: string
-    readinessPath: string
-  }
-  realtime?: {
-    enabled: boolean
-    publisher?: string
-  }
-  status: 'starting' | 'ready' | 'draining' | 'offline'
-  seq: number
-  updatedAt: number
-}
+Client mở đúng một WebSocket tới gateway. Việc đăng ký xảy ra **phía server, sau một lần đọc đã
+được phân quyền** — client không tự gửi frame `subscribe` được (mặc định gateway bỏ qua), nên
+không thể nghe một ref mà nó chưa từng đọc nổi.
+
+```text
+client ─ GET /livequery/tasks ─▶ gateway ─▶ service
+                                          ◀─ 200 + x-livequery-ref: tasks
+        gateway: subscribe(client, ref) rồi xóa header
+
+client ─ POST /livequery/tasks ─▶ gateway ─▶ service
+                                           ◀─ 201 {item} + x-livequery-change: added tasks
+        gateway: publish(change) ──▶ mọi client đang nghe ref đó
 ```
 
-Ví dụ:
+Service chỉ **báo việc cần làm qua response header**; nó không giữ socket và không biết socket nằm
+ở đâu. Nhờ vậy cùng một service chạy sau một gateway trong process (Node, Bun) hay sau một gateway
+Worker với Durable Object.
+
+Khi service có change feed thật (change stream của Mongo, `LISTEN/NOTIFY` của Postgres), nó bỏ qua
+cơ chế header và đẩy thẳng vào realtime gateway trong process. Khi không có (D1), realtime đến từ
+đường ghi — và **chỉ đường ghi qua API mới sinh realtime**.
+
+## 4. Gateway
+
+Gateway định tuyến **theo tiền tố path**, khai báo trong một file routing:
 
 ```json
 {
-  "schemaVersion": 1,
-  "serviceId": "users",
-  "instanceId": "users-7d9d8f-abc",
-  "version": "1.4.2",
-  "protocolVersion": "1",
-  "endpoint": {
-    "protocol": "http",
-    "host": "users",
-    "port": 3000
-  },
-  "routes": [
-    {
-      "id": "users-list",
-      "method": "GET",
-      "path": "/livequery/users",
-      "auth": "required"
-    },
-    {
-      "id": "users-detail",
-      "method": "GET",
-      "path": "/livequery/users/:id",
-      "auth": "required"
-    }
-  ],
-  "health": {
-    "livenessPath": "/health",
-    "readinessPath": "/ready"
-  },
-  "realtime": {
-    "enabled": true,
-    "publisher": "nats"
-  },
-  "status": "ready",
-  "seq": 15,
-  "updatedAt": 1787880000000
+  "services": { "tasks": { "binding": "TASKS_SERVICE", "url": "http://tasks:8081" } },
+  "routes": { "livequery": { "tasks": { "$service": "tasks" },
+                             "customers": { ":customer_id": { "orders": { "$service": "orders" } } } } }
 }
 ```
 
-### 4.1 Route ownership
+- Key có tiền tố `$` là metadata, còn lại là một đoạn path; `:name` khớp mọi đoạn.
+- `$service` và `$auth` kế thừa xuống dưới, và `$service` **sâu nhất thắng**.
+- Một service sở hữu mọi route dưới tiền tố của nó, nên **thêm route con chỉ cần deploy service**.
+  Chỉ khi thêm service mới thì gateway mới phải deploy lại, vì cần thêm binding.
+- `target` mang cả `binding` (Cloudflare Service Binding) lẫn `url`; runtime nào dùng thứ nó có.
 
-Registry phải xác định ownership bằng ít nhất:
+Đổi lại, gateway không biết route cụ thể, nên 404 và 405 do service trả, và việc suy ra `ref` cho
+realtime cũng do service làm (qua header ở mục 3).
 
-```text
-serviceId + route.id + method + normalized path + protocolVersion
-```
+## 5. Ranh giới runtime
 
-Hai instance của cùng service và cùng definition được coi là replica. Hai service
-khác nhau khai báo cùng `method + path` phải bị từ chối, không được tự động đưa vào
-cùng một round-robin pool.
-
-### 4.2 Instance và logical service
-
-- `serviceId` xác định service logic và quyền sở hữu route.
-- `instanceId` xác định một process, VM, container hoặc Pod.
-- Bare-metal có thể cân bằng trực tiếp giữa các `instanceId`.
-- Kubernetes nên collapse các instance thành một endpoint logic như
-  `http://users:3000`; Kubernetes Service cân bằng Pod.
-
-## 5. ApiServiceLinker và publisher
-
-API service-facing giữ ổn định:
-
-```ts
-const linker = new ApiServiceLinker({
-  manifest,
-  publisher,
-})
-
-await linker.start()
-await linker.ready()
-
-// Khi shutdown:
-await linker.draining()
-await server.drain()
-await linker.close()
-```
-
-### 5.1 UDP development example
-
-Dùng trực tiếp `@ohayo/udp` cho local, pure Linux hoặc private bare-metal
-network. Đây là example integration, không phải một package publisher trong
-Livequery:
+Một package, chia theo entry point. Runtime tự chọn phần của mình, code ứng dụng không kiểm tra
+runtime:
 
 ```text
-ServiceApiMetadata --signed UDP--> ApiGatewayHandler
-```
-
-Yêu cầu:
-
-- Discovery key bắt buộc trong production; không có giá trị mặc định.
-- HMAC, timestamp, TTL, `instanceId` và monotonic `seq`.
-- Giới hạn kích thước packet và tốc độ nhận.
-- Xác minh chữ ký trước khi relay packet.
-- Firewall chỉ cho phép private subnet cần thiết.
-- Không giả định UDP multicast hoạt động trên Kubernetes hoặc cloud network.
-
-Ví dụ E2E trong `examples/udp-auto-discovery` dùng compatibility API của
-`@livequery/core`, chạy gateway/service ở process riêng và kiểm tra cả hai thứ tự
-khởi động. Pipeline `ServiceManifest` chuẩn vẫn dùng HTTP, file hoặc CI/CD.
-
-### 5.2 FileServicePublisher
-
-Dùng khi service và manifest agent nhìn thấy cùng filesystem:
-
-```text
-Service -> generic manifest file -> Agent -> Kong/Nginx controller
-```
-
-Mỗi instance ghi một file riêng:
-
-```text
-/var/run/livequery/services/
-  users-pod-a.json
-  users-pod-b.json
-  orders-pod-a.json
-```
-
-File phải được ghi atomic:
-
-```text
-write users-pod-a.json.tmp -> fsync -> rename users-pod-a.json
-```
-
-Agent dùng `updatedAt` và TTL để phát hiện file stale. Trên Docker có thể dùng
-shared volume. Trên Kubernetes chỉ dùng mô hình file khi agent là sidecar hoặc có
-volume được chia sẻ rõ ràng; không coi filesystem của các Pod là filesystem chung.
-
-File luôn chứa manifest trung lập, không chứa `kong.yaml` hoặc `nginx.conf`.
-
-### 5.3 HttpServicePublisher
-
-Dùng khi service và registry không cùng host. Endpoint đăng ký phải authenticated,
-idempotent và giới hạn quyền theo `serviceId`. Registry lưu desired/current state và
-phát event cho controller.
-
-### 5.4 NoopServicePublisher
-
-Dùng khi manifest đã được CI/CD thu thập và triển khai. Service vẫn có thể dùng
-cùng code nhưng không thực hiện runtime registration.
-
-## 6. Gateway controllers
-
-### 6.1 Livequery Gateway
-
-```text
-@ohayo/udp
-        |
-ApiGatewayHandler
-```
-
-Gateway duy trì route table và có thể round-robin giữa các instance cùng
-`serviceId`. Đây là mode thuận tiện nhất cho local và pure Linux.
-
-### 6.2 Kong
-
-```text
-Manifest Registry -> KongGatewayController -> Kong desired state
-```
-
-Controller có thể dùng declarative configuration hoặc Admin API tùy cách vận hành,
-nhưng phải reconcile idempotently:
-
-- Tạo service/route còn thiếu.
-- Cập nhật route đã thay đổi.
-- Xóa resource được controller quản lý khi manifest hết hiệu lực.
-- Gắn ownership/tag để không xóa cấu hình do người khác quản lý.
-- Không cấp Kong admin credential cho application service.
-
-### 6.3 Nginx
-
-```text
-Manifest Registry -> NginxGatewayController
-                  -> render temporary config
-                  -> nginx -t
-                  -> atomic replace
-                  -> graceful reload
-```
-
-Controller phải debounce event trong một khoảng ngắn và không reload Nginx theo
-mỗi heartbeat. Nếu endpoint là Kubernetes Service hoặc DNS ổn định, thay đổi Pod
-không được tạo ra một lần reload mới.
-
-### 6.4 Kubernetes
-
-Gateway controller hoặc CI sinh `HTTPRoute`/Ingress trỏ đến Kubernetes Service:
-
-```text
-/livequery/users/* -> users:3000
-/livequery/orders/* -> orders:3000
-```
-
-Không đăng ký từng Pod vào gateway trừ khi có lý do đặc biệt. Readiness, endpoint
-rotation và load balancing giữa Pod thuộc trách nhiệm của Kubernetes Service.
-
-## 7. Cloudflare
-
-Cloudflare Workers không có mô hình local shared file hoặc UDP discovery như một
-Linux process thông thường. Vì vậy không dùng `@ohayo/udp` hoặc
-`FileServicePublisher` bên trong Worker.
-
-### 7.1 HTTP API
-
-Một Worker stateless làm public entrypoint:
-
-```text
-Client
-  |
-Cloudflare Worker (auth, routing, headers, rate policy)
-  |
-  +-- Service Binding/RPC -> Worker service
-  +-- fetch() ------------> public/private origin
-  `-- Durable Object -----> stateful coordination only
-```
-
-Khi cả gateway và service đều là Workers trong cùng account, ưu tiên Service
-Bindings/RPC thay vì gọi URL public. Binding vừa là capability vừa là internal API;
-service discovery trở thành deploy-time binding configuration.
-
-Manifest vẫn là source of truth. `CloudflareController` chuyển manifest thành:
-
-- Worker service bindings.
-- Route table/variables được deploy cùng Worker.
-- Origin mapping khi backend nằm ngoài Workers.
-
-Nếu backend ở ngoài Cloudflare, Worker proxy qua HTTP đến origin được khai báo rõ
-ràng. Không cho request tự quyết định hostname upstream.
-
-### 7.2 WebSocket trên Cloudflare
-
-Plain Worker phù hợp với stateless routing nhưng không phải nơi giữ global
-subscription state. Durable Objects phù hợp cho WebSocket vì có identity ổn định,
-state và cơ chế Hibernation WebSocket API.
-
-```text
-Client
-  |
-Worker front door
-  | validate upgrade token
-  | choose deterministic shard
-  v
-Realtime Durable Object
-  +-- WebSocket connections
-  +-- subscription metadata
-  `-- delivery for its shard
-```
-
-Không dùng một Durable Object tên `global` cho toàn bộ Livequery. Shard theo atom
-phối hợp tự nhiên:
-
-- `tenant:<tenantId>` khi tenant có quy mô giới hạn.
-- `room:<roomId>` cho chat/collaboration.
-- `document:<documentId>` cho collaborative document.
-- `realtime:<tenantId>:<bucket>` khi cần hash-bucket nhiều kết nối.
-
-Khóa shard phải deterministic để Worker route cùng một nhóm client đến cùng DO.
-Nếu một event cần fan-out đến nhiều bucket, realtime router phải biết danh sách
-bucket liên quan; không tạo một global DO chỉ để tránh bài toán routing này.
-
-Durable Object nên dùng Hibernation WebSocket API. Metadata cần để phục hồi một
-connection sau hibernation, như user, tenant và authorized refs, phải được lưu bằng
-WebSocket attachment hoặc durable storage. Không dựa vào class property vì memory
-có thể bị reset khi DO hibernate hoặc được thay instance.
-
-Không dùng `setInterval` chỉ để ping client vì timer có thể ngăn hibernation. Tận
-dụng protocol ping/pong của runtime và batch nhiều logical change trong một frame
-khi tần suất event cao.
-
-### 7.3 Đẩy realtime event đến Durable Objects
-
-Khi producer cũng là Worker:
-
-```text
-Service Worker -> Service Binding/RPC -> Realtime Router -> DO stub
-```
-
-Khi producer nằm ngoài Cloudflare:
-
-```text
-Service -> signed HTTPS event endpoint -> Realtime Router -> DO stub
-```
-
-Event endpoint phải kiểm tra audience, service identity, timestamp, nonce/idempotency
-key và authorization đối với ref. Có thể đặt queue giữa producer và router nếu cần
-retry/buffering; consumer cuối vẫn route event đến DO shard sở hữu kết nối.
-
-## 8. HTTP API Gateway và WebSocket Gateway
-
-### 8.1 Quyết định
-
-Trong production, hai gateway nên là **hai deployment độc lập**, nhưng có thể xuất
-hiện dưới cùng domain và cùng external front door:
-
-```text
-api.example.com
-  |
-Nginx/Kong/Cloudflare/Kubernetes Gateway
-  |
-  +-- /livequery/* ----------------> HTTP API Gateway deployment
-  `-- /livequery/realtime-updates -> WebSocket Gateway deployment
-```
-
-Lý do tách deployment:
-
-| HTTP API Gateway | WebSocket Gateway |
-| --- | --- |
-| Stateless request/response | Giữ connection và subscription state |
-| Scale theo RPS/latency | Scale theo connection, message rate và memory |
-| Request tồn tại ngắn | Connection tồn tại lâu |
-| Rollout tương đối đơn giản | Cần drain/reconnect khi rollout |
-| Timeout theo request | Backpressure và slow-client handling |
-
-Hai thành phần vẫn dùng chung:
-
-- Protocol types.
-- Auth verifier/internal identity.
-- Route/ref normalization.
-- Observability conventions.
-- Broker event envelope.
-
-Không nên chia sẻ bắt buộc cùng process memory.
-
-### 8.2 Khi nào có thể chạy chung
-
-Cho phép `embedded mode` chạy chung process/container khi:
-
-- Local development.
-- Một máy pure Linux nhỏ.
-- Lưu lượng thấp và chấp nhận restart chung.
-- Muốn một binary đơn giản để bắt đầu.
-
-Code vẫn phải tạo hai component riêng để có thể tách mà không sửa nghiệp vụ:
-
-```ts
-const apiGateway = createApiGateway(...)
-const realtimeGateway = createRealtimeGateway(...)
-
-const server = createCombinedServer({ apiGateway, realtimeGateway })
-```
-
-Production có thể sử dụng cùng factory nhưng deploy riêng:
-
-```ts
-createApiGatewayServer(...)
-createRealtimeGatewayServer(...)
-```
-
-### 8.3 Cloudflare là trường hợp đặc biệt
-
-Cloudflare có thể dùng một Worker làm entrypoint chung cho cả HTTP route và
-WebSocket upgrade. Tuy nhiên state WebSocket vẫn nằm trong Durable Objects. Do đó
-bên ngoài trông như một gateway, nhưng bên trong vẫn tách:
-
-```text
-Single public Worker
-  +-- HTTP API -> stateless handler/service binding
-  `-- WebSocket -> sharded Durable Objects
-```
-
-Đây là mô hình được khuyến nghị cho Cloudflare: chung public edge, tách state và
-scaling boundary.
-
-## 9. Realtime event backbone ngoài Cloudflare
-
-Khi WebSocket Gateway chạy nhiều replica, service không gửi event trực tiếp đến
-một replica cụ thể. Service publish vào broker:
-
-```text
-Application service
-       |
-       | LivequeryChangeEvent
-       v
-NATS / Redis Streams / Kafka
-       |
-       +--> Realtime Gateway A -> clients connected to A
-       `--> Realtime Gateway B -> clients connected to B
-```
-
-NATS phù hợp làm mặc định nhẹ cho Livequery. Event envelope phải độc lập transport:
-
-```ts
-type LivequeryChangeEvent = {
-  eventId: string
-  serviceId: string
-  tenantId?: string
-  ref: string
-  type: 'added' | 'modified' | 'removed'
-  data: { id: string; [key: string]: unknown }
-  occurredAt: number
-}
-```
-
-Gateway phải có bounded queue, batching, slow-client policy và idempotency/dedup
-khi broker có thể redeliver.
-
-## 10. Authentication và subscription authorization
-
-WebSocket client không được tự gửi một `subscribe` tùy ý rồi vượt qua HTTP auth.
-Có hai mô hình hợp lệ:
-
-1. HTTP request đã authorize ref và gateway tạo subscription nội bộ cho đúng
-   `clientId`.
-2. Auth service phát subscription token ngắn hạn, ký số, ràng buộc user, tenant,
-   ref, audience và expiry; WebSocket Gateway xác minh token trước khi subscribe.
-
-Gateway phải xóa và tự ghi đè các header nội bộ:
-
-```text
-x-livequery-client-id
-x-livequery-gateway-id
-x-livequery-user-id
-x-livequery-service-id
-x-request-id
-```
-
-Service vẫn chịu trách nhiệm authorization nghiệp vụ. Gateway authentication không
-thay thế kiểm tra quyền trên resource.
-
-## 11. CI/CD và desired state
-
-```text
-Service CI
-  +-- unit/integration tests
-  +-- build image once
-  +-- emit OpenAPI
-  `-- emit ServiceManifest
-                |
-Gateway config pipeline
-  +-- schema validation
-  +-- route conflict validation
-  +-- ownership/policy validation
-  +-- render target configuration
-  `-- commit environment repository
-                |
-             Argo CD
-```
-
-OpenAPI dùng cho contract/documentation/client generation. `ServiceManifest` bổ
-sung deployment metadata và upstream ownership mà OpenAPI không mô tả đầy đủ.
-
-## 12. Package boundary đã triển khai
-
-Toàn bộ phần không phụ thuộc hạ tầng nằm trong một package, `@livequery/core`,
-chia theo entry point để mỗi runtime chỉ kéo đúng phần của nó:
-
-```text
-@livequery/core            Contract, parser, realtime protocol engine, discovery
-                           contract. Không import Node built-in, ws hay UDP.
-@livequery/core/node       + WebsocketGateway (ws) và helper http ↔ Fetch.
+@livequery/core            Contract, parser, realtime protocol, prefix routing.
+                           Không chạm Node built-in hay ws → an toàn trên Worker.
+@livequery/core/node       + WebsocketGateway (ws), helper http ↔ Fetch.
 @livequery/core/bun        + BunWebsocketGateway.
-@livequery/core/workers    + HibernatableWebsocketGateway, CloudflareRealtimeRouter,
-                           CloudflareRealtimePublisher.
-
-@livequery/d1 | mongodb | postgres   Datasource, mỗi package kéo driver riêng.
-@livequery/nestjs | honojs           Framework adapter.
+@livequery/core/workers    + HibernatableWebsocketGateway, router, publisher.
 ```
 
-Trước đây phần lõi được tách thành nhiều package nhỏ (`protocol`, `service`,
-`discovery`, `gateway`, `realtime-*`, `gateway-controller-*`...), trong khi `core`
-vẫn giữ bản sao của cùng code đó. Hai nguồn song song khiến mỗi bản sửa phải làm
-hai lần, nên các package đó đã được gom lại vào `core`. Ranh giới runtime vẫn được
-giữ bằng entry point; `core/tests/root-entrypoint.test.ts` kiểm tra đồ thị import
-của root và `/workers` không chạm module Node.
+`@livequery/honojs` làm tương tự cho `serve()` và `realtimeGateway()`, qua export condition
+`workerd` / `bun` / `node`. `core/tests/root-entrypoint.test.ts` duyệt đồ thị import của root và
+`/workers` rồi fail nếu có ai kéo module Node vào — ranh giới này là test, không phải quy ước.
 
-Định tuyến của gateway là một tree tiền tố (`matchService`): service sở hữu mọi route dưới tiền tố
-của nó, nên thêm route con không cần deploy lại gateway. Service báo việc cần làm cho realtime qua
-hai response header, nên nó không phải biết socket nằm ở đâu.
+| | Node | Bun | Cloudflare Workers |
+| --- | --- | --- | --- |
+| HTTP server | `http.createServer` | `Bun.serve` | handler `fetch` |
+| Socket của client | `WebsocketGateway` (ws) | `BunWebsocketGateway` | Durable Object |
+| Datasource | MongoDB, Postgres | MongoDB, Postgres | D1 |
+| Gateway gọi service | `fetch(url)` | `fetch(url)` | Service Binding |
+| Việc chạy nền | timer trong process | timer trong process | alarm, Cron Trigger, Queue |
 
-Trên Cloudflare không có discovery lúc chạy: gateway gọi service qua Service
-Binding khai báo lúc deploy, realtime nằm trong Durable Object (xem `cf-worker`).
+## 6. Realtime trên Cloudflare
 
-## 13. Deployment matrix
+Socket nằm trong Durable Object, chia shard theo principal:
 
-| Environment | Service publisher | HTTP gateway | WebSocket | Khuyến nghị |
-| --- | --- | --- | --- | --- |
-| Local process | UDP hoặc file | Embedded Livequery | Embedded | Chạy chung cho đơn giản |
-| Docker Compose | UDP/file/static | Livequery/Nginx/Kong | Chung hoặc riêng | Cùng domain |
-| Pure Linux | Signed UDP | Livequery Gateway | Tách khi tải tăng | Systemd + private network |
-| Kubernetes | Noop/CI manifest | Kong/Nginx/Gateway API | Deployment riêng | Upstream là K8s Service |
-| Cloudflare | Deploy-time bindings | Stateless Worker | Sharded Durable Objects | Chung front door, tách state |
+- **Gateway id là id của Durable Object.** `hello.gid` và `x-lgid` vì thế không đổi khi object bị
+  evict hay khi deploy lại.
+- **Trạng thái nằm ngoài bộ nhớ.** Danh tính socket lưu trong attachment, subscription lưu trong
+  storage; instance mới khôi phục cả hai trong `blockConcurrencyWhile` trước khi nhận event.
+- **Chờ reconnect bằng alarm, không bằng timer.** Object ngủ được trong lúc chờ, và cửa sổ chờ
+  sống sót qua eviction. Cùng alarm đó quét dọn bản ghi không còn socket.
+- **Ping do runtime trả lời** (`setWebSocketAutoResponse`), nên client rảnh không đánh thức object.
 
-## 14. Quyết định tóm tắt
+Mô hình tin cậy: chỉ Worker chạm được Durable Object; router luôn ghi đè header principal nên
+client không tự chọn danh tính; `register` từ chối khi socket thuộc principal khác; và một
+principal khác không `start` được bằng `client_id` đang có subscription của người khác.
 
-- Giữ `ApiServiceLinker` làm API chung.
-- Đổi các linker theo vendor thành generic publishers và vendor controllers.
-- Gateway của repository cung cấp sẵn `UdpGatewayDiscovery`.
-- Kong/Nginx không cần UDP gateway component; chúng dùng controller/agent.
-- Cloudflare không dùng UDP/file runtime discovery; dùng manifest tại deploy time,
-  bindings và Durable Objects.
-- HTTP và WebSocket có thể chạy chung ở local, nhưng production mặc định tách
-  deployment và dùng chung public front door.
+Giới hạn cần nhớ khi mở rộng: mỗi Durable Object có trần mềm 1.000 request/giây, nên chia shard là
+bắt buộc. Publish hiện fan-out tới mọi shard, chi phí ghi tăng tuyến tính theo số shard; hệ thống
+lớn nên chuyển sang shard theo tenant hoặc thêm một sổ đăng ký ref → shard.
 
-## 15. Tham khảo Cloudflare
+## 7. An toàn dữ liệu
 
-- [Workers Service Bindings/RPC](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/rpc/)
-- [Durable Objects WebSockets and Hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/)
-- [Rules and sharding of Durable Objects](https://developers.cloudflare.com/durable-objects/best-practices/rules-of-durable-objects/)
-- [Cloudflare Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/)
+| Rủi ro | Cách chặn |
+| --- | --- |
+| SQL injection qua tên cột | Mọi identifier phải khớp `^[A-Za-z_][A-Za-z0-9_]{0,63}$` trước khi vào SQL; D1 chỉ bind được giá trị, không bind được identifier |
+| Client chạm cột không được phép | Schema của `validator()` là allowlist; cột ngoài danh sách bị từ chối 400 |
+| Client nghe ref chưa được phép đọc | Frame `subscribe` từ client bị bỏ qua; subscription chỉ tạo sau một lần đọc đã phân quyền |
+| Client hủy subscription của người khác | `unsubscribe` chỉ gỡ ref của chính socket đó |
+| Lộ chi tiết nội bộ qua lỗi | `errorHandler()` giữ nguyên 4xx, còn 5xx chỉ ghi log và trả thông báo chung |
+| Vượt trần tham số của D1 | Danh sách `in`/`nin` bị chặn ở 50 giá trị |
+
+## 8. Những gì đã bỏ, và vì sao
+
+- **Discovery lúc chạy** (UDP multicast, HTTP registry) và **gateway proxy theo IP:port**. Chúng
+  không chạy được trên Worker, nên hệ thống phải có hai cách viết service. Định tuyến theo tiền tố
+  khai báo sẵn chạy ở mọi nơi, và trên Cloudflare thì binding vốn đã tĩnh nên discovery không thêm
+  được gì.
+- **Tách thành nhiều package nhỏ** (`protocol`, `service`, `gateway`, `realtime-*`,
+  `gateway-controller-*`). Mỗi bản sửa phải làm hai lần vì `core` giữ bản sao của cùng đoạn code.
+  Ranh giới runtime giờ do entry point giữ, và có test canh.
+- **Decorator kiểu NestJS.** Cần `experimentalDecorators` và `reflect-metadata`, xung đột với dự án
+  dùng decorator chuẩn, và giấu mất thứ tự thực thi. Middleware của Hono cho cùng khả năng mà đọc
+  được từ trên xuống.
+
+## 9. Điểm còn mở
+
+- Trên Worker, ghi thẳng vào D1 (script, migration, dashboard) không sinh realtime. Muốn có thì
+  phải tự gọi publish.
+- `@livequery/mongodb` còn một lỗi đã biết: thay đổi thành viên của một field dạng mảng không
+  fan-out đúng `added`/`removed` theo từng parent.
+- Publish fan-out tới mọi shard; xem mục 6 cho hướng mở rộng.
