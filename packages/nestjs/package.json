@@ -28,24 +28,26 @@
   "type": "module",
   "devDependencies": {
     "@livequery/core": "^3.0.0",
-    "@livequery/protocol": "^3.0.0",
     "@nestjs/platform-express": "^11.1.19",
+    "@ohayo/udp": "^3.0.0",
     "@types/express": "x",
     "@types/node": "x",
     "@types/ws": "^8.5.10",
     "rxjs": "x",
     "tslib": "^2.6.1",
-    "typescript": "^5.1.6"
+    "typescript": "^5.1.6",
+    "ws": "^8.18.0"
   },
   "peerDependencies": {
     "reflect-metadata": "x",
     "@livequery/core": "^3.0.0",
-    "@livequery/protocol": "^3.0.0",
     "@nestjs/core": "*",
     "@nestjs/common": "*",
     "@nestjs/platform-ws": "^11.0.10",
     "@nestjs/websockets": "^10.3.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "ws": "^8.18.0",
+    "@ohayo/udp": "^3.0.0"
   },
   "dependencies": {
     "msgpackr": "^1.11.9"

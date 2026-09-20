@@ -1,25 +1,21 @@
-// Default entry point — Node adapter is exported as `WebsocketGateway` for
-// backward compatibility with existing consumers (most were on Node).
+// Default entry point — runtime-neutral. Importing it pulls in no Node built-ins, no `ws` and
+// no UDP transport, so it is safe in Workers, browsers, Bun and Node alike.
 //
 // Runtime-specific entries:
-//   import { ... } from '@livequery/core/node'
-//   import { ... } from '@livequery/core/bun'
-//   import { ... } from '@livequery/core/workers'
-//
-// Protocol-only (no runtime dependency):
-//   import { WebsocketGatewayBase, SocketLike, RealtimeSubscription } from '@livequery/core'
+//   import { WebsocketGateway, UdpDiscovery, ApiGatewayHandler } from '@livequery/core/node'
+//   import { BunWebsocketGateway } from '@livequery/core/bun'
+//   import { HibernatableWebsocketGateway } from '@livequery/core/workers'
 
 export * from './WebsocketGatewayBase.js'
-export * from './WebsocketGateway.js'
+export * from './RealtimeBroker.js'
 export * from './const.js'
 export * from './Discovery.js'
-export * from './HttpDiscovery.js'
-export * from './UdpDiscovery.js'
-export * from './ApiGatewayHandler.js'
-export * from './ApiServiceLinker.js'
 export * from './LivequeryBaseEntity.js'
 export * from './LivequeryQuery.js'
 export * from './LivequeryContext.js'
 export * from './LivequeryDatasource.js'
+export * from './LivequeryRealtime.js'
 export * from './LivequeryRequestParser.js'
 export * from './helpers/hidePrivateFields.js'
+export * from './helpers/decodeMsgpack.js'
+export * from './helpers/decodeRealtimeFrame.js'

@@ -1,9 +1,9 @@
 /**
- * Cloudflare/edge-safe compatibility entrypoint. It intentionally exports no
- * Node HTTP server, UDP transport, `ws` implementation, or `process.env` config.
+ * Cloudflare Workers / edge entry point — `@livequery/core/workers`.
+ *
+ * Re-exports the runtime-neutral root plus the Durable Object realtime pieces. Loads no Node
+ * built-in, no `ws` and no UDP transport, so a Worker needs no `nodejs_compat` flag.
  */
-export * from '@livequery/protocol'
-export * from '@livequery/service'
-export * from '@livequery/gateway'
-export * from '@livequery/realtime'
-export * from '@livequery/realtime-cloudflare'
+export * from './index.js'
+export * from './EdgeWebsocketGateway.js'
+export * from './cloudflare/index.js'

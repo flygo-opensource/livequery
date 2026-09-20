@@ -14,7 +14,7 @@ import {
     type DiscoveryMessage,
 } from './Discovery.js'
 import { HttpDiscovery } from './HttpDiscovery.js'
-import { WebsocketGateway } from './WebsocketGateway.js'
+import type { WebsocketGatewayBase } from './WebsocketGatewayBase.js'
 import { nodeRequestToWebRequest } from './helpers/nodeRequestToWebRequest.js'
 import { writeWebResponse } from './helpers/writeWebResponse.js'
 
@@ -63,7 +63,7 @@ export type ServiceApiStatus = {
 } | { id: string; online: false }
 
 export type ApiGatewayOptions = {
-    ws?: WebsocketGateway
+    ws?: WebsocketGatewayBase
     discovery?: Discovery<ServiceApiMetadata>
     node_id?: string
     // Upstream-request timeout in ms. Defaults to LIVEQUERY_GATEWAY_TIMEOUT_MS
@@ -91,7 +91,7 @@ export class ApiGatewayHandler {
     readonly #root: RoutingNode = createNode()
     readonly #nodeId: string
     readonly #timeoutMs: number
-    readonly #lws?: WebsocketGateway
+    readonly #lws?: WebsocketGatewayBase
     readonly #discovery: Discovery<ServiceApiMetadata>
     readonly #discoverySubscription: Subscription
     readonly #services = new Map<string, {

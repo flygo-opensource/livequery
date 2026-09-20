@@ -48,19 +48,116 @@ Type-check tests:
 bunx tsc -p tests/tsconfig.json --noEmit
 ```
 
-## Public Entry Point
+## Public Entry Points
+
+The root entry is runtime-neutral: it imports no Node built-ins, no `ws` and no UDP
+transport, so it works in Workers, browsers, Bun and Node.
 
 ```ts
+import { LivequeryRequestParser, WebsocketGatewayBase, hidePrivateFields } from '@livequery/core'
+```
+
+Runtime adapters live in their own entries:
+
+```ts
+// Node: gateway on `ws`, HTTP/UDP discovery, API gateway and service linker
 import {
   ApiGatewayHandler,
   ApiServiceLinker,
   HttpDiscovery,
-  LivequeryRequestParser,
-  UdpDiscovery,
   WebsocketGateway,
-  hidePrivateFields,
-} from '@livequery/core'
+} from '@livequery/core/node'
+
+// UDP LAN discovery (loads @ohayo/udp, so it has its own entry)
+import { UdpDiscovery } from '@livequery/core/udp'
+
+// Bun
+import { BunWebsocketGateway } from '@livequery/core/bun'
+
+// Cloudflare Workers and Durable Objects
+import { HibernatableWebsocketGateway } from '@livequery/core/workers'
 ```
+
+`ws` and `@ohayo/udp` are optional peer dependencies. Install `ws` to use
+`WebsocketGateway` from `/node`, and `@ohayo/udp` to use `@livequery/core/udp`. Importing `/node`
+or `/bun` never loads `@ohayo/udp`.
+
+### Migrating from 2.x
+
+3.0 removed the Node adapters from the root entry. Change
+`from '@livequery/core'` to `from '@livequery/core/node'` wherever you import
+`WebsocketGateway`, `HttpDiscovery`, `ApiGatewayHandler` or `ApiServiceLinker`, import
+`UdpDiscovery` from `@livequery/core/udp`, and add `ws` / `@ohayo/udp` to your own dependencies if you use
+them. Everything else is unchanged.
+
+## Cloudflare Workers
+
+`@livequery/core/workers` holds the realtime pieces for Workers and Durable Objects.
+A Worker bundle that imports only this entry needs no `nodejs_compat` flag.
+
+| Export | Runs in | Role |
+| --- | --- | --- |
+| `CloudflareRealtimeRouter` | Worker | Picks the shard for a WebSocket upgrade and attaches the authenticated principal |
+| `CloudflareRealtimePublisher` | Worker | Registers a subscription after an authorized read; publishes changes to shards |
+| `HibernatableWebsocketGateway` | Durable Object | Holds sockets with the Hibernation API; subscriptions live in storage |
+| `EdgeWebsocketGateway` | Durable Object | Legacy `server.accept()` adapter, memory-only state, no hibernation |
+
+```ts
+import { DurableObject } from 'cloudflare:workers'
+import { HibernatableWebsocketGateway } from '@livequery/core/workers'
+
+export class RealtimeGatewayDO extends DurableObject<Env> {
+    readonly #gateway: HibernatableWebsocketGateway
+
+    constructor(ctx: DurableObjectState, env: Env) {
+        super(ctx, env)
+        this.#gateway = new HibernatableWebsocketGateway(ctx)
+    }
+
+    override fetch(request: Request) { return this.#gateway.fetch(request) }
+    override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) { this.#gateway.webSocketMessage(ws, message) }
+    override webSocketClose(ws: WebSocket) { this.#gateway.webSocketClose(ws) }
+    override webSocketError(ws: WebSocket) { this.#gateway.webSocketError(ws) }
+}
+```
+
+```ts
+import { CloudflareRealtimePublisher, CloudflareRealtimeRouter } from '@livequery/core/workers'
+
+const shards = ['shard-0', 'shard-1', 'shard-2', 'shard-3']
+const router = new CloudflareRealtimeRouter(env.GATEWAY, {
+    shardKey: (_request, principal) => shards[hash(principal) % shards.length],
+})
+const publisher = new CloudflareRealtimePublisher(env.GATEWAY, { shards: () => shards })
+
+// WebSocket upgrade, after the Worker authenticated the caller:
+return router.fetch(request, principal)
+
+// After an authorized GET, before responding:
+await publisher.register({ ref, client_id, gateway_id, listener_node_id: gateway_id }, principal)
+
+// After a write:
+ctx.waitUntil(publisher.publish({ ref, type: 'added', data: item }))
+```
+
+Hibernation: the gateway id is the Durable Object id, so `hello.gid` and `x-lgid`
+survive eviction and redeploys. Each socket keeps its `client_id` and principal in
+its attachment and each subscription is a `sub:<client_id>:<ref>` storage key; a
+woken instance restores both inside `blockConcurrencyWhile`. Client pings are
+answered by the runtime (`setWebSocketAutoResponse`) without waking the object.
+
+Trust model:
+
+- Only the Worker reaches the Durable Object; the router forwards WebSocket upgrades
+  only, so clients never reach the internal broadcast / subscribe endpoints.
+- The router always overwrites `LIVEQUERY_PRINCIPAL_HEADER`, so clients cannot pick a principal.
+- Subscriptions are created only through `register` after an authorized read; client
+  `subscribe` frames are dropped.
+- `register` returns 403 when the socket of `client_id` belongs to another principal,
+  and another principal cannot `start` with a `client_id` that still has subscriptions.
+- A client `unsubscribe` only removes that socket's own subscriptions.
+
+A full example with D1, auth and sharding: [`cf-worker`](../cf-worker/README.md).
 
 ## Core Types
 
@@ -375,7 +472,7 @@ Accepts Node.js `IncomingMessage` and `ServerResponse`.
 
 ```ts
 import * as http from 'http'
-import { ApiGatewayHandler } from '@livequery/core'
+import { ApiGatewayHandler } from '@livequery/core/node'
 
 const gateway = new ApiGatewayHandler({})
 
@@ -485,7 +582,7 @@ import {
   ApiGatewayHandler,
   ApiServiceLinker,
   type ServiceApiMetadata,
-} from '@livequery/core'
+} from '@livequery/core/node'
 
 const gatewayDiscovery = new HttpDiscovery<ServiceApiMetadata>({
   mode: 'server',
@@ -740,7 +837,8 @@ Closes sockets and completes the observable streams.
 ### Example
 
 ```ts
-import { UdpDiscovery, type DiscoveryMessage } from '@livequery/core'
+import type { DiscoveryMessage } from '@livequery/core'
+import { UdpDiscovery } from '@livequery/core/udp'
 
 type Metadata = { role: 'service' | 'gateway'; name: string }
 
@@ -954,7 +1052,7 @@ import {
   LivequeryRequestParser,
   hidePrivateFields,
   type LivequeryContext,
-} from '@livequery/core'
+} from '@livequery/core/node'
 
 const parser = new LivequeryRequestParser()
 
@@ -997,7 +1095,7 @@ import * as http from 'http'
 import {
   ApiGatewayHandler,
   WebsocketGateway,
-} from '@livequery/core'
+} from '@livequery/core/node'
 
 const server = http.createServer()
 const ws = new WebsocketGateway(server)

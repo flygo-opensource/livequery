@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 import { Subject } from 'rxjs'
-import { ApiGatewayHandler, type DiscoveryMessage, type ServiceApiMetadata } from '../src/node.js'
+import { ApiGatewayHandler, type DiscoveryMessage, type ServiceApiMetadata } from '../../src/bun.js'
 
 describe('ApiGatewayHandler', () => {
     test('updates a service route when the same node publishes a newer metadata version', async () => {
@@ -613,3 +613,4 @@ function readBody(req: http.IncomingMessage): Promise<string> {
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms))
 }
+

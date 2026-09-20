@@ -1,5 +1,5 @@
 import { createParamDecorator, ExecutionContext } from "@nestjs/common";
-import type { LivequeryRequest as LQR } from '@livequery/protocol'
+import type { LivequeryRequest as LQR } from '@livequery/core/node'
 
 
 export const LivequeryRequest = createParamDecorator((data: unknown, ctx: ExecutionContext) => {

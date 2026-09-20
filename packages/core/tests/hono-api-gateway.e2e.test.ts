@@ -7,7 +7,7 @@ import {
     type Discovery,
     type DiscoveryMessage,
     type ServiceApiMetadata,
-} from '../src/index.js'
+} from '../src/node.js'
 
 type TestDiscovery = Discovery<ServiceApiMetadata>
 type HonoServer = ReturnType<typeof Bun.serve>

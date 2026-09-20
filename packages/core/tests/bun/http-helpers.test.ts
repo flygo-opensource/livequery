@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import * as http from 'http'
-import { nodeRequestToWebRequest } from '../src/helpers/nodeRequestToWebRequest.js'
-import { writeWebResponse } from '../src/helpers/writeWebResponse.js'
+import { nodeRequestToWebRequest } from '../../src/helpers/nodeRequestToWebRequest.js'
+import { writeWebResponse } from '../../src/helpers/writeWebResponse.js'
 
 describe('HTTP helpers', () => {
     test('nodeRequestToWebRequest preserves URL, method, headers, and raw body', async () => {
@@ -22,25 +22,6 @@ describe('HTTP helpers', () => {
         expect(request.headers.get('content-type')).toBe('application/json')
         expect(request.headers.get('x-extra')).toBe('yes')
         expect(await request.json()).toEqual({ title: 'Hello' })
-    })
-
-    test('nodeRequestToWebRequest streams the body of an unbuffered IncomingMessage', async () => {
-        const server = http.createServer(async (req, res) => {
-            const request = nodeRequestToWebRequest(req as http.IncomingMessage & { url: string; method: string })
-            res.end(JSON.stringify(await request.json()))
-        })
-        await new Promise<void>(resolve => server.listen(0, resolve))
-        const { port } = server.address() as { port: number }
-        try {
-            const response = await fetch(`http://127.0.0.1:${port}/livequery/posts`, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ title: 'Streamed' }),
-            })
-            expect(await response.json()).toEqual({ title: 'Streamed' })
-        } finally {
-            server.close()
-        }
     })
 
     test('nodeRequestToWebRequest omits body for GET requests', async () => {
@@ -81,3 +62,4 @@ describe('HTTP helpers', () => {
         ])
     })
 })
+

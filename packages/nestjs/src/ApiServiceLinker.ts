@@ -1,6 +1,7 @@
 import { Controller, Inject, Injectable, OnModuleDestroy, Optional } from '@nestjs/common'
 import { ModulesContainer } from '@nestjs/core'
-import { ApiServiceLinker as CoreApiServiceLinker, UdpDiscovery, type ServiceApiMetadata, WebsocketGateway } from '@livequery/core'
+import { ApiServiceLinker as CoreApiServiceLinker, type ServiceApiMetadata, WebsocketGateway } from '@livequery/core/node'
+import { UdpDiscovery } from '@livequery/core/udp'
 import { listPaths } from './helpers/listPaths.js'
 
 @Controller()

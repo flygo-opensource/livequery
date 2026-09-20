@@ -6,10 +6,12 @@ import {
     hidePrivateFields,
     HttpDiscovery,
     LivequeryRequestParser,
-    UdpDiscovery,
     WebsocketGateway,
     WEBSOCKET_PATH,
-} from '../src/index.js'
+} from '../src/node.js'
+import {
+    UdpDiscovery,
+} from '../src/udp.js'
 
 describe('package entrypoint', () => {
     test('exports the public runtime API', () => {

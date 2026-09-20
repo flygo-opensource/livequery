@@ -5,12 +5,12 @@ import { pack } from 'msgpackr'
 import { filter, firstValueFrom, timeout } from 'rxjs'
 import {
     type DiscoveryMessage,
-} from '../src/node.js'
+} from '../../src/bun.js'
 import {
     UdpDiscovery,
     type UdpDiscoveryOptions,
     type UdpDiscoveryPacket,
-} from '../src/udp.js'
+} from '../../src/udp.js'
 
 type Metadata = {
     role: 'gateway' | 'service'
@@ -309,3 +309,4 @@ function sendRaw(raw: Buffer, port: number, host = '127.0.0.1') {
 function sleep(ms: number) {
     return new Promise<void>(resolve => setTimeout(resolve, ms))
 }
+

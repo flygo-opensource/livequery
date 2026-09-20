@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 import { Subject } from 'rxjs'
-import { ApiGatewayHandler, WebsocketGateway, WEBSOCKET_PATH, type DiscoveryMessage, type ServiceApiMetadata } from '../src/index.js'
+import { ApiGatewayHandler, WebsocketGateway, WEBSOCKET_PATH, type DiscoveryMessage, type ServiceApiMetadata } from '../src/node.js'
 
 function createDiscovery() {
     const subject = new Subject<DiscoveryMessage<ServiceApiMetadata>>() as Subject<DiscoveryMessage<ServiceApiMetadata>> & {

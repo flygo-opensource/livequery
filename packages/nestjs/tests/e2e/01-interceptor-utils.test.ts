@@ -2,7 +2,7 @@ import 'reflect-metadata'
 import { describe, test, expect } from 'bun:test'
 import { Controller, Get } from '@nestjs/common'
 import { Reflector } from '@nestjs/core'
-import { LivequeryRequestParser, hidePrivateFields, type LivequeryContext } from '@livequery/core'
+import { LivequeryRequestParser, hidePrivateFields, type LivequeryContext } from '@livequery/core/node'
 import { LivequeryDatasourceInterceptors } from '../../src/LivequeryDatasourceInterceptors.js'
 
 // ─── LivequeryRequestParser ───────────────────────────────────────────────────

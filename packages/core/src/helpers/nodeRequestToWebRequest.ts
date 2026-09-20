@@ -1,5 +1,6 @@
-import { IncomingMessage } from "http";
-import { OutgoingHttpHeaders } from "http2";
+import type { IncomingMessage } from 'http'
+import type { OutgoingHttpHeaders } from 'http2'
+import { Readable } from 'stream'
 
 export function nodeRequestToWebRequest(
     req: IncomingMessage & { url: string; method: string; rawBody?: Buffer },
@@ -13,7 +14,11 @@ export function nodeRequestToWebRequest(
 
     const body = req.method === 'GET' || req.method === 'HEAD'
         ? undefined
-        : req.rawBody ? new Uint8Array(req.rawBody) : undefined
+        : req.rawBody
+            ? new Uint8Array(req.rawBody)
+            // Nothing buffered the body (plain http.createServer): stream it instead of dropping it.
+            // Node's web-stream type is runtime-compatible with fetch but not with the DOM lib type.
+            : typeof req.on === 'function' ? Readable.toWeb(req) as unknown as BodyInit : undefined
 
     return new Request(`http://${host}${req.url}`, {
         method: req.method,

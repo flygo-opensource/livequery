@@ -1,8 +1,8 @@
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, RequestMethod } from '@nestjs/common';
 import { map, mergeMap } from 'rxjs';
 import { DiscoveryService, ModuleRef, Reflector } from '@nestjs/core'
-import type { LivequeryBaseEntity, LivequeryContext, LivequeryDatasource } from '@livequery/protocol';
-import { hidePrivateFields, LivequeryRequestParser } from '@livequery/protocol';
+import type { LivequeryBaseEntity, LivequeryContext, LivequeryDatasource } from '@livequery/core/node';
+import { hidePrivateFields, LivequeryRequestParser } from '@livequery/core/node';
 
 
 export class LivequeryItemMapper<T extends LivequeryBaseEntity> {

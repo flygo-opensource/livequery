@@ -4,8 +4,8 @@ import { UseLivequeryInterceptor } from "../LivequeryInterceptor.js";
 import { RouterOptions } from "express";
 import { Observable } from 'rxjs'
 import { ModuleRef } from "@nestjs/core";
-import type { LivequeryDatasource, UpdatedData } from "@livequery/core";
-import { WebsocketGateway } from "@livequery/core";
+import type { LivequeryDatasource, UpdatedData } from "@livequery/core/node";
+import { WebsocketGateway } from "@livequery/core/node";
 
 export type ResolverRoutes = Array<{
     path: string,

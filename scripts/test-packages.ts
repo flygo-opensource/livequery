@@ -1,8 +1,8 @@
-const packages = ['service', 'discovery-file', 'gateway', 'gateway-controller', 'gateway-controller-nginx', 'gateway-controller-kong', 'gateway-controller-cloudflare']
+const packages = ['core', 'd1']
 
 for (const name of packages) {
-  const process = Bun.spawn(['bun', 'test'], {
-    cwd: new URL(`../packages/${name}/`, import.meta.url).pathname,
+  const process = Bun.spawn(['bun', 'test', 'tests/'], {
+    cwd: new URL(`../${name}/`, import.meta.url).pathname,
     stdout: 'inherit',
     stderr: 'inherit',
   })

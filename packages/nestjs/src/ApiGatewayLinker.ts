@@ -2,7 +2,8 @@ import { Controller, Inject, OnModuleDestroy, OnModuleInit, Optional } from '@ne
 import { HttpAdapterHost } from '@nestjs/core'
 import { type IncomingMessage, type ServerResponse } from 'http'
 import { type Response } from 'express'
-import { ApiGatewayHandler, type ServiceApiMetadata, type ServiceApiStatus, UdpDiscovery, WebsocketGateway } from '@livequery/core'
+import { ApiGatewayHandler, type ServiceApiMetadata, type ServiceApiStatus, WebsocketGateway } from '@livequery/core/node'
+import { UdpDiscovery } from '@livequery/core/udp'
 export type { ServiceApiMetadata, ServiceApiStatus }
 
 export type ApiGatewayClientOptions = {

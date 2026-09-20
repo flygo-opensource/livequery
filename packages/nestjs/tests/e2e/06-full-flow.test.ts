@@ -17,7 +17,7 @@ import { interval, mergeMap, mergeAll, of } from 'rxjs'
 import type { AddressInfo } from 'net'
 import * as http from 'http'
 
-import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core'
+import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core/node'
 import { LivequeryInterceptor, UseLivequeryInterceptor } from '../../src/LivequeryInterceptor.js'
 import { LivequeryRequest as LQDecorator } from '../../src/LivequeryRequest.js'
 import type { LivequeryRequest } from '@livequery/types'

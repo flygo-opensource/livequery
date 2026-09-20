@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { filter, firstValueFrom, timeout } from 'rxjs'
-import { HttpDiscovery, isDiscoveryOfflineData, type DiscoveryMessage } from '../src/node.js'
+import { HttpDiscovery, isDiscoveryOfflineData, type DiscoveryMessage } from '../../src/bun.js'
 
 type Metadata = {
     role: 'service' | 'gateway'
@@ -309,3 +309,4 @@ function randomPort() {
 function sleep(ms: number) {
     return new Promise<void>(resolve => setTimeout(resolve, ms))
 }
+

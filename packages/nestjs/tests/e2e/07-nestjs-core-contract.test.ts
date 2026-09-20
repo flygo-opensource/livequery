@@ -10,10 +10,12 @@ import { ReplaySubject } from 'rxjs'
 import {
     type DiscoveryEvent,
     type DiscoveryMessage,
-    UdpDiscovery,
     WebsocketGateway,
     type ServiceApiMetadata,
-} from '@livequery/core'
+} from '@livequery/core/node'
+import {
+    UdpDiscovery,
+} from '@livequery/core/udp'
 import { ApiGateway } from '../../src/ApiGatewayLinker.js'
 import { ApiServiceLinker } from '../../src/ApiServiceLinker.js'
 import { LivequeryInterceptor, UseLivequeryInterceptor } from '../../src/LivequeryInterceptor.js'

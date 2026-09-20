@@ -1,7 +1,7 @@
 import { CallHandler, ExecutionContext, Inject, Injectable, NestInterceptor, Optional, UseInterceptors } from "@nestjs/common";
 import { map } from "rxjs/operators";
-import { hidePrivateFields, LivequeryRequestParser, WebsocketGateway, type LivequeryContext } from "@livequery/core";
-import type { LivequeryRequest } from "@livequery/core";
+import { hidePrivateFields, LivequeryRequestParser, WebsocketGateway, type LivequeryContext } from "@livequery/core/node";
+import type { LivequeryRequest } from "@livequery/core/node";
 
 
 

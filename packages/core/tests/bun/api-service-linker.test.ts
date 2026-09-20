@@ -6,7 +6,7 @@ import {
     WEBSOCKET_PATH,
     type DiscoveryMessage,
     type ServiceApiMetadata,
-} from '../src/node.js'
+} from '../../src/bun.js'
 
 describe('ApiServiceLinker', () => {
     test('publishes service metadata when started', async () => {

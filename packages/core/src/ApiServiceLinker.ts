@@ -11,12 +11,12 @@ import {
     type DiscoveryMessage,
 } from './Discovery.js'
 import { HttpDiscovery } from './HttpDiscovery.js'
-import { WebsocketGateway } from './WebsocketGateway.js'
+import type { WebsocketGatewayBase } from './WebsocketGatewayBase.js'
 import { ServiceApiMetadata } from './ApiGatewayHandler.js'
 
 export type ApiServiceLinkerOptions = {
     paths: Array<{ method: string; path: string }>
-    ws?: WebsocketGateway
+    ws?: WebsocketGatewayBase
     discovery?: Discovery<ServiceApiMetadata>
     node_id?: string
 }
@@ -24,7 +24,7 @@ export type ApiServiceLinkerOptions = {
 export class ApiServiceLinker {
     readonly #paths: Array<{ method: string; path: string }>
     readonly #nodeId: string
-    readonly #lws?: WebsocketGateway
+    readonly #lws?: WebsocketGatewayBase
     readonly #discovery: Discovery<ServiceApiMetadata>
     #subscription?: Subscription
     #metadata?: DiscoveryMessage<ServiceApiMetadata>

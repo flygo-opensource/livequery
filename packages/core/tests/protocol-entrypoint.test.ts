@@ -5,7 +5,7 @@ import {
     hidePrivateFields,
     type LivequerySyncEvent,
     type UpdatedData,
-} from '../src/protocol.js'
+} from '../src/index.js'
 
 describe('protocol entrypoint', () => {
     test('exports only runtime-independent protocol primitives', () => {

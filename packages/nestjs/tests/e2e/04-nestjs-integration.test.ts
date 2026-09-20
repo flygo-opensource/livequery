@@ -16,7 +16,7 @@ import { NestFactory } from '@nestjs/core'
 import type { AddressInfo } from 'net'
 import * as http from 'http'
 
-import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core'
+import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core/node'
 import {
     LivequeryInterceptor,
     UseLivequeryInterceptor,

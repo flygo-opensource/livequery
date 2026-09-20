@@ -3,14 +3,14 @@
   "private": true,
   "packageManager": "bun@1.2.5",
   "workspaces": [
-    "packages/*",
     "core",
-    "bunjs",
+    "d1",
     "nestjs",
+    "cf-worker",
     "examples"
   ],
   "scripts": {
-    "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck",
+    "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck && bun run --cwd cf-worker type-check",
     "test": "bun scripts/test-packages.ts && bun run --cwd examples test"
   },
   "overrides": {

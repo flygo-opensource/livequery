@@ -3,18 +3,16 @@
  *
  *   import { BunWebsocketGateway } from '@livequery/core/bun'
  *
- * Use this when running on the Bun runtime so the build does not pull in the
- * Node-only `ws` package.
+ * Re-exports the runtime-neutral root plus the Bun gateway and the discovery / API gateway
+ * pieces, which run on Bun's Node compatibility layer. Does not load the `ws` package.
+ * `UdpDiscovery` needs `@ohayo/udp`, an optional peer dependency.
  */
-export { BunWebsocketGateway } from './BunWebsocketGateway.js'
-export * from './WebsocketGatewayBase.js'
-export * from './const.js'
-export * from './Discovery.js'
+export * from './index.js'
+export * from './BunWebsocketGateway.js'
+// Lets code written against the Node entry swap in the Bun gateway by changing the import path.
+export { BunWebsocketGateway as WebsocketGateway } from './BunWebsocketGateway.js'
 export * from './HttpDiscovery.js'
-export * from './UdpDiscovery.js'
 export * from './ApiGatewayHandler.js'
 export * from './ApiServiceLinker.js'
-export * from './LivequeryContext.js'
-export * from './LivequeryDatasource.js'
-export * from './LivequeryRequestParser.js'
-export * from './helpers/hidePrivateFields.js'
+export * from './helpers/nodeRequestToWebRequest.js'
+export * from './helpers/writeWebResponse.js'

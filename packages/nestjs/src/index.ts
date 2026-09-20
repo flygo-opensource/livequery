@@ -1,6 +1,7 @@
 export { ApiServiceLinker } from './ApiServiceLinker.js'
 export { listPaths } from './helpers/listPaths.js'
-export { UdpDiscovery, type UdpDiscoveryOptions, type UdpDiscoveryPacket, type UdpDiscoveryStatus, WebsocketGateway, type RealtimeSubscription } from '@livequery/core'
+export { WebsocketGateway, type RealtimeSubscription } from '@livequery/core/node'
+export { UdpDiscovery, type UdpDiscoveryOptions, type UdpDiscoveryPacket, type UdpDiscoveryStatus } from '@livequery/core/udp'
 export { LivequeryRequest } from './LivequeryRequest.js'
 export { LivequeryInterceptor, UseLivequeryInterceptor } from './LivequeryInterceptor.js'
 export * from './helpers/createDatasourceMapper.js'
@@ -31,4 +32,4 @@ export type {
     RequestMethod,
     Eq, Neq, NumberNotEqual, Lt, Eqn, Lte, Gt, Gte,
     Visible, InArray, NotInArray, Like, OrderBy,
-} from '@livequery/core'
+} from '@livequery/core/node'

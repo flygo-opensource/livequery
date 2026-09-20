@@ -6,7 +6,7 @@
     "url": "git@github.com:livequery/core.git"
   },
   "version": "3.0.0",
-  "description": "Framework-agnostic core utilities for @livequery ecosystem",
+  "description": "Livequery protocol, realtime gateway and runtime adapters (Node, Bun, Cloudflare Workers)",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
@@ -23,36 +23,6 @@
       "import": {
         "types": "./build/src/index.d.ts",
         "default": "./build/src/index.js"
-      }
-    },
-    "./protocol": {
-      "import": {
-        "types": "./build/src/protocol.d.ts",
-        "default": "./build/src/protocol.js"
-      }
-    },
-    "./service": {
-      "import": {
-        "types": "./build/src/service.d.ts",
-        "default": "./build/src/service.js"
-      }
-    },
-    "./discovery": {
-      "import": {
-        "types": "./build/src/discovery-entry.d.ts",
-        "default": "./build/src/discovery-entry.js"
-      }
-    },
-    "./gateway": {
-      "import": {
-        "types": "./build/src/gateway.d.ts",
-        "default": "./build/src/gateway.js"
-      }
-    },
-    "./realtime": {
-      "import": {
-        "types": "./build/src/realtime.d.ts",
-        "default": "./build/src/realtime.js"
       }
     },
     "./node": {
@@ -72,26 +42,39 @@
         "types": "./build/src/workers.d.ts",
         "default": "./build/src/workers.js"
       }
+    },
+    "./udp": {
+      "import": {
+        "types": "./build/src/udp.d.ts",
+        "default": "./build/src/udp.js"
+      }
     }
   },
   "type": "module",
   "devDependencies": {
+    "@msgpack/msgpack": "^3.0.0",
+    "@ohayo/udp": "^3.0.0",
     "@types/bun": "latest",
     "@types/node": "x",
     "@types/ws": "^8",
     "hono": "^4.12.21",
     "msgpackr": "^1.11.9",
-    "typescript": "^5.1.6"
+    "typescript": "^5.1.6",
+    "ws": "^8.18.0"
   },
   "dependencies": {
-    "@livequery/discovery": "^3.0.0",
-    "@livequery/gateway": "^3.0.0",
-    "@livequery/protocol": "^3.0.0",
-    "@livequery/realtime": "^3.0.0",
-    "@livequery/realtime-cloudflare": "^3.0.0",
-    "@livequery/service": "^3.0.0",
+    "rxjs": "x"
+  },
+  "peerDependencies": {
     "@ohayo/udp": "^3.0.0",
-    "rxjs": "x",
     "ws": "^8.18.0"
+  },
+  "peerDependenciesMeta": {
+    "@ohayo/udp": {
+      "optional": true
+    },
+    "ws": {
+      "optional": true
+    }
   }
 }

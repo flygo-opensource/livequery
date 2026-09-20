@@ -3,83 +3,92 @@
  *
  * Import via `@livequery/core/bun`.
  *
- *   const gw = new BunWebsocketGateway()
- *   gw.listen(15535)                        // start a standalone Bun.serve
+ *   const gw = new BunWebsocketGateway({ port: 15535 })   // standalone Bun.serve
  *
  *   // or inside a framework (Hono, Elysia) that already owns Bun.serve:
  *   Bun.serve({
  *     fetch(req, server) {
- *       if (new URL(req.url).pathname === '/livequery/realtime-updates') {
- *         if (gw.attachBunUpgrade(req, server)) return
- *       }
+ *       if (gw.attachBunUpgrade(req, server)) return
  *       return new Response('Not found', { status: 404 })
  *     },
  *     websocket: gw.getBunWebsocketHandlers(),
  *   })
  */
-import { WebsocketGatewayBase, SocketLike } from './WebsocketGatewayBase.js'
 import { WEBSOCKET_PATH } from './const.js'
+import { WebsocketGatewayBase, type SocketLike, type WebsocketGatewayOptions } from './WebsocketGatewayBase.js'
 
-type BunSocketData = {
-    id: string
-    gateway: boolean
-    refs: Set<string>
-    _livequery?: boolean
+export type BunWebsocketGatewayOptions = WebsocketGatewayOptions & {
+    /** Start a standalone `Bun.serve` on this port. */
+    port?: number
+    /** Upgrade path. Default `WEBSOCKET_PATH` (`/livequery/realtime-updates`). */
+    path?: string
 }
 
-type BunServer = { stop(closeActiveConnections?: boolean): void }
-type BunWs = {
+type BunSocketData = { id: string; gateway: boolean; refs: Set<string>; livequery: true }
+
+type BunSocket = {
     data: BunSocketData
     send(data: string): void
     close(): void
 }
 
-const Bun = (globalThis as { Bun?: any }).Bun
+type BunServer = { stop(closeActiveConnections?: boolean): void }
+
+type BunUpgradeServer = {
+    upgrade(request: Request, options: { data: BunSocketData }): boolean
+}
+
+type BunRuntime = { serve(options: Record<string, unknown>): BunServer }
 
 export class BunWebsocketGateway extends WebsocketGatewayBase {
+    readonly path: string
+
     #server?: BunServer
 
-    constructor(port?: number) {
-        super()
+    /** Pass a port number (legacy form) or options. */
+    constructor(options: number | BunWebsocketGatewayOptions = {}) {
+        const { port, path, ...gateway_options } = typeof options === 'number' ? { port: options } : options
+        super(gateway_options)
+        this.path = path ?? WEBSOCKET_PATH
         if (port !== undefined) this.serve(port)
     }
 
     /** Start a standalone Bun.serve on the given port. */
     serve(port: number): this {
-        if (!Bun) throw new Error('BunWebsocketGateway requires the Bun runtime')
+        const runtime = (globalThis as unknown as { Bun?: BunRuntime }).Bun
+        if (!runtime) throw new Error('BunWebsocketGateway requires the Bun runtime')
         this.#server?.stop(true)
-        this.#server = Bun.serve({
+        this.#server = runtime.serve({
             port,
-            fetch: (req: Request, server: any) => this.#fetch(req, server),
+            fetch: (request: Request, server: BunUpgradeServer) => this.#fetch(request, server),
             websocket: this.getBunWebsocketHandlers(),
-        }) as BunServer
+        })
         return this
     }
 
-    /** Use inside an existing Bun.serve `fetch()` to upgrade livequery requests. */
-    attachBunUpgrade(req: Request, server: any): boolean {
-        return server.upgrade(req, {
-            data: this.#newData(true),
-        })
+    /**
+     * Use inside an existing Bun.serve `fetch()`. Upgrades requests to `path` and returns true;
+     * returns false for any other path so the caller can handle it.
+     */
+    attachBunUpgrade(request: Request, server: BunUpgradeServer): boolean {
+        if (new URL(request.url).pathname !== this.path) return false
+        return server.upgrade(request, { data: this.#newSocketData() })
     }
 
     /** Spread into `Bun.serve({ websocket: ... })` when sharing a server. */
     getBunWebsocketHandlers() {
-        const self = this
         return {
-            open(ws: BunWs) {
-                if (!ws.data?._livequery) return
-                self.onConnection(self.#wrap(ws))
+            open: (socket: BunSocket) => {
+                if (socket.data?.livequery) this.onConnection(this.#wrap(socket))
             },
-            message(ws: BunWs, data: string | Buffer) {
-                if (!ws.data?._livequery) return
-                self.onMessage(self.#wrap(ws), data as any)
+            message: (socket: BunSocket, data: string | ArrayBuffer | Uint8Array) => {
+                if (socket.data?.livequery) this.onMessage(this.#wrap(socket), data)
             },
-            close(ws: BunWs) {
-                if (ws.data?._livequery) self.onClose(self.#wrap(ws))
+            close: (socket: BunSocket) => {
+                if (socket.data?.livequery) this.onClose(this.#wrap(socket))
             },
-            error(ws: BunWs) {
-                if (ws.data?._livequery) self.onClose(self.#wrap(ws))
+            error: (socket: BunSocket) => {
+                if (socket.data?.livequery) this.onClose(this.#wrap(socket))
             },
         }
     }
@@ -92,32 +101,26 @@ export class BunWebsocketGateway extends WebsocketGatewayBase {
 
     // ── Internal ───────────────────────────────────────────────────────────────
 
-    #fetch(req: Request, server: any): Response | undefined {
-        if (new URL(req.url).pathname === WEBSOCKET_PATH) {
-            if (server.upgrade(req, { data: this.#newData(true) })) return
-        }
+    #fetch(request: Request, server: BunUpgradeServer): Response | undefined {
+        if (this.attachBunUpgrade(request, server)) return undefined
         return new Response('Not found', { status: 404 })
     }
 
-    #newData(livequery = true): BunSocketData {
-        return {
-            id: '',
-            gateway: false,
-            refs: new Set<string>(),
-            _livequery: livequery,
-        }
+    #newSocketData(): BunSocketData {
+        return { id: '', gateway: false, refs: new Set<string>(), livequery: true }
     }
 
-    #wrap(ws: BunWs): SocketLike {
+    // Identity lives on socket.data, so every wrapper of the same socket sees the same state.
+    #wrap(socket: BunSocket): SocketLike {
         return {
-            send: (d) => ws.send(d),
-            close: () => ws.close(),
-            get id() { return ws.data.id },
-            set id(v) { ws.data.id = v },
-            get gateway() { return ws.data.gateway },
-            set gateway(v) { ws.data.gateway = v },
-            get refs() { return ws.data.refs },
-            set refs(v) { ws.data.refs = v },
+            send: data => socket.send(data),
+            close: () => socket.close(),
+            get id() { return socket.data.id },
+            set id(value) { socket.data.id = value },
+            get gateway() { return socket.data.gateway },
+            set gateway(value) { socket.data.gateway = value },
+            get refs() { return socket.data.refs },
+            set refs(value) { socket.data.refs = value },
         }
     }
 }

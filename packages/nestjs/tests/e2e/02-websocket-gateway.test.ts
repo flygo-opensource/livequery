@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
-import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core'
+import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core/node'
 import { wsConnect, waitForWsMessage, sendJson, sleep, closeServer } from './helpers.js'
 import type { UpdatedData } from '@livequery/types'
 
