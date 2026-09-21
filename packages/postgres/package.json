@@ -4,7 +4,9 @@
   "license": "MIT",
   "type": "module",
   "repository": {
-    "url": "git@github.com:livequery/postgres.git"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/postgres"
   },
   "version": "3.0.0",
   "description": "PostgreSQL datasource mapping for @livequery ecosystem",
@@ -31,8 +33,7 @@
   },
   "scripts": {
     "test": "bun test",
-    "build": "rm -rf build; tsc -b .",
-    "deploy": "rm -rf build && yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    "build": "rm -rf build; tsc -b ."
   },
   "peerDependencies": {
     "pg": "^8.0.0"
@@ -41,5 +42,9 @@
     "pg": {
       "optional": true
     }
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/postgres#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
   }
 }

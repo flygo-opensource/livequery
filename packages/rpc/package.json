@@ -78,5 +78,14 @@
     "rxjs": "^7.8.2",
     "uuidv7": "^1.2.1"
   },
-  "private": false
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/rpc"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/rpc#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
+  }
 }

@@ -1,7 +1,9 @@
 {
   "name": "@livequery/rest",
   "repository": {
-    "url": "https://github.com/livequery/rest"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/rest"
   },
   "version": "3.0.0",
   "type": "module",
@@ -52,5 +54,9 @@
   "license": "ISC",
   "dependencies": {
     "@msgpack/msgpack": "^3.0.0"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/rest#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
   }
 }

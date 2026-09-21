@@ -1,7 +1,9 @@
 {
   "name": "@livequery/react",
   "repository": {
-    "url": "https://github.com/livequery/react"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/react"
   },
   "type": "module",
   "version": "3.0.0",
@@ -70,5 +72,9 @@
     "build:watch": "bunx tsc -p tsconfig.build.json --watch"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/react#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
+  }
 }

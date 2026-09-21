@@ -3,7 +3,9 @@
   "author": "Duong Van Ba",
   "license": "MIT",
   "repository": {
-    "url": "git@github.com:livequery/nestjs.git"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/nestjs"
   },
   "version": "3.0.0",
   "description": "Nestjs decorators for @livequery ecosystem",
@@ -14,8 +16,7 @@
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc -b .",
-    "deploy": "yarn build; git add .; git commit -m \"Update\"; git push origin master; npm publish --access public"
+    "build": "tsc -b ."
   },
   "exports": {
     ".": {
@@ -49,5 +50,9 @@
   },
   "dependencies": {
     "msgpackr": "^1.11.9"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/nestjs#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
   }
 }

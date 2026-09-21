@@ -4,7 +4,9 @@
   "license": "MIT",
   "type": "module",
   "repository": {
-    "url": "git@github.com:livequery/d1.git"
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/d1"
   },
   "version": "3.0.0",
   "description": "Cloudflare D1 datasource mapping for @livequery ecosystem",
@@ -34,5 +36,9 @@
   "peerDependencies": {
     "@cloudflare/workers-types": "^4",
     "@livequery/core": "^3.0.0"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/d1#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
   }
 }
