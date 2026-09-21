@@ -9,11 +9,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../client/src/index.js'
-import { RestTransporter } from '../rest/src/RestTransporter.js'
-import { RpcChannel, type RpcMessage } from '../rpc/src/RpcChannel.js'
-import { ServiceLinker } from '../rpc/src/ServiceLinker.js'
-import { WorkerManager } from '../rpc/src/WorkerManager.js'
+import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../packages/client/src/index.js'
+import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
+import { RpcChannel, type RpcMessage } from '../packages/rpc/src/RpcChannel.js'
+import { ServiceLinker } from '../packages/rpc/src/ServiceLinker.js'
+import { WorkerManager } from '../packages/rpc/src/WorkerManager.js'
 import { buildNestMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { warmupRealtime } from './helpers/realtime.js'

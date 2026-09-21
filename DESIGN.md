@@ -90,7 +90,7 @@ runtime:
 ```
 
 `@livequery/honojs` làm tương tự cho `serve()` và `realtimeGateway()`, qua export condition
-`workerd` / `bun` / `node`. `core/tests/root-entrypoint.test.ts` duyệt đồ thị import của root và
+`workerd` / `bun` / `node`. `packages/core/tests/root-entrypoint.test.ts` duyệt đồ thị import của root và
 `/workers` rồi fail nếu có ai kéo module Node vào — ranh giới này là test, không phải quy ước.
 
 | | Node | Bun | Cloudflare Workers |

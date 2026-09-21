@@ -1,18 +1,18 @@
-import '../nestjs/node_modules/reflect-metadata/Reflect.js'
+import 'reflect-metadata'
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 import type { Subscription } from 'rxjs'
-import express from '../nestjs/node_modules/express/index.js'
+import express from 'express'
 import { MongoClient, type Db, type Collection } from 'mongodb'
-import { Controller, Get, Module, Req } from '../nestjs/node_modules/@nestjs/common/index.js'
-import { NestFactory } from '../nestjs/node_modules/@nestjs/core/index.js'
-import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/index.js'
-import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/node.js'
-import { LivequeryInterceptor, UseLivequeryInterceptor } from '../nestjs/src/LivequeryInterceptor.js'
-import { MongoDatasource, MongodbRealtime } from '../mongodb/src/index.js'
-import { RestTransporter } from '../rest/src/RestTransporter.js'
+import { Controller, Get, Module, Req } from '@nestjs/common'
+import { NestFactory } from '@nestjs/core'
+import { ExpressAdapter } from '@nestjs/platform-express'
+import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core/node'
+import { LivequeryInterceptor, UseLivequeryInterceptor } from '../packages/nestjs/src/LivequeryInterceptor.js'
+import { MongoDatasource, MongodbRealtime } from '../packages/mongodb/src/index.js'
+import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
 
 // This mirrors rest-mongoose-nestjs-realtime.e2e.test.ts but swaps the datasource
 // implementation: MongoDatasource (native driver) instead of MongooseDatasource, and

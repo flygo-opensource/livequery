@@ -13,25 +13,25 @@
  * Full CRUD (add/get/query/update/delete) + realtime add/modify/remove events.
  */
 
-import '../nestjs/node_modules/reflect-metadata/Reflect.js'
+import 'reflect-metadata'
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import * as http from 'http'
 import type { AddressInfo } from 'net'
 
-import express from '../nestjs/node_modules/express/index.js'
-import { Controller, Delete, Get, Module, Patch, Post } from '../nestjs/node_modules/@nestjs/common/index.js'
-import { DiscoveryModule, NestFactory } from '../nestjs/node_modules/@nestjs/core/index.js'
-import { ExpressAdapter } from '../nestjs/node_modules/@nestjs/platform-express/index.js'
+import express from 'express'
+import { Controller, Delete, Get, Module, Patch, Post } from '@nestjs/common'
+import { DiscoveryModule, NestFactory } from '@nestjs/core'
+import { ExpressAdapter } from '@nestjs/platform-express'
 
 // Same copy of @livequery/core as nestjs/src resolves — DI token identity.
-import { WebsocketGateway, WEBSOCKET_PATH } from '../nestjs/node_modules/@livequery/core/build/src/node.js'
+import { WebsocketGateway, WEBSOCKET_PATH } from '@livequery/core/node'
 import { ObjectId } from 'mongodb'
 
-import { createDatasourceMapper } from '../nestjs/src/helpers/createDatasourceMapper.js'
-import { LivequeryDatasourceInterceptors } from '../nestjs/src/LivequeryDatasourceInterceptors.js'
-import { MongoDatasource, MongodbRealtime, type RouteOptions } from '../mongodb/src/index.js'
-import { RestTransporter } from '../rest/src/RestTransporter.js'
+import { createDatasourceMapper } from '../packages/nestjs/src/helpers/createDatasourceMapper.js'
+import { LivequeryDatasourceInterceptors } from '../packages/nestjs/src/LivequeryDatasourceInterceptors.js'
+import { MongoDatasource, MongodbRealtime, type RouteOptions } from '../packages/mongodb/src/index.js'
+import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
 
 import { DB_NAME } from './helpers/env.js'
 import { connectMongo, prepareCollection, uniqueCollection } from './helpers/mongo.js'

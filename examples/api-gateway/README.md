@@ -64,6 +64,5 @@ dữ liệu sai, 404 cho path không service nào sở hữu, header nội bộ 
 
 - Chưa có xác thực. Thêm một middleware trước `gateway()` và truyền `principal` vào nếu cần.
 - `TaskStore` nằm trong bộ nhớ nên chạy nhiều bản sao service thì mỗi bản có dữ liệu riêng.
-- Gateway dùng bảng tiền tố tĩnh. Muốn phát hiện service tự động trong LAN thì xem
-  [`examples/udp-auto-discovery`](../udp-auto-discovery/README.md), vốn dùng `ApiGatewayHandler`
-  và discovery của `@livequery/core/node`.
+- Gateway dùng bảng tiền tố tĩnh: thêm service mới thì sửa `routing.json`. Discovery lúc chạy đã
+  bị gỡ, xem [DESIGN.md](../../DESIGN.md) mục 8.

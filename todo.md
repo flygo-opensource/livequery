@@ -3,7 +3,7 @@
 ## `@livequery/mongodb`: bare `retry()` in `MongodbRealtime.#listenRawChanges` spins the CPU when `collMod` fails
 
 - Date reported: 2026-09-16
-- Affects: `mongodb/src/MongodbRealtime.ts` (`#listenRawChanges`, the `retry()` at the end of the pipe). The published `@livequery/mongodb@2.0.153` and the legacy `@livequery/mongodb-mapper@2.0.58` ship the same bare `retry()`.
+- Affects: `packages/mongodb/src/MongodbRealtime.ts` (`#listenRawChanges`, the `retry()` at the end of the pipe). The published `@livequery/mongodb@2.0.153` and the legacy `@livequery/mongodb-mapper@2.0.58` ship the same bare `retry()`.
 - Status: **open upstream**. Downstream (24aff) is running a `bun patch` workaround, see below.
 
 ### Incident (24aff production)
@@ -15,7 +15,7 @@
 
 ### What to change
 
-1. **Back off on retry.** Mirror what `postgres/src/PostgresRealtime.ts` already does: exponential delay with a cap, driven by options.
+1. **Back off on retry.** Mirror what `packages/postgres/src/PostgresRealtime.ts` already does: exponential delay with a cap, driven by options.
 
    ```ts
    export type MongoRealtimeOptions = {

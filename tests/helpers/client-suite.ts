@@ -6,8 +6,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../../client/src/index.js'
-import { RestTransporter } from '../../rest/src/RestTransporter.js'
+import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../../packages/client/src/index.js'
+import { RestTransporter } from '../../packages/rest/src/RestTransporter.js'
 import type { AppHandle } from './servers.js'
 import { warmupRealtime } from './realtime.js'
 import { sleep, waitFor } from './wait.js'

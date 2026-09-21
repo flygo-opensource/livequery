@@ -9,8 +9,8 @@
  * software with a quietly growing bill, which no other test would catch.
  */
 import { describe, expect, test } from 'bun:test'
-import { LIVEQUERY_PING_FRAME, LIVEQUERY_PONG_FRAME } from '../core/build/src/index.js'
-import { LIVEQUERY_PING_FRAME as CLIENT_PING_FRAME } from '../rest/src/Socket.js'
+import { LIVEQUERY_PING_FRAME, LIVEQUERY_PONG_FRAME } from '../packages/core/build/src/index.js'
+import { LIVEQUERY_PING_FRAME as CLIENT_PING_FRAME } from '../packages/rest/src/Socket.js'
 
 describe('keep-alive frame', () => {
     test('client and server agree byte for byte', () => {

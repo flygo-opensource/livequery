@@ -307,7 +307,7 @@ The middleware runs the operation, publishes `livequery_result` and builds the r
 calling `next()`, so a `realtime()` after it can still add headers. It does not publish changes:
 a service that also runs `MongodbRealtime.watch()` gets those from the change stream, which also
 covers writes that never went through the API. See
-[`examples/todo-mongodb`](../examples/todo-mongodb/README.md) for the whole app.
+[`examples/todo-mongodb`](../../examples/todo-mongodb/README.md) for the whole app.
 
 ### `MongodbRealtime`
 

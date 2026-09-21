@@ -10,17 +10,17 @@
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import React, { act } from '../react/node_modules/react/index.js'
-import { create, type ReactTestRenderer } from '../react/node_modules/react-test-renderer/index.js'
-import { LivequeryClientProvider } from '../react/src/LivequeryClientContext.js'
-import { useCollection } from '../react/src/useCollection.js'
-import { useDocument } from '../react/src/useDocument.js'
-import { useObservable } from '../react/src/useObservable.js'
-import { useAction } from '../react/src/useAction.js'
+import React, { act } from 'react'
+import { create, type ReactTestRenderer } from 'react-test-renderer'
+import { LivequeryClientProvider } from '../packages/react/src/LivequeryClientContext.js'
+import { useCollection } from '../packages/react/src/useCollection.js'
+import { useDocument } from '../packages/react/src/useDocument.js'
+import { useObservable } from '../packages/react/src/useObservable.js'
+import { useAction } from '../packages/react/src/useAction.js'
 // Import the client from the same module instance the react hooks resolve
 // ('@livequery/client' → react/node_modules symlink → client/dist).
-import { LivequeryClient, LivequeryMemoryStorage } from '../react/node_modules/@livequery/client/dist/index.js'
-import { RestTransporter } from '../rest/src/RestTransporter.js'
+import { LivequeryClient, LivequeryMemoryStorage } from '@livequery/client'
+import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
 import { buildNestMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { warmupRealtime } from './helpers/realtime.js'

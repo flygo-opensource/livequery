@@ -3,16 +3,13 @@
   "private": true,
   "packageManager": "bun@1.2.5",
   "workspaces": [
-    "core",
-    "d1",
-    "honojs",
-    "mongodb",
-    "nestjs",
-    "cf-worker",
-    "examples"
+    "packages/*",
+    "examples",
+    "examples/cf-worker",
+    "examples/todo-app"
   ],
   "scripts": {
-    "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck && bun run --cwd cf-worker type-check",
+    "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck && bun run --cwd examples/cf-worker type-check",
     "test": "bun scripts/test-packages.ts && bun run --cwd examples test"
   }
 }

@@ -11,7 +11,7 @@ Loại trừ: `indexeddb`, `mongoose`, `sqlite`.
 - **Mongo**: `mongodb://127.0.0.1:27017/` (env `LIVEQUERY_E2E_MONGO_URL`), **db `livequery`** (env `LIVEQUERY_E2E_DB_NAME`), `authSource=admin`.
 - Mỗi suite dùng **collection name unique** (`<suite>_<Date.now()>`), xoá sạch ở `afterAll`.
 - `MongodbRealtime` khởi tạo `{ enablePreAndPostImages: false }` (không cần quyền collMod).
-- Runner: `bun test tests/` từ repo root; import cross-package theo pattern hiện có (`../<pkg>/src/...`, deps qua `../nestjs/node_modules/...`).
+- Runner: `bun test tests/` từ repo root; import cross-package qua `../packages/<pkg>/src/...`; thư viện ngoài import bare (`express`, `@nestjs/core`...) vì workspace hoist một bản duy nhất lên gốc.
 - Cleanup bắt buộc để bun exit: `transporter.socket.stop()`, `gateway.close()`, `server.closeAllConnections()`, `client.destroy()`, unsubscribe realtime watcher.
 
 ### Phase 0 — Helpers (`tests/helpers/`)
@@ -21,7 +21,7 @@ Loại trừ: `indexeddb`, `mongoose`, `sqlite`.
 | `mongo.ts` | `connectMongo()`, `uniqueCollection(prefix)`, `seedDocs()`, `cleanup()` |
 | `servers.ts` | `buildNestMongoApp(opts)` / `buildHonoMongoApp(opts)` → `{ port, apiUrl, wsUrl, gateway, datasource, mongo, close() }` — dựng full app: HTTP server + WebsocketGateway + MongoDatasource + (tuỳ chọn) MongodbRealtime |
 | `wait.ts` | `waitFor(predicate, timeout)`, `collectEvents(observable)` |
-| `ws.ts` | raw WS client helper (start/hello/sync) — tái dùng từ `nestjs/tests/e2e/helpers.ts` |
+| `ws.ts` | raw WS client helper (start/hello/sync) — tái dùng từ `packages/nestjs/tests/e2e/helpers.ts` |
 
 Đồng thời: chuẩn hoá 2 test e2e hiện có sang db `livequery` (đang là `livequery-test`).
 
@@ -101,7 +101,7 @@ Cùng matrix 3.1 trên Hono backend (qua `useDatasource` handler) — chứng mi
 ## Phase 4 — React + RPC trên stack thật
 
 ### 4.1 `react-fullstack.e2e.test.tsx`
-Harness: `react-test-renderer` + `React.act` (theo pattern `react/tests/`), backend từ Phase 3.
+Harness: `react-test-renderer` + `React.act` (theo pattern `packages/react/tests/`), backend từ Phase 3.
 - `<LivequeryClientProvider core={client}>` + `useCollection(ref)` → items render từ server thật
 - Update Mongo out-of-band → hook state tự cập nhật (assert sau `act` + waitFor)
 - `useDocument(ref/id)` → `[doc, loading, error]` đúng vòng đời
@@ -158,5 +158,5 @@ Mô phỏng kiến trúc SharedWorker: collection sống ở "worker", UI nhận
 3. **RestTransporter chờ gateway_id tối đa 3s** — phải đợi socket `hello` trước khi assert subscription, hoặc chấp nhận latency đầu.
 4. **Socket heartbeat 60s + reconnect timer** — luôn `stop()` trong afterAll kẻo treo process.
 5. **`hidePrivateFields` chạy 2 tầng** (interceptor + response helper) — assert không double-strip `id`.
-6. **react-test-renderer + react 19** — đã dùng sẵn trong `react/tests`, giữ nguyên harness, không cần DOM.
+6. **react-test-renderer + react 19** — đã dùng sẵn trong `packages/react/tests`, giữ nguyên harness, không cần DOM.
 7. Root `bun test` quét cả packages → chạy e2e bằng `bun test tests/` hoặc từng file để tránh nhiễu reflect-metadata cross-package đã biết.

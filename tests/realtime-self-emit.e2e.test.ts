@@ -7,7 +7,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { interval, map } from '../core/node_modules/rxjs/dist/cjs/index.js'
+import { interval, map } from 'rxjs'
 import { buildNestMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { sleep } from './helpers/wait.js'

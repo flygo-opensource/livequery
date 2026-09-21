@@ -160,7 +160,7 @@ Trust model:
   and another principal cannot `start` with a `client_id` that still has subscriptions.
 - A client `unsubscribe` only removes that socket's own subscriptions.
 
-A full example with D1, auth and sharding: [`cf-worker`](../cf-worker/README.md).
+A full example with D1, auth and sharding: [`cf-worker`](../../examples/cf-worker/README.md).
 
 ## Core Types
 
@@ -576,7 +576,7 @@ Copies a Web `Response` into a Node.js `ServerResponse`.
 
 A service is a Hono app; a gateway routes to it by path prefix. Both live in
 [`@livequery/honojs`](../honojs/README.md), and a full pair that runs on Node and Bun is in
-[`examples/api-gateway`](../examples/api-gateway/README.md):
+[`examples/api-gateway`](../../examples/api-gateway/README.md):
 
 ```ts
 // service

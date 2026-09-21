@@ -1,9 +1,9 @@
-// d1 and mongodb depend on core, so core builds first.
-const packages = ['core', 'd1', 'mongodb']
+// Dependency order: core first, then what builds on it; client before rest and react.
+const packages = ['core', 'd1', 'mongodb', 'postgres', 'honojs', 'nestjs', 'client', 'rest', 'rpc', 'react']
 
 for (const name of packages) {
   const process = Bun.spawn(['bun', 'run', 'build'], {
-    cwd: new URL(`../${name}/`, import.meta.url).pathname,
+    cwd: new URL(`../packages/${name}/`, import.meta.url).pathname,
     stdout: 'inherit',
     stderr: 'inherit',
   })

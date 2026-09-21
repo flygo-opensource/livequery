@@ -5,8 +5,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../client/src/index.js'
-import { RestTransporter } from '../rest/src/RestTransporter.js'
+import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../packages/client/src/index.js'
+import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
 import { buildNestMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { warmupRealtime } from './helpers/realtime.js'
