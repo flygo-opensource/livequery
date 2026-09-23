@@ -126,3 +126,29 @@ export type LivequeryResult<T> = {
     data: T
     error?: { code: string, message: string, status?: number }
 }
+
+export type LocalFirstScope = 'full' | 'window' | 'on-demand'
+
+/**
+ * How much of a collection lives on the device, and how long it stays in sync. Given as
+ * `mode: { ... }` on a collection (the string `'local-first'` is `{}`).
+ */
+export type LocalFirstConfig = {
+    /** `full`: everything. `window`: the `size` newest by `sort`, older loaded on scroll. `on-demand`: what was viewed. Default `full`. */
+    scope?: LocalFirstScope
+    /** With `window`: how many documents to keep in sync. Default 200. */
+    size?: number
+    /** Order of the window, e.g. `{ created_at: 'desc' }`. Default: the collection's `:sort` filters. */
+    sort?: Record<string, 'asc' | 'desc'>
+    /** How long it stays in sync after the last collection using it closes: 'always', '10m', '24h'… Default '10m'. */
+    keep?: 'always' | string | number
+    /** Drop the local copy after this long unused. Default '30d'. */
+    evict?: string | number
+    /** Data to keep in sync for every document of this collection. Keys are refs; `:field` is read from the document. */
+    children?: Record<string, LocalFirstConfig>
+}
+
+export type LivequeryMode = 'server-first' | 'cache-first' | 'local-first' | 'local-only' | LocalFirstConfig
+
+/** Whether a local-first collection holds everything its scope covers. */
+export type LivequeryCompleteness = 'complete' | 'partial' | 'unknown'

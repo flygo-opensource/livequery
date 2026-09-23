@@ -1,7 +1,10 @@
-import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, take, takeUntil, takeWhile, tap, toArray } from "rxjs"
+import { concatMap, EMPTY, filter, finalize, from, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
-import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
+import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState, LivequeryMode, LocalFirstConfig } from "./types.js"
+import { LIVEQUERY_SYNC_REF, LivequerySync, type SyncHandle, type SyncIngestOptions } from "./LivequerySync.js"
+import { encodeCursor } from "./helpers/paginateDocs.js"
+import { sortersOf } from "./helpers/sortDocs.js"
 import { LIVEQUERY_OUTBOX_REF, LivequeryOutbox, type OutboxEntry, type OutboxExecution, type OutboxOperation, type OutboxSettlement } from "./LivequeryOutbox.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
@@ -59,6 +62,8 @@ export type CollectionMetadata = {
     }>
     collection_ref: string
     mode: 'server-first' | 'local-first' | 'cache-first' | 'local-only'
+    /** Local-first only: what the collection declared it needs on the device. */
+    sync?: LocalFirstConfig
     filters: Partial<LivequeryFilters<any>>
     parsedFilters: ParsedFilter[]
     /** The last first-page query, re-run when a transporter reconnects. */
@@ -102,8 +107,12 @@ const toAddPayload = (doc: Record<string, any>) => ({
 
 const isIdAlreadyExists = (e: DocError) => e.code === 'ID_ALREADY_EXISTS'
 
-// Exists only on this device so far: a refetch that does not see it must not remove it.
-const isUnsynced = (doc: Record<string, any>) => String(doc.id).startsWith('local:') || !!doc._adding || !!doc._local_only
+/** `'local-first'` and `{ ... }` are local-first; the object also says how much to keep in sync. */
+export function normalizeMode(mode: LivequeryMode | undefined): { mode: CollectionMetadata['mode'], sync?: LocalFirstConfig } {
+    if (mode === undefined) return { mode: 'server-first' }
+    if (typeof mode === 'object') return { mode: 'local-first', sync: mode }
+    return mode === 'local-first' ? { mode, sync: {} } : { mode }
+}
 
 /** Server-maintained version of a document (ms). Changes older than the stored one are ignored. */
 export const VERSION_FIELD = 'updated_at'
@@ -124,11 +133,12 @@ export class LivequeryClient {
 
     /** Local-first writes waiting for, or on their way to, the transporters. */
     readonly outbox: LivequeryOutbox
+    /** Keeps the local copy of local-first collections in sync, as each one declares. */
+    readonly sync: LivequerySync
 
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<Query>()
-    #localSyncingStop$ = new Subject<void>()
     #addLock = new AddLock()
     #running = new Subscription()
     #subscriptions = new Subscription()
@@ -140,10 +150,20 @@ export class LivequeryClient {
             onQueued: entries => this.#markQueued(entries),
             lock: config.storage.shared ? `livequery-outbox:${config.storage.shared}` : undefined,
         })
+        this.sync = new LivequerySync({
+            storage: config.storage,
+            transporters: config.transporters,
+            ingest: (transporter_id, collection_ref, changes, options) => this.#ingestAndBroadcast(transporter_id, collection_ref, changes, options),
+            refetched: (collection_ref, changes) => this.#broadcast(collection_ref, 'query', { changes, refetch: true }),
+        })
         this.#start()
         this.#watchConnections()
-        // Resumes writes a previous session (a reload, a killed service worker) left queued.
-        Object.keys(config.transporters).length > 0 && this.outbox.start()
+        if (Object.keys(config.transporters).length > 0) {
+            // Resumes writes a previous session (a reload, a killed service worker) left queued.
+            this.outbox.start()
+            // Resumes the `keep: 'always'` scopes before any collection asks for them.
+            this.sync.start().catch(e => console.warn('livequery sync: start failed', e))
+        }
     }
 
     #cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
@@ -235,55 +255,6 @@ export class LivequeryClient {
                         })
                     )
                 })
-            ),
-
-
-            // Local queries
-            this.#queries$.pipe(
-                filter(req => req.collection.mode == 'local-first'),
-                groupBy(
-                    e => `${e.collection.collection_ref}/${e.collection.document_id || '::'}`,
-                    // stopLocalSyncing() đóng group đang mở; group bị xóa khỏi groupBy nên
-                    // lần query kế tiếp của cùng collection_ref tạo group mới → fetch lại từ index 0.
-                    { duration: () => this.#localSyncingStop$ }
-                ),
-                mergeMap($ => $.pipe(
-                    mergeMap((e, index) => {
-                        index == 0 && e.collection.data$.next({
-                            from: 'query',
-                            loading: 'all'
-                        })
-                        return merge(
-                            of(e),
-                            index > 0 ? EMPTY : defer(() => {
-                                return this.#query(e).pipe(
-                                    expand(res => {
-                                        const next = res.paging?.next
-                                        if (!next) return EMPTY
-                                        return this.#query({
-                                            ...e,
-                                            filters: { ':after': next.cursor }
-                                        })
-                                    }),
-                                    mergeMap(result => {
-                                        return from(this.#broadcast(e.collection.collection_ref, 'query', result)).pipe(
-                                            map(() => result)
-                                        )
-                                    })
-
-                                )
-                            }).pipe(switchMap(() => EMPTY))
-                        )
-                    }),
-                    scan(
-                        (p, c) => new Set([...p, c.collection.data$].filter($ => !$.closed)),
-                        new Set<Subject<any>>()
-                    ),
-                    map(set => [...set].map($ => whenCompleted($))),
-                    switchMap(list => forkJoin(list)),
-                    takeWhile(() => false)
-                ))
-
             )
         ).subscribe()
     }
@@ -314,36 +285,32 @@ export class LivequeryClient {
      */
     refetch() {
         this.#cache.clear()
-        const local_groups = new Set<string>()
         for (const collection of this.#collections.values()) {
             const last = collection.last_query
             if (!last) continue
             if (collection.mode === 'server-first' || collection.mode === 'cache-first') {
                 this.#queries$.next({ ...last, collection, refetch: true })
-                continue
             }
-            if (collection.mode !== 'local-first') continue
-            // Local-first collections of one ref share their sync; fetch it once.
-            const key = `${collection.collection_ref}/${collection.document_id ?? '::'}`
-            if (local_groups.has(key)) continue
-            local_groups.add(key)
-            this.#refetchLocal({ ...last, collection }).catch(e => console.error('livequery: refetch failed', e))
         }
+        // Local-first scopes catch up through the sync: a delta, or a re-read without versions.
+        this.sync.reconnected()
     }
 
     /**
-     * Đóng mọi local-first sync đang chạy. Lần query kế tiếp của mỗi collection_ref
-     * sẽ được fetch lại từ đầu thay vì bị dedup. Gọi khi logout / đổi account.
+     * Forget what the local-first scopes hold, so each reloads from the server on next use.
+     * Call on logout / account switch.
      */
     stopLocalSyncing() {
-        this.#localSyncingStop$.next()
+        this.sync.cleared()
     }
 
-    watch(ref: string, collection_id: string, mode: CollectionMetadata['mode']) {
+    watch(ref: string, collection_id: string, requested: LivequeryMode, context?: Record<string, any>) {
+        const { mode, sync } = normalizeMode(requested)
         const refs = ref.split('/')
         const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
         if (collection_ref === LIVEQUERY_OUTBOX_REF) throw new Error(`"${LIVEQUERY_OUTBOX_REF}" is reserved for the outbox`)
+        if (collection_ref === LIVEQUERY_SYNC_REF) throw new Error(`"${LIVEQUERY_SYNC_REF}" is reserved for the sync`)
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         collections.add(collection_id)
         this.#refs.set(collection_ref, collections)
@@ -354,11 +321,25 @@ export class LivequeryClient {
             collection_id,
             collection_ref,
             mode,
+            ...sync ? { sync } : {},
             filters: {},
             parsedFilters: []
         })
+        const handle: SyncHandle | undefined = sync && Object.keys(this.config.transporters).length > 0
+            ? this.sync.acquire(collection_ref, sync, collection_id, context)
+            : undefined
+        // The first load shows as loading; completeness tells the UI whether more exists.
+        const status = handle?.status$.subscribe(status => data$.next({
+            from: 'query',
+            completeness: this.sync.completeness(collection_ref),
+            // Only a first load shows as loading; deltas and realtime happen quietly.
+            ...status.extending ? {} : { loading: !status.loaded && status.fetching ? 'all' as const : null },
+            ...status.error ? { error: status.error } : {},
+        }))
         return data$.pipe(
             finalize(() => {
+                status?.unsubscribe()
+                handle?.release()
                 this.#collections.delete(collection_id)
                 collections.delete(collection_id)
                 if (collections.size === 0) {
@@ -377,6 +358,11 @@ export class LivequeryClient {
         if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
         if (isFirstPageQuery(req.filters)) collection.last_query = req
 
+        if (collection.document_id && collection.mode == 'local-first') {
+            const doc = await this.config.storage.get<T>(collection.collection_ref, collection.document_id)
+            return { documents: doc ? [doc] : [], paging: { total: doc ? 1 : 0, current: doc ? 1 : 0 } }
+        }
+
         // If document
         if (collection.document_id) {
             const ids = this.#refs.get(collection.collection_ref)
@@ -387,9 +373,16 @@ export class LivequeryClient {
             }
         }
 
+        // Local-first: the device answers; the sync fetches only past what it holds.
+        if (collection.mode == 'local-first') {
+            collection.filters = req.filters || {}
+            collection.parsedFilters = parseFilters(collection.filters as Record<string, any>)
+            return await this.#localPage<T>(collection, req.filters ?? {})
+        }
+
         setTimeout(() => this.#queries$.next({
             ...req,
-            filters: collection.mode == 'local-first' ? {} : req.filters,
+            filters: req.filters,
             collection
         }))
 
@@ -397,9 +390,6 @@ export class LivequeryClient {
         // If collection
         collection.filters = req.filters || {}
         collection.parsedFilters = parseFilters(collection.filters as Record<string, any>)
-        if (collection.mode == 'local-first') {
-            return await this.config.storage.query<T>(req.ref, req.filters)
-        }
 
         if (collection.mode == 'cache-first') {
             const before = req.filters?.[':before']
@@ -677,12 +667,14 @@ export class LivequeryClient {
         await this.#broadcast(collection_ref, 'realtime', { changes: [{ collection_ref, id: '*', type: 'removed' }] })
         await this.config.storage.flush()
         this.outbox.cleared()
+        this.sync.cleared()
     }
 
     destroy() {
         this.#running.unsubscribe()
         this.#subscriptions.unsubscribe()
         this.outbox.stop()
+        this.sync.stop()
     }
 
     // ── Read path ──────────────────────────────────────────────────────────────
@@ -732,30 +724,52 @@ export class LivequeryClient {
         return { ...change, data: change.type === 'added' ? stored ?? resolved.document : resolved.document }
     }
 
-    // One-shot re-read of a local-first sync, every page. The long-lived sync keeps running; this
-    // only repairs what it missed. Documents the server no longer returns are removed locally.
-    async #refetchLocal(e: Query) {
-        const count = Object.keys(this.config.transporters).length
-        // No filters: a first-page read without opening another realtime subscription.
-        const read = (filters?: Record<string, any>) => this.#query({ ...e, filters }).pipe(take(count))
-        const pages = await lastValueFrom(read().pipe(
-            expand(page => page.paging?.next ? read({ ':after': page.paging.next.cursor }) : EMPTY),
-            toArray()
-        ))
-        // A partial read cannot tell deleted from not-yet-fetched.
-        if (pages.some(page => page.error)) return
-        const { collection_ref, document_id } = e.collection
-        const changes = pages.flatMap(page => page.changes ?? [])
-        if (!document_id) {
-            const seen = new Set(changes.map(change => change.id))
-            const { documents } = await this.config.storage.query<DocState<Doc>>(collection_ref)
-            for (const doc of documents) {
-                if (seen.has(doc.id) || isUnsynced(doc)) continue
-                await this.config.storage.delete(collection_ref, doc.id)
-                changes.push({ collection_ref, id: doc.id, type: 'removed' })
-            }
+    // A page of a local-first collection, from storage. Past the end of what the device holds,
+    // the sync loads the next older page from the server first (when it can).
+    async #localPage<T extends Doc>(collection: CollectionMetadata, filters: Record<string, any>) {
+        const storage = this.config.storage
+        let page = await storage.query<T>(collection.collection_ref, filters)
+        const incomplete = () => this.sync.completeness(collection.collection_ref) !== 'complete'
+        const limit = Number(filters[':limit']) || undefined
+        // Past what the device holds (a short page): ask the server for the next older page.
+        const short = limit !== undefined && page.documents.length < limit
+        if (!page.paging.next && filters[':after'] && short && incomplete()) {
+            collection.data$.next({ from: 'query', loading: 'next' })
+            await this.sync.extend(collection.collection_ref, limit).catch(e => {
+                collection.data$.next({ from: 'query', error: { code: e?.code ?? 'SYNC_FAILED', message: e?.message ?? 'Cannot load more right now' } })
+            })
+            page = await storage.query<T>(collection.collection_ref, filters)
+            collection.data$.next({ from: 'query', loading: null, completeness: this.sync.completeness(collection.collection_ref) })
         }
-        await this.#broadcast(collection_ref, 'query', { changes, refetch: true })
+        // More may exist on the server: keep a cursor so the UI can ask again (e.g. once online).
+        const last = page.documents.at(-1)
+        const cursor = last ? encodeCursor(last, sortersOf(filters)) : filters[':after']
+        if (!page.paging.next && filters[':limit'] && cursor && incomplete()) {
+            page = { ...page, paging: { ...page.paging, next: { count: 0, cursor } } }
+        }
+        return page
+    }
+
+    // The single write path for server data the sync brings: ingest (rebase, versions, storage),
+    // then tell the collections. Realtime `added` waits for adds in flight, like the query stream.
+    async #ingestAndBroadcast(transporter_id: string, collection_ref: string, changes: DataChangeEvent[], options: SyncIngestOptions) {
+        const ingested: DataChangeEvent[] = []
+        for (const change of changes) {
+            const result = await this.#ingestRemoteChange(transporter_id, { ...change, collection_ref })
+            result && ingested.push(result)
+        }
+        if (options.broadcast === false || ingested.length === 0) return ingested
+        const source: RealtimeChangeSource = options.source === 'realtime' ? 'realtime' : 'query'
+        if (source === 'realtime' && this.#addLock.locked(collection_ref)) {
+            await this.#broadcast(collection_ref, source, { changes: ingested.filter(c => c.type !== 'added') })
+            const delayed = ingested.filter(c => c.type === 'added')
+            this.#addLock.pending(collection_ref).subscribe(() => {
+                this.#broadcast(collection_ref, source, { changes: delayed }).catch(e => console.error('livequery: broadcast failed', e))
+            })
+            return ingested
+        }
+        await this.#broadcast(collection_ref, source, { changes: ingested })
+        return ingested
     }
 
     // ── Write path ─────────────────────────────────────────────────────────────

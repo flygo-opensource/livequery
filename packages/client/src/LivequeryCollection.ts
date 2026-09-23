@@ -1,6 +1,8 @@
 import { BehaviorSubject, debounceTime, EMPTY, filter, finalize, lastValueFrom, merge, Observable, pairwise, Subject, Subscription, switchMap, tap } from "rxjs"
-import { LivequeryClient, type ActionMode, type CollectionMetadata, type LivequeryLoadingState } from "./LivequeryClient.js"
-import type { DataChangeEvent, Doc, DocState, LivequeryFilters, LivequeryPaging, ParitalDocState } from "./types.js"
+import { normalizeMode, type ActionMode, type LivequeryClient, type LivequeryLoadingState } from "./LivequeryClient.js"
+import type { DataChangeEvent, Doc, DocState, LivequeryCompleteness, LivequeryFilters, LivequeryMode, LivequeryPaging, ParitalDocState } from "./types.js"
+import { compareDocs, sortersOf } from "./helpers/sortDocs.js"
+import { encodeCursor } from "./helpers/paginateDocs.js"
 import { LivequeryDocument } from "./LivequeryDocument.js"
 import { uuidv7 } from 'uuidv7'
 
@@ -9,7 +11,12 @@ export type LivequeryCollectionOptions<T extends Doc> = {
     filters: Partial<LivequeryFilters<T>>
     lazy: boolean
     debounce: number
-    mode: CollectionMetadata['mode']
+    /**
+     * Where reads come from. A string (`'server-first'`, `'cache-first'`, `'local-first'`,
+     * `'local-only'`), or an object: local-first, with how much to keep on the device —
+     * `{ scope, size, sort, keep, evict, children }` (see `LocalFirstConfig`).
+     */
+    mode: LivequeryMode
     seed: {
         data: T[]
         persist: boolean
@@ -33,6 +40,10 @@ export type LivequeryCollectionOptions<T extends Doc> = {
 
 export type OneOrMany<T> = T | T[]
 
+/** What a collection needs from a client — a `LivequeryClient`, or a proxy to one in a worker. */
+export type LivequeryClientLike = Pick<LivequeryClient,
+    'watch' | 'query' | 'add' | 'update' | 'delete' | 'retry' | 'trigger' | 'flush' | 'seedToStorage'>
+
 export class LivequeryCollection<T extends Doc> {
 
     public readonly id = uuidv7()
@@ -50,9 +61,13 @@ export class LivequeryCollection<T extends Doc> {
     public readonly paging: BehaviorSubject<LivequeryPaging>
     public readonly selected: BehaviorSubject<Set<string>>
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
+    /** Local-first: whether the device holds everything the collection's scope covers. */
+    public readonly completeness = new BehaviorSubject<LivequeryCompleteness>('unknown')
     #index = 0
+    // Local-first: how many documents the UI asked for so far (`:limit` × pages loaded).
+    #window = Infinity
 
-    constructor(private client: LivequeryClient, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
+    constructor(private client: LivequeryClientLike, private options: Partial<LivequeryCollectionOptions<T>> = {}) {
         const seedDocs = (options.seed?.data ?? []).map((doc, i) =>
             new LivequeryDocument(this, { ...doc, _index: i + 1 } as DocState<T>)
         )
@@ -80,7 +95,12 @@ export class LivequeryCollection<T extends Doc> {
 
 
     #defaultMode(): ActionMode {
-        return !this.options.mode || this.options.mode === 'cache-first' ? 'server-first' : this.options.mode
+        const { mode } = normalizeMode(this.options.mode)
+        return mode === 'cache-first' ? 'server-first' : mode
+    }
+
+    #isLocalFirst() {
+        return normalizeMode(this.options.mode).mode === 'local-first'
     }
 
     #subscription: Subscription | null = null
@@ -121,12 +141,13 @@ export class LivequeryCollection<T extends Doc> {
                 )
             ) : EMPTY,
 
-            this.client.watch(this.ref, this.id, this.options.mode || 'server-first').pipe(
+            this.client.watch(this.ref, this.id, this.options.mode || 'server-first', this.options.context).pipe(
                 finalize(() => {
                     this.#timer && clearTimeout(this.#timer)
                     this.#timer = undefined
                 }),
                 tap(event => {
+                    event.completeness && this.completeness.next(event.completeness)
                     event.summary && this.summary.next(event.summary)
                     event.paging && this.paging.next(event.paging)
                     if (event.error) {
@@ -152,92 +173,7 @@ export class LivequeryCollection<T extends Doc> {
                         return
                     }
 
-                    const changes = event.refetch ? this.#reconcile(event.changes ?? []) : event.changes
-                    if (!changes || changes.length == 0) return
-                    const chaos = changes.some(change => {
-                        if (change.type == 'added' || change.type == 'removed') return true
-                        if (change.data && change.data.id && change.data.id != change.id) return true
-                        return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
-                    })
-                    const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
-                        for (const [key, order] of this.#keys) {
-                            const va = a.value[key]
-                            const vb = b.value[key]
-                            if (typeof va === 'number' && typeof vb === 'number') {
-                                if (va < vb) return -order
-                                if (va > vb) return order
-                                return 0
-                            }
-                            if (typeof va === 'string' && typeof vb === 'string') {
-                                return va.localeCompare(vb) * order
-                            }
-                            return 0
-                        }
-                        return a.value.id.localeCompare(b.value.id)
-                    }
-
-                    const events = changes.reduce((p, c) => {
-                        return {
-                            ...p,
-                            [c.type]: [
-                                ...(p[c.type] || []),
-                                c
-                            ]
-                        }
-                    }, {
-                        added: [] as DataChangeEvent[],
-                        modified: [] as DataChangeEvent[],
-                        removed: [] as DataChangeEvent[]
-                    })
-
-                    const updated_items = events.modified.reduce((p, { data, id }) => {
-                        const index = this.#indexes.get(id)
-                        const target = index != undefined && index >= 0 ? p[index] : null
-                        target && target.next({ ...target.value, ...data })
-                        return p
-                    }, this.items.value)
-
-                    const new_items = (
-                        events.added
-                            .filter(a => a.data)
-                            .reduce(
-                                (p, c) => {
-                                    if (!p.indexes.has(c.id)) {
-                                        const doc = new LivequeryDocument(this, {
-                                            id: c.id,
-                                            ...c.data,
-                                            _index: ++this.#index
-                                        } as any as DocState<T>)
-                                        p.list.push(doc)
-                                        p.indexes.add(c.id)
-                                    }
-                                    return p
-                                },
-                                {
-                                    list: [] as LivequeryDocument<DocState<T>>[],
-                                    indexes: new Set(this.#indexes.keys())
-                                }
-                            )
-                    )
-
-                    // Deduplicated: removing the same index twice would cut out its neighbour.
-                    const remove_indexes = [...new Set(
-                        events.removed
-                            .map(r => this.#indexes.get(r.id))
-                            .filter(i => i != undefined)
-                    )].sort((a, b) => b - a)
-
-                    const unsort_items = remove_indexes.reduce((p, index) => {
-                        return [
-                            ...p.slice(0, index),
-                            ...p.slice(index + 1)
-                        ]
-                    }, [
-                        ...updated_items,
-                        ...new_items.list
-                    ])
-                    const items = chaos ? [...unsort_items].sort(sorter) : unsort_items
-                    chaos && this.#commit(items)
+                    this.#applyChanges(event.refetch ? this.#reconcile(event.changes ?? []) : event.changes ?? [])
                     event.paging && this.paging.next(event.paging)
                 }),
             )
@@ -245,6 +181,111 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
+
+    #applyChanges(changes: DataChangeEvent[]) {
+        if (changes.length === 0) return
+        const chaos = changes.some(change => {
+            if (change.type == 'added' || change.type == 'removed') return true
+            if (change.data && change.data.id && change.data.id != change.id) return true
+            return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
+        })
+        // Local-first sorts exactly like the storage pages, so the window lines up with them.
+        const compare = compareDocs(sortersOf(this.filters.value as Record<string, any>))
+        const localSorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => compare(a.value, b.value)
+        const sorter = (a: BehaviorSubject<T>, b: BehaviorSubject<T>) => {
+            for (const [key, order] of this.#keys) {
+                const va = a.value[key]
+                const vb = b.value[key]
+                if (typeof va === 'number' && typeof vb === 'number') {
+                    if (va < vb) return -order
+                    if (va > vb) return order
+                    return 0
+                }
+                if (typeof va === 'string' && typeof vb === 'string') {
+                    return va.localeCompare(vb) * order
+                }
+                return 0
+            }
+            return a.value.id.localeCompare(b.value.id)
+        }
+
+        const events = changes.reduce((p, c) => {
+            return {
+                ...p,
+                [c.type]: [
+                    ...(p[c.type] || []),
+                    c
+                ]
+            }
+        }, {
+            added: [] as DataChangeEvent[],
+            modified: [] as DataChangeEvent[],
+            removed: [] as DataChangeEvent[]
+        })
+
+        const updated_items = events.modified.reduce((p, { data, id }) => {
+            const index = this.#indexes.get(id)
+            const target = index != undefined && index >= 0 ? p[index] : null
+            target && target.next({ ...target.value, ...data })
+            return p
+        }, this.items.value)
+
+        const new_items = (
+            events.added
+                .filter(a => a.data)
+                .reduce(
+                    (p, c) => {
+                        if (!p.indexes.has(c.id)) {
+                            const doc = new LivequeryDocument(this, {
+                                id: c.id,
+                                ...c.data,
+                                _index: ++this.#index
+                            } as any as DocState<T>)
+                            p.list.push(doc)
+                            p.indexes.add(c.id)
+                        }
+                        return p
+                    },
+                    {
+                        list: [] as LivequeryDocument<DocState<T>>[],
+                        indexes: new Set(this.#indexes.keys())
+                    }
+                )
+        )
+
+        // Deduplicated: removing the same index twice would cut out its neighbour.
+        const remove_indexes = [...new Set(
+            events.removed
+                .map(r => this.#indexes.get(r.id))
+                .filter(i => i != undefined)
+        )].sort((a, b) => b - a)
+
+        const unsort_items = remove_indexes.reduce((p, index) => {
+            return [
+                ...p.slice(0, index),
+                ...p.slice(index + 1)
+            ]
+        }, [
+            ...updated_items,
+            ...new_items.list
+        ])
+        const items = chaos ? [...unsort_items].sort(this.#isLocalFirst() ? localSorter : sorter) : unsort_items
+        chaos && this.#commit(this.#clip(items))
+    }
+
+    // Local-first: a sync can deliver far more than the UI asked for (the first load of a 200-message
+    // window). Keep what fits the pages loaded so far; the rest stays in storage for loadMore.
+    #clip(items: LivequeryDocument<DocState<T>>[]) {
+        if (!this.#isLocalFirst() || items.length <= this.#window) return items
+        const kept = items.slice(0, this.#window)
+        const last = kept.at(-1)!.value
+        this.paging.next({
+            ...this.paging.value,
+            current: kept.length,
+            next: { count: items.length - kept.length, cursor: encodeCursor(last, sortersOf(this.filters.value as Record<string, any>)) },
+        })
+        return kept
+    }
 
     // A refetch is a complete re-read: update what we hold, drop what it no longer contains, but
     // keep documents that exist only on this device.
@@ -271,6 +312,8 @@ export class LivequeryCollection<T extends Doc> {
             }
         }, {} as Partial<LivequeryFilters<T>>)
         flush && this.#commit([])
+        const limit = Number((filters as Record<string, any>)[':limit'])
+        this.#window = flush ? (limit > 0 ? limit : Infinity) : this.#window + (limit > 0 ? limit : Infinity)
         this.#keys = Object.entries(filters).reduce((p, [k, v]) => {
             if (k.endsWith(':sort')) {
                 const field = k.split(':')[0] as keyof T
@@ -288,6 +331,13 @@ export class LivequeryCollection<T extends Doc> {
             })
             if (cache && cache.documents && flush) {
                 this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
+            }
+            // Local-first pages come from storage: take its paging, and append pages past the first.
+            if (cache && this.#isLocalFirst()) {
+                'paging' in cache && cache.paging && this.paging.next(cache.paging)
+                !flush && this.#applyChanges(cache.documents.map(data => ({
+                    collection_ref: this.collection_ref ?? '', id: data.id, type: 'added' as const, data,
+                })))
             }
         } catch (e) {
             // Centralised here so every caller (query/loadMore/loadPrev/loadAround) is covered:

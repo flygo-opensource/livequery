@@ -1,5 +1,5 @@
 import type { Observable } from "rxjs";
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQueryParams, LivequeryResult } from "./types.js";
+import type { DataChangeEvent, LivequeryAction, Doc, LivequeryPaging, LivequeryQueryParams, LivequeryResult, LivequeryCompleteness } from "./types.js";
 
 
 export type LivequeryQueryResult = {
@@ -15,6 +15,8 @@ export type LivequeryQueryResult = {
      * hold and drop the ones the result no longer contains.
      */
     refetch?: boolean
+    /** Local-first collections: whether the device holds everything the collection's scope covers. */
+    completeness?: LivequeryCompleteness
 }
 
 
@@ -31,4 +33,9 @@ export type LivequeryTransporter = {
      * realtime events sent while the connection was down are lost.
      */
     status$?: Observable<{ connected: boolean }>
+    /**
+     * One read, no realtime subscription: used by local-first sync to load pages and deltas.
+     * Without it the client takes the first result of `query()` and unsubscribes.
+     */
+    read?<T extends Doc>(query: LivequeryQueryParams<T>): Promise<Partial<LivequeryQueryResult>>
 }

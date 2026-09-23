@@ -33,7 +33,8 @@ function makeServer(initial: Todo[]) {
             const items = paged ? [{ id: 'page-2', title: 'page 2' }] : [...docs.values()]
             subscriber.next({
                 changes: items.map(data => ({ collection_ref: 'todos', id: data.id, type: 'added', data })),
-                paging: { total: items.length, current: items.length, ...!paged && filters?.[':limit'] ? { next: { count: 1, cursor: 'c1' } } : {} },
+                // A next page exists when the page size is smaller than what the server holds.
+                paging: { total: items.length, current: items.length, ...!paged && Number(filters?.[':limit']) < docs.size + 1 && Number(filters?.[':limit']) <= items.length ? { next: { count: 1, cursor: 'c1' } } : {} },
                 source: 'query',
             })
             if (!filters || paged) return subscriber.complete()

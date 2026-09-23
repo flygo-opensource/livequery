@@ -5,7 +5,7 @@ import { compareDocs, type Sorter } from './sortDocs.js'
 type Page<T> = { documents: T[], paging: LivequeryPaging }
 
 // A cursor is the position of one document in the order: its sort values and id.
-function encode(doc: Record<string, any>, sorters: Sorter[]): string {
+export function encodeCursor(doc: Record<string, any>, sorters: Sorter[]): string {
     const position = Object.fromEntries([...sorters.map(([path]) => [path, getByPath(doc, path)]), ['id', doc.id]])
     return btoa(unescape(encodeURIComponent(JSON.stringify(position))))
 }
@@ -73,8 +73,8 @@ export function paginateDocs<T extends { id: string }>(sorted: T[], sorters: Sor
         paging: {
             total,
             current: documents.length,
-            ...last && next_count > 0 ? { next: { count: next_count, cursor: encode(last, sorters) } } : {},
-            ...first && prev_count > 0 ? { prev: { count: prev_count, cursor: encode(first, sorters) } } : {},
+            ...last && next_count > 0 ? { next: { count: next_count, cursor: encodeCursor(last, sorters) } } : {},
+            ...first && prev_count > 0 ? { prev: { count: prev_count, cursor: encodeCursor(first, sorters) } } : {},
         },
     }
 }

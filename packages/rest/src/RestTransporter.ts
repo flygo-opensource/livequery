@@ -248,63 +248,9 @@ export class RestTransporter implements LivequeryTransporter {
                     })).pipe(
                         map(collection => {
                             collection.subscription_token && this.socket?.subscribeWith(collection.subscription_token)
-                            // If collection
-                            if (collection.items != null) {
-                                const items = Array.isArray(collection.items) ? collection.items : []
-                                const length = items.length
-                                return {
-                                    summary: collection.summary,
-                                    paging: {
-                                        current: collection?.count?.current ?? length,
-                                        total: collection?.count?.total ?? length,
-                                        next: collection?.has?.next ? {
-                                            count: collection?.count?.next || 0,
-                                            cursor: collection?.cursor?.last
-                                        } : undefined,
-                                        prev: collection?.has?.prev ? {
-                                            count: collection?.count?.prev || 0,
-                                            cursor: collection?.cursor?.first
-                                        } : undefined
-                                    },
-                                    changes: items.map(data => ({
-                                        data,
-                                        type: 'added',
-                                        id: data.id,
-                                        collection_ref
-                                    })),
-                                    source: "query"
-                                } as Partial<LivequeryQueryResult>
-                            }
-
-                            // If document
-                            if (collection.item != null) {
-                                return {
-                                    summary: collection.summary,
-                                    changes: [{
-                                        data: collection.item,
-                                        type: 'added',
-                                        id: collection.item.id,
-                                        collection_ref
-                                    }],
-                                    source: "query"
-                                } as Partial<LivequeryQueryResult>
-                            }
-
-                            // Missing items/item field — server returned unexpected format
-                            return {
-                                error: {
-                                    code: is_document ? 'DOCUMENT_NOT_FOUND' : 'INVALID_RESPONSE',
-                                    message: is_document
-                                        ? `Document not found: server response is missing the 'item' field`
-                                        : `Server response is missing the 'items' field for collection query`
-                                },
-                                source: "query"
-                            } as Partial<LivequeryQueryResult>
+                            return this.#toResult(collection, ref)
                         }),
-                        catchError(e => {
-                            const error = e instanceof TypeError ? { code: 'NETWORK_ERROR', message: e.message } : e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || 'UnknownError', message: e.message || 'An unknown error occurred' }
-                            return of({ error, source: "query" } as Partial<LivequeryQueryResult>)
-                        })
+                        catchError(e => of(this.#toErrorResult(e)))
 
                     )))
             ),
@@ -329,6 +275,79 @@ export class RestTransporter implements LivequeryTransporter {
                 filter(Boolean)
             )
         )
+    }
+
+    /** One read, no realtime subscription: local-first sync loads pages and deltas with it. */
+    async read<T extends Doc>({ ref, filters, headers, context }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: HeadersInit, context?: Record<string, any> }): Promise<Partial<LivequeryQueryResult>> {
+        try {
+            const collection = await this.#call<LivequeryCollectionResponse<T>>({ ref, method: 'GET', query: filters, headers, context })
+            return this.#toResult(collection, ref)
+        } catch (e) {
+            return this.#toErrorResult(e)
+        }
+    }
+
+    #toResult<T extends Doc>(collection: LivequeryCollectionResponse<T>, ref: string): Partial<LivequeryQueryResult> {
+        const refs = ref.split('/')
+        const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
+        const is_document = refs.length % 2 == 0
+        // If collection
+        if (collection.items != null) {
+            const items = Array.isArray(collection.items) ? collection.items : []
+            const length = items.length
+            return {
+                summary: collection.summary,
+                paging: {
+                    current: collection?.count?.current ?? length,
+                    total: collection?.count?.total ?? length,
+                    next: collection?.has?.next ? {
+                        count: collection?.count?.next || 0,
+                        cursor: collection?.cursor?.last
+                    } : undefined,
+                    prev: collection?.has?.prev ? {
+                        count: collection?.count?.prev || 0,
+                        cursor: collection?.cursor?.first
+                    } : undefined
+                },
+                changes: items.map(data => ({
+                    data,
+                    type: 'added',
+                    id: data.id,
+                    collection_ref
+                })),
+                source: "query"
+            } as Partial<LivequeryQueryResult>
+        }
+
+        // If document
+        if (collection.item != null) {
+            return {
+                summary: collection.summary,
+                changes: [{
+                    data: collection.item,
+                    type: 'added',
+                    id: collection.item.id,
+                    collection_ref
+                }],
+                source: "query"
+            } as Partial<LivequeryQueryResult>
+        }
+
+        // Missing items/item field — server returned unexpected format
+        return {
+            error: {
+                code: is_document ? 'DOCUMENT_NOT_FOUND' : 'INVALID_RESPONSE',
+                message: is_document
+                    ? `Document not found: server response is missing the 'item' field`
+                    : `Server response is missing the 'items' field for collection query`
+            },
+            source: "query"
+        } as Partial<LivequeryQueryResult>
+    }
+
+    #toErrorResult(e: any): Partial<LivequeryQueryResult> {
+        const error = e instanceof TypeError ? { code: 'NETWORK_ERROR', message: e.message } : e instanceof Error ? { code: e.name, message: e.message } : { code: e.code || 'UnknownError', message: e.message || 'An unknown error occurred', ...typeof e.status === 'number' ? { status: e.status } : {} }
+        return { error, source: "query" } as Partial<LivequeryQueryResult>
     }
 
     // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) before sending a write.

@@ -168,6 +168,30 @@ describe("RestTransporter", () => {
         expect(JSON.parse(calls[2].init?.body as string)).toEqual({ title: "y" });
     });
 
+    test("read() answers one page with its cursor and never subscribes to realtime", async () => {
+        const calls: string[] = [];
+        globalThis.fetch = (async (input: RequestInfo | URL) => {
+            calls.push(String(input));
+            return new Response(JSON.stringify({ data: {
+                items: [{ id: "a", title: "x" }],
+                count: { current: 1, total: 3, next: 2, prev: 0 },
+                has: { next: true, prev: false },
+                cursor: { first: "c-first", last: "c-last" },
+                subscription_token: "should-not-be-used"
+            } }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({ api: "https://api.example.com" });
+        const result = await transporter.read({ ref: "todos", filters: { ":limit": 1 } as any });
+        expect(calls[0]).toBe("https://api.example.com/todos?%3Alimit=1");
+        expect(result.changes?.map(c => c.id)).toEqual(["a"]);
+        expect(result.paging?.next).toEqual({ count: 2, cursor: "c-last" });
+
+        globalThis.fetch = (async () => { throw new TypeError("offline") }) as unknown as typeof fetch;
+        const failed = await transporter.read({ ref: "todos" });
+        expect(failed.error?.code).toBe("NETWORK_ERROR");
+    });
+
     test("non-2xx errors carry the HTTP status", async () => {
         globalThis.fetch = (async () => new Response(JSON.stringify({
             error: { code: "INTERNAL", message: "boom" }
