@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { SharedWorkerChannel, WorkerManager } from '@livequery/rpc'
-import { TodoService } from './TodoService'
+import { createClient } from './createClient'
 
-// One instance for every tab that connects to this SharedWorker.
-new WorkerManager(new SharedWorkerChannel()).exposeService('todos', new TodoService(self.location.origin))
+// Every tab of this site uses this one client: one WebSocket, one outbox, one IndexedDB.
+new WorkerManager(new SharedWorkerChannel()).exposeService('livequery', createClient(self.location.origin))

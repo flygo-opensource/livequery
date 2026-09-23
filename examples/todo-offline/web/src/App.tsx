@@ -1,22 +1,29 @@
 import { useState, type FormEvent } from 'react'
-import { useObservable } from '@livequery/react'
-import { host, todos } from './service'
-import type { SyncStatus, TodoState } from './TodoService'
+import { useCollection, useDocument } from '@livequery/react'
+import type { DocState, LivequeryCollection, LivequeryStatus, LocalFirstConfig } from '@livequery/client'
+import { host } from './livequery'
+
+type Todo = { id: string, title: string, done: boolean, created_at: number }
+type TodoState = DocState<Todo>
+type Todos = LivequeryCollection<Todo>
+
+// Every todo on the device, kept in sync in the background: the list works offline, and a device
+// that was away asks only for what changed.
+const TODOS: LocalFirstConfig = { scope: 'full', keep: 'always', sort: { created_at: 'desc' } }
 
 type Filter = 'all' | 'open' | 'done'
 
 const LABELS: Record<Filter, string> = { all: 'Tất cả', open: 'Chưa xong', done: 'Đã xong' }
 
 export function App() {
-    // Factories: each subscribes once, to a stream coming from the SharedWorker (or this tab).
-    const items = useObservable(() => todos.items(), [] as TodoState[])
-    const status = useObservable(() => todos.status(), { connected: false, offline: false, pending: 0 } as SyncStatus)
+    const todos = useCollection<Todo>('todos', { mode: TODOS, filters: { 'created_at:sort': 'desc' } as any, ssr: false })
+    const [status_doc] = useDocument<LivequeryStatus & { id: string }>('livequery/status')
+    const status = status_doc?.value
+    const items = todos.items.value.map(item => item.value as TodoState)
     const [filter, setFilter] = useState<Filter>('all')
 
     const matches = (item: TodoState, key: Filter) => key === 'all' || (key === 'done') === !!item.done
-    const visible = items
-        .filter(item => matches(item, filter))
-        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
+    const visible = items.filter(item => matches(item, filter))
 
     return (
         <main className="page">
@@ -34,15 +41,15 @@ export function App() {
                     : 'Trình duyệt này không có SharedWorker: mỗi tab có client riêng, đồng bộ với nhau qua server.'}
             </p>
 
-            <label className={`toggle ${status.offline ? 'is-offline' : ''}`}>
-                <input type="checkbox" checked={status.offline} onChange={e => todos.setOffline(e.target.checked)} />
+            <label className={`toggle ${status?.offline ? 'is-offline' : ''}`}>
+                <input type="checkbox" checked={!!status?.offline} onChange={e => status_doc?.update({ offline: e.target.checked })} />
                 <span>Giả lập mất mạng</span>
-                <small>{status.offline
-                    ? 'Mọi request HTTP đang bị chặn (áp dụng cho mọi tab)'
+                <small>{status?.offline
+                    ? 'Client không gọi server nữa: không HTTP, không realtime (áp dụng cho mọi tab)'
                     : 'Bật để thử thêm / sửa / xoá khi offline'}</small>
             </label>
 
-            <AddTodo onAdd={title => todos.add(title)} />
+            <AddTodo onAdd={title => todos.add({ title, done: false, created_at: Date.now() })} />
 
             <nav className="filters">
                 {(Object.keys(LABELS) as Filter[]).map(key => (
@@ -54,7 +61,7 @@ export function App() {
             </nav>
 
             <ul className="list">
-                {visible.map(item => <TodoRow key={item.id} todo={item} />)}
+                {visible.map(item => <TodoRow key={item.id} todo={item} todos={todos} />)}
                 {visible.length === 0 && <li className="empty">Chưa có việc nào.</li>}
             </ul>
 
@@ -63,14 +70,16 @@ export function App() {
     )
 }
 
-function Status({ status }: { status: SyncStatus }) {
-    const online = status.connected && !status.offline
+/** From the library's `livequery/status` document: connection, offline switch, writes waiting. */
+function Status({ status }: { status?: LivequeryStatus }) {
+    const online = !!status?.online
+    const pending = status?.pending ?? 0
     return (
         <div className="status">
             <span className={`dot ${online ? 'on' : 'off'}`} />
             <span>{online ? 'Online' : 'Offline'}</span>
-            <span className={`badge ${status.pending > 0 ? 'waiting' : 'synced'}`}>
-                {status.pending > 0 ? `${status.pending} thay đổi chờ đồng bộ` : 'Đã đồng bộ'}
+            <span className={`badge ${pending > 0 ? 'waiting' : 'synced'}`}>
+                {pending > 0 ? `${pending} thay đổi chờ đồng bộ` : 'Đã đồng bộ'}
             </span>
         </div>
     )
@@ -93,7 +102,7 @@ function AddTodo({ onAdd }: { onAdd: (title: string) => unknown }) {
     )
 }
 
-function TodoRow({ todo }: { todo: TodoState }) {
+function TodoRow({ todo, todos }: { todo: TodoState, todos: Todos }) {
     const [editing, setEditing] = useState(false)
     const [draft, setDraft] = useState(todo.title)
     const state = describe(todo)
@@ -101,13 +110,13 @@ function TodoRow({ todo }: { todo: TodoState }) {
     const save = () => {
         setEditing(false)
         const value = draft.trim()
-        if (value && value !== todo.title) todos.update(todo.id, { title: value })
+        if (value && value !== todo.title) todos.update({ id: todo.id, title: value })
         else setDraft(todo.title)
     }
 
     return (
         <li className={`row ${todo.done ? 'done' : ''} ${todo._deleting ? 'deleting' : ''}`}>
-            <input type="checkbox" checked={!!todo.done} disabled={!!todo._deleting} onChange={() => todos.update(todo.id, { done: !todo.done })} />
+            <input type="checkbox" checked={!!todo.done} disabled={!!todo._deleting} onChange={() => todos.update({ id: todo.id, done: !todo.done })} />
             {editing
                 ? <input
                     className="edit"
@@ -123,7 +132,7 @@ function TodoRow({ todo }: { todo: TodoState }) {
                 />
                 : <span className="title" title="Nhấp đúp để sửa" onDoubleClick={() => { setDraft(todo.title); setEditing(true) }}>{todo.title}</span>}
             {state && <span className={`tag ${state.kind}`} title={state.hint}>{state.label}</span>}
-            <button className="delete" title="Xoá" disabled={!!todo._deleting} onClick={() => todos.remove(todo.id)}>✕</button>
+            <button className="delete" title="Xoá" disabled={!!todo._deleting} onClick={() => todos.delete(todo.id)}>✕</button>
         </li>
     )
 }
@@ -144,12 +153,12 @@ function Guide() {
             <ol>
                 <li>Mở trang này ở <b>hai tab</b>: thêm / sửa / xoá ở tab này hiện ngay ở tab kia.</li>
                 <li>Bật <b>Giả lập mất mạng</b> rồi thao tác ở một tab: tab kia vẫn thấy ngay (chung SharedWorker), các dòng có nhãn <i>Chờ…</i>, badge đếm số thay đổi chờ.</li>
-                <li><b>Đóng hết tab rồi mở lại</b> khi vẫn offline: dữ liệu và hàng đợi còn nguyên (IndexedDB).</li>
+                <li><b>Đóng hết tab rồi mở lại</b> khi vẫn offline — kể cả khi mất mạng thật: app mở từ service worker (PWA, cài được), dữ liệu và hàng đợi còn nguyên (IndexedDB).</li>
                 <li>Tắt giả lập: hàng đợi tự gửi theo đúng thứ tự, nhãn biến mất.</li>
                 <li>Mở trên <b>thiết bị khác</b> (điện thoại): thay đổi đi qua server và hiện realtime ở mọi thiết bị.</li>
-                <li>Xung đột: offline sửa tiêu đề một việc, trong lúc đó tick “xong” việc đó trên thiết bị khác. Khi online lại, cả hai thay đổi đều được giữ.</li>
+                <li>Xung đột: offline sửa tiêu đề một việc, trong lúc đó tick “xong” việc đó trên thiết bị khác. Khi online lại, cả hai thay đổi đều được giữ. Cùng sửa tiêu đề trên hai máy: server phát hiện (409), máy gửi sau được hỏi qua <code>conflictResolver</code> — mặc định giữ bản của nó.</li>
             </ol>
-            <p className="note">Mỗi việc nhận id uuidv7 ngay trên trình duyệt; server giữ nguyên id đó, nên gửi lại sau khi mất phản hồi không tạo bản trùng.</p>
+            <p className="note">Mỗi việc nhận id uuidv7 ngay trên trình duyệt; server giữ nguyên id đó, nên gửi lại sau khi mất phản hồi không tạo bản trùng. Giao diện chỉ dùng <code>useCollection('todos')</code> và <code>useDocument('livequery/status')</code>.</p>
         </section>
     )
 }

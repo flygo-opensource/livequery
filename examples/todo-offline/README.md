@@ -4,33 +4,40 @@ Demo đầy đủ tính năng offline-first của `@livequery/client`, đang ch�
 **https://livequery-demo.global.flygo.vn**.
 
 ```text
-tab 1 ─┐                     SharedWorker (một cho mọi tab)
-tab 2 ─┼── @livequery/rpc ──▶ TodoService
-tab n ─┘                       LivequeryClient · local-first
-                               IndexedDB · outbox · 1 WebSocket
-                                        │
-                                        ▼
-                     server.ts (Bun): Hono + MongoDatasource
-                     realtime từ change stream của MongoDB
+tab 1 ─┐                                SharedWorker (một cho mọi tab)
+tab 2 ─┼── createRemoteLivequeryClient ──▶ LivequeryClient · local-first (scope 'full')
+tab n ─┘   (@livequery/rpc)                IndexedDB · outbox · 1 WebSocket
+                                                   │
+service worker: app shell (PWA)                    ▼
+                          server.ts (Bun): Hono + mongodb({ sync: true })
+                          realtime từ change stream của MongoDB
 ```
 
-- **Các tab đồng bộ tức thì, kể cả khi offline**: client chạy trong một SharedWorker, các tab chỉ
-  là giao diện nối vào qua `@livequery/rpc`. Chrome trên Android không có SharedWorker: khi đó mỗi
-  tab tự chạy `TodoService`, các tab gặp nhau qua realtime của server.
-- **Offline**: đọc/ghi vào IndexedDB, ghi nằm trong outbox, tự gửi lại khi có mạng. Nút "Giả lập
-  mất mạng" chặn mọi request HTTP của worker (áp dụng cho mọi tab); DevTools → Offline cắt cả socket.
+- **PWA, chạy khi mất mạng thật**: cài được như app; service worker giữ app shell, nên tải lại
+  trang khi không có mạng vẫn mở được, danh sách và hàng đợi còn nguyên (IndexedDB).
+- **Giao diện chỉ dùng hai hook**: `useCollection('todos', { mode: { scope: 'full', keep: 'always' } })`
+  và `useDocument('livequery/status')` (online, số thay đổi chờ, nút giả lập mất mạng). Không có
+  service riêng, không `useObservable`.
+- **Các tab đồng bộ tức thì, kể cả khi offline**: client của thư viện chạy trong một SharedWorker
+  (`extendedLifetime`, nên tải lại tab cuối không làm rớt kết nối). Chrome trên Android không có
+  SharedWorker: khi đó mỗi tab tự chạy client, các tab gặp nhau qua realtime của server.
+- **Đồng bộ theo delta**: route `sync: true` — mỗi lần ghi có phiên bản theo thứ tự commit, xoá là
+  tombstone; máy vắng mặt lâu chỉ hỏi "đã đổi gì". Todo cũ được gán phiên bản lúc server khởi động
+  (`withVersion`), tombstone quá 30 ngày được dọn.
 - **Id do client sinh** (uuidv7): server giữ nguyên, gửi lại không tạo bản trùng.
-- **Xung đột**: sửa khác field thì gộp, cùng field thì bên ghi sau thắng.
+- **Xung đột**: sửa khác field thì gộp; cùng field thì server phát hiện (409 `VERSION_CONFLICT`),
+  `conflictResolver` quyết định — mặc định giữ bản của máy gửi sau.
 
 | File | Vai trò |
 | --- | --- |
 | [server.ts](server.ts) | API + WebSocket + phục vụ bản build của web, một process Bun |
-| [web/src/TodoService.ts](web/src/TodoService.ts) | LivequeryClient, collection, trạng thái đồng bộ — chạy trong worker |
-| [web/src/worker.ts](web/src/worker.ts) | SharedWorker: expose `TodoService` qua `WorkerManager` |
-| [web/src/service.ts](web/src/service.ts) | Tab nối vào worker (hoặc tự chạy service khi không có SharedWorker) |
-| [web/src/App.tsx](web/src/App.tsx) | Giao diện React |
+| [web/src/createClient.ts](web/src/createClient.ts) | LivequeryClient: IndexedDB + REST/WebSocket |
+| [web/src/worker.ts](web/src/worker.ts) | SharedWorker: expose client qua `WorkerManager` |
+| [web/src/livequery.ts](web/src/livequery.ts) | Tab nối vào worker (hoặc tự chạy client khi không có SharedWorker) |
+| [web/src/App.tsx](web/src/App.tsx) | Giao diện React — chỉ `useCollection` / `useDocument` |
+| [web/sw.js](web/sw.js), [vite.config.ts](vite.config.ts) | Service worker (precache toàn bộ bản build, sinh lúc `vite build`) |
 | [smoke.ts](smoke.ts) | Hai client livequery: thêm ở A, B nhận qua realtime |
-| [browser-check.ts](browser-check.ts) | Chrome headless, hai tab: đồng bộ online/offline, xả hàng đợi, reload |
+| [browser-check.ts](browser-check.ts) | Chrome headless: hai tab online/offline, xả hàng đợi, reload; thiết bị D mất mạng thật (proxy tắt được) — mở app offline, thêm todo, reload, có mạng lại tự gửi |
 
 ## Chạy local
 
