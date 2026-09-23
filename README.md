@@ -169,6 +169,18 @@ Một lần sửa xếp hàng (local-first) mang theo phiên bản nó dựa và
 `VERSION_CONFLICT`**, client đọc bản trên server, cho qua `conflictResolver` (mặc định: giữ các
 trường thiết bị này đã sửa) rồi gửi lại trên phiên bản mới — không ghi đè mà không ai biết.
 
+## Đổi dữ liệu hoặc schema khi máy đã giữ bản sao
+
+Máy chỉ hỏi "đã đổi gì từ phiên bản X", nên:
+
+1. **Mọi lần ghi vào collection `sync` phải qua phiên bản** — route đã làm; script, migration, cron
+   phải dùng `withVersion` (xem `packages/mongodb/README.md`). Ghi thẳng không tăng phiên bản thì
+   máy đã đồng bộ giữ dạng cũ mãi mãi. Xoá cũng vậy: xoá mềm qua `withVersion`, không `deleteMany`.
+2. **Đổi dạng theo kiểu thêm trước, bỏ sau:** thêm trường mới (không bắt buộc), phát hành app ghi
+   trường đó, chỉ bỏ trường cũ khi không còn app cũ. Lần ghi offline từ app cũ gặp 400 thì nằm lại
+   trên máy, đánh dấu lỗi, chờ người dùng gửi lại hoặc xoá.
+3. **Đổi tên trường trong validator là thay đổi phá vỡ** — làm thành hai bước như trên.
+
 ## Build và test
 
 ```sh

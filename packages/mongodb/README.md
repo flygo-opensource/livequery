@@ -832,6 +832,36 @@ longer than that re-reads its scope instead (the client evicts scopes unused for
 await collection.deleteMany({ deleted_at: { $lt: Date.now() - 30 * 86400_000 } })
 ```
 
+### Changing data or its shape while devices hold copies
+
+Devices keep what they synced and only ask for what changed since — "changed" meaning a newer
+version. Three rules keep every device correct without a client-side schema:
+
+1. **Every write to a sync collection goes through a version** — the routes do it; scripts,
+   migrations, admin tools and cron jobs must too. A document rewritten without a new version is
+   never sent to devices that already have it: they keep the old shape for good.
+
+   ```ts
+   // Rename a field on every document — each one gets a version, so every device receives it.
+   for await (const doc of db.collection('users').find({ name: { $exists: true } })) {
+       await withVersion(db, 'users', (version, session) => db.collection('users').updateOne(
+           { _id: doc._id },
+           { $rename: { name: 'full_name' }, $set: { updated_at: version } },
+           { session },
+       ))
+   }
+   ```
+
+   Deleting a document outside the API: soft-delete it the same way (`$set: { deleted_at: version,
+   updated_at: version }`). A hard `deleteMany` is invisible to devices that are not connected.
+2. **Change the shape by adding, then removing.** Add the new field (optional, or with a default
+   in the reading code) and ship the app that writes it; only once no old app is left, stop
+   accepting the old field. A device offline across a breaking change sends its queued writes in
+   the old shape: the server answers 400, and they wait on the device marked failed
+   (`_adding_error` / `_updating_error`) until the user retries or discards them.
+3. **Renaming a field in the validator is a breaking change** — both at once: old writes are
+   refused and old copies lack the new name until rule 1 rewrites them. Do it in two steps (rule 2).
+
 ## Build And Verification
 
 ```sh
