@@ -2,8 +2,7 @@ import { uuidv7 } from 'uuidv7'
 import type { Doc, LivequeryPaging, ParitalDocState } from './types.js'
 import type { LivequeryStorage } from './LivequeryStorage.js'
 import { LivequeryMemoryStorage } from './LivequeryMemoryStorage.js'
-import { filterDocs } from './helpers/filterDocs.js'
-import { sortDocs } from './helpers/sortDocs.js'
+import { queryDocs } from './helpers/queryDocs.js'
 
 export type LivequeryIndexedDBStorageOptions = {
     /** Database name. Two storages with the same name share their data. Default `livequery`. */
@@ -63,16 +62,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
             const request = store.index(BY_COLLECTION).getAll(collection)
             request.onsuccess = () => done((request.result as Row[]).map(row => row.doc as T))
         })
-        const f = filters ?? {}
-        const sorters = Object.entries(f).filter(([k]) => k.endsWith(':sort')) as Array<[string, 'asc' | 'desc']>
-        const documents = sortDocs(filterDocs(sources, f), sorters)
-        return {
-            documents,
-            paging: {
-                total: sources.length,
-                current: documents.length,
-            },
-        }
+        return queryDocs(sources, filters)
     }
 
     async get<T extends Doc>(ref: string, id: string): Promise<T | null> {

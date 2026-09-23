@@ -1,6 +1,6 @@
 import type { LivequeryStorage } from '../LivequeryStorage.js'
 import { filterDocs } from '../helpers/filterDocs.js'
-import { sortDocs } from '../helpers/sortDocs.js'
+import { compareDocs, sortersOf } from '../helpers/sortDocs.js'
 
 /** The slice of a test runner the suite needs; bun:test, vitest and jest all fit. */
 export type StorageConformanceRunner = {
@@ -42,7 +42,6 @@ const FILTER_CASES: Array<Record<string, any>> = [
     { 'meta.group': 'x', 'meta.score:sort': 'desc' },
     { 'title:like': 'ha' },
     { 'title:in': '["alpha","delta"]' },
-    { 'done:eq-boolean': 'false', ':limit': 1, ':after': 'a' },
 ]
 
 /**
@@ -134,15 +133,51 @@ export function defineStorageConformanceSuite(options: StorageConformanceOptions
         run('query answers exactly like filterDocs, with paging totals', async storage => {
             await seed(storage)
             for (const filters of FILTER_CASES) {
-                const sorters = Object.entries(filters).filter(([k]) => k.endsWith(':sort')) as Array<[string, 'asc' | 'desc']>
-                const expected = sortDocs(filterDocs([...ITEMS], filters), sorters).map(d => d.id)
+                const sorters = sortersOf(filters)
+                const expected = filterDocs([...ITEMS], filters).sort(compareDocs(sorters)).map(d => d.id)
                 const { documents, paging } = await storage.query('items', filters)
                 const ids = documents.map(d => d.id)
                 // Without a sort key the order is the adapter's own business.
                 expect(sorters.length > 0 ? ids : [...ids].sort()).toEqual(sorters.length > 0 ? expected : [...expected].sort())
-                expect(paging.total).toBe(ITEMS.length)
+                expect(paging.total).toBe(expected.length)
                 expect(paging.current).toBe(expected.length)
             }
+        })
+
+        run('paging: :limit pages, :after walks forward, every document once, no next on the last page', async storage => {
+            for (let i = 0; i < 25; i++) await storage.add('pages', { id: `p${String(i).padStart(2, '0')}`, n: i % 5 } as any)
+            const seen: string[] = []
+            let cursor: string | undefined
+            for (let page = 0; page < 10; page++) {
+                const { documents, paging } = await storage.query('pages', { 'n:sort': 'desc', ':limit': 10, ...cursor ? { ':after': cursor } : {} })
+                seen.push(...documents.map(d => d.id))
+                expect(paging.total).toBe(25)
+                if (!paging.next) break
+                cursor = paging.next.cursor
+            }
+            expect(seen).toHaveLength(25)
+            expect(new Set(seen).size).toBe(25)
+            // Ties on `n` are broken by id, so the order is total and stable.
+            const all = (await storage.query('pages', { 'n:sort': 'desc' })).documents.map(d => d.id)
+            expect(seen).toEqual(all)
+        })
+
+        run('paging: :before walks back to the page just before the cursor', async storage => {
+            for (let i = 0; i < 25; i++) await storage.add('pages', { id: `p${String(i).padStart(2, '0')}`, n: i } as any)
+            const first = await storage.query('pages', { 'n:sort': 'asc', ':limit': 10 })
+            const second = await storage.query('pages', { 'n:sort': 'asc', ':limit': 10, ':after': first.paging.next!.cursor })
+            expect(second.paging.prev).toBeTruthy()
+            const back = await storage.query('pages', { 'n:sort': 'asc', ':limit': 10, ':before': second.paging.prev!.cursor })
+            expect(back.documents.map(d => d.id)).toEqual(first.documents.map(d => d.id))
+            expect(back.paging.prev).toBeUndefined()
+        })
+
+        run('paging: a document inserted before the cursor does not shift the next page', async storage => {
+            for (let i = 0; i < 20; i++) await storage.add('pages', { id: `p${String(i).padStart(2, '0')}`, n: i } as any)
+            const first = await storage.query('pages', { 'n:sort': 'desc', ':limit': 5 })
+            await storage.add('pages', { id: 'newest', n: 100 } as any)
+            const second = await storage.query('pages', { 'n:sort': 'desc', ':limit': 5, ':after': first.paging.next!.cursor })
+            expect(second.documents.map(d => (d as any).n)).toEqual([14, 13, 12, 11, 10])
         })
 
         run('flush empties every collection', async storage => {
