@@ -35,6 +35,24 @@ function makeApp(service: { fetch(request: Request): Promise<Response> }, option
 
 // ─── proxying ──────────────────────────────────────────────────────────────────
 
+describe('gateway() — routing that changes', () => {
+    test('a routing function is asked on every request; a failed service is reported', async () => {
+        const failing = { fetch: () => Promise.reject(new TypeError('connection refused')) }
+        let asked = 0
+        const reported: Array<{ name: string, error: unknown }> = []
+        const request = makeApp(failing, {
+            routing: () => { asked++; return routing },
+            onServiceError: (service, error) => reported.push({ name: service.name, error }),
+        })
+        const response = await request('/livequery/tasks')
+        expect(asked).toBe(1)
+        expect(response.status).toBe(500)
+        expect(reported).toHaveLength(1)
+        expect(reported[0]!.name).toBe('tasks')
+        expect(String(reported[0]!.error)).toContain('connection refused')
+    })
+})
+
 describe('gateway()', () => {
     test('forwards an owned prefix to its service binding', async () => {
         const calls: Call[] = []

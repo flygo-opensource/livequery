@@ -10,8 +10,11 @@ export type ServiceAnnouncement = {
     port?: number
     /** Path prefixes it owns, e.g. `/livequery/tasks`; `:param` segments match any segment. */
     prefixes?: string[]
-    /** Sent once when the service shuts down, so gateways drop it at once. */
-    leaving?: boolean
+    /**
+     * TCP port a gateway connects to and keeps open: while the connection lives, the service is up;
+     * when it closes (the process exits, even killed), the gateway drops the service at once.
+     */
+    probe_port?: number
 }
 
 /**

@@ -38,8 +38,9 @@ app.patch('/livequery/tasks/:id', check, livequery(), source, realtime())
 app.delete('/livequery/tasks/:id', livequery(), source, realtime())
 
 if (DISCOVERY) {
-    // Tell gateways it is here and which prefixes it owns (its /livequery routes); say goodbye on exit.
-    const announced = announceService({ name: 'tasks', port: SERVICE_PORT, app })
+    // Tell gateways it is here and which prefixes it owns (its /livequery routes), once. Gateways
+    // then keep a connection to it: when this process ends — even killed — they drop it.
+    const announced = await announceService({ name: 'tasks', port: SERVICE_PORT, app })
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
         process.once(signal, () => void announced.close().finally(() => process.exit(0)))
     }

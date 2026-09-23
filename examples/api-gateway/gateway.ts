@@ -22,8 +22,9 @@ const realtime = await realtimeGateway()
 // without a gateway restart. Either declared (routing.json, the address from the environment), or
 // learned from the services' own announcements over UDP — then adding a service, or a second
 // instance of one, needs no gateway change at all.
-const routing: ServiceRouting | (() => ServiceRouting) = DISCOVERY
-    ? discoverServices().routing
+const directory = DISCOVERY ? discoverServices() : undefined
+const routing: ServiceRouting | (() => ServiceRouting) = directory
+    ? directory.routing
     : { ...declared, services: { ...declared.services, tasks: { ...declared.services.tasks, url: SERVICE_URL } } }
 
 const app = new Hono()
@@ -38,7 +39,8 @@ app.use('*', cors({
 
 app.get('/health', c => c.json({ ok: true, kind: 'gateway', gateway_id: realtime.id }))
 app.get(LIVEQUERY_REALTIME_PATH, c => c.text('Expected WebSocket', 426))
-app.use('*', gateway({ routing, realtime }))
+// With discovery, a failed request takes that instance out until its connection is checked again.
+app.use('*', gateway({ routing, realtime, onServiceError: directory?.unreachable }))
 app.notFound(c => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404))
 
 console.log(JSON.stringify({ event: 'ready', kind: 'gateway', port: GATEWAY_PORT }))

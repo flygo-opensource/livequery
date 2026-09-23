@@ -23,6 +23,12 @@ export type LivequeryGatewayOptions<E extends Env = any> = {
     realtime?: LivequeryRealtimeTarget<E>
     /** Identity of the caller, passed to `register` so a socket cannot be subscribed by others. */
     principal?: (c: Context<E>) => string | undefined
+    /**
+     * A request to a service failed before any answer (connection refused, reset, DNS). The error
+     * still propagates; this is for routing that can take the service out — `discoverServices()`'s
+     * `unreachable`.
+     */
+    onServiceError?: (service: MatchedService, error: unknown) => void
 }
 
 const CHANGE_TYPES = new Set<UpdatedDataType>(['added', 'modified', 'removed'])
@@ -73,13 +79,16 @@ function clean(response: Response): Response {
  * and then strips. A path no service owns falls through to the next handler.
  */
 export function gateway<E extends Env = any>(options: LivequeryGatewayOptions<E>): MiddlewareHandler<E, any> {
-    const { routing, realtime, principal } = options
+    const { routing, realtime, principal, onServiceError } = options
 
     return async (c, next) => {
         const service = matchService(typeof routing === 'function' ? routing() : routing, c.req.path)
         if (!service) return next()
 
-        const response = await resolve(c, service).fetch(c.req.raw)
+        const response = await resolve(c, service).fetch(c.req.raw).catch(error => {
+            onServiceError?.(service, error)
+            throw error
+        })
         if (!response.ok || !realtime) return clean(response)
 
         try {

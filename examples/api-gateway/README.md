@@ -48,7 +48,9 @@ Trên Node/Bun (Linux), đặt `DISCOVERY=udp` và cùng một `SIMPLE_DISCOVERY
 service tự thông báo tên, cổng và các route `/livequery/*` của nó qua
 [`@livequery/discovery`](../../packages/discovery/README.md), gateway học từ đó thay vì đọc
 `routing.json`. Thêm service, hay chạy thêm instance, không phải sửa gateway; các instance cùng tên
-chia tải lần lượt, service tắt (SIGTERM) thì gateway gỡ ngay.
+chia tải lần lượt. Không có heartbeat: service thông báo một lần, gateway tự mở một kết nối TCP tới
+nó và giữ kết nối đó — service dừng, crash hay bị kill thì kết nối đóng và gateway gỡ ngay; mất kết
+nối mà service vẫn sống thì gateway tự nối lại.
 
 ```bash
 DISCOVERY=udp SIMPLE_DISCOVERY_KEY=bi-mat node api-gateway/service.ts
