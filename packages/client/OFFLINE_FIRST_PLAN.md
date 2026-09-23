@@ -211,6 +211,9 @@ thắng field đó (resolver can thiệp được). Merge theo ký tự là đ�
 
 ## Phase 2 (ngoài v1 — v1 không được chặn đường): client trong SharedWorker
 
+> ✅ Đã làm (2026-09-23, commit `ebf791a`): `createRemoteLivequeryClient` + `@livequery/rpc`. Xem
+> mục "Đồng bộ khai báo, PWA" ở cuối.
+
 `@livequery/rpc` (SharedWorkerChannel/WorkerManager/WorkerService) + e2e
 `rpc-livequery-bridge.e2e.test.ts` đã chứng minh pattern "collection sống ở worker". Topology B:
 LivequeryClient (1 socket, 1 IDB writer, 1 outbox drainer) chạy trong SharedWorker, tab là UI
@@ -351,3 +354,26 @@ client đã xong, phần server (replay event rơi trong grace window) vẫn m�
 
 Còn lại trước khi merge: review, merge nhánh `worktree-offline-first`, xoá bản plan chưa track trong
 checkout chính (nhánh đã commit file này) để git không từ chối merge.
+
+## Đồng bộ khai báo, PWA (2026-09-23)
+
+Tiêu chí được duyệt: (1) app chat là PWA, chạy khi mất mạng, có mạng thì tự đồng bộ và gửi tin chờ;
+(2) React chỉ dùng `useCollection`, `useDocument`.
+
+| Commit | Nội dung |
+| --- | --- |
+| `6534722` | Phân trang keyset trong storage (`:limit`, `:after`, `:before`) |
+| `e0d0e28` | Ingest theo phiên bản: `updated_at` cũ hơn bị bỏ, `deleted_at` là tombstone |
+| `3c28278` | `LivequerySync`: `mode: { scope, size, sort, keep, evict, children }` — khai báo phần giữ trên máy; tải lần đầu, delta, realtime, extend, children theo ref pattern |
+| `5068ce8` | Document `livequery/status` (`connected`, `offline`, `online`, `pending`), cập nhật `{ offline }` để giả lập mất mạng |
+| `ebf791a` | `useCollection`/`useDocument` tự re-render; `createRemoteLivequeryClient` cho client chạy trong SharedWorker |
+| `5df5c63` | `@livequery/mongodb` `sync: true`: `updated_at`, tombstone, đọc delta — kiểm trên replica set LAN |
+| `9fe8c2a` | Sửa lỗi lộ ra khi chạy trình duyệt thật: socket mới thay socket half-open, backoff reset, `synced_at` không nhảy trước catch-up, doc đang giữ nhận lại dạng `added` thì cập nhật |
+| `c44c662` | Demo chat viết lại: PWA, chỉ `useCollection`/`useDocument`, 45/45 kiểm tra trình duyệt gồm cắt mạng thật (proxy tắt được) |
+
+Kiểm chứng: client 179, react 68, rest 15, rpc 47, core 133, mongodb 66 (+1 e2e Mongo thật), honojs 43.
+Demo: https://livequery-chat.global.flygo.vn.
+
+Còn mở: socket của SharedWorker rớt (1006) mỗi lần điều hướng cả trang (tự nối lại ~2s, delta bù);
+phần server của "replay event rơi trong grace window" (không cần cho scope local-first có `sync: true`).
+
