@@ -13,7 +13,8 @@ function connect(): { api: TodoApi, host: Host } {
         // drainer — but an offline change reaches other tabs only once it is synced.
         return { api: new TodoService(window.location.origin), host: 'tab' }
     }
-    const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'livequery-todos' })
+    // extendedLifetime: survives the reload of the only tab (see examples/chat-demo/web/src/livequery.ts).
+    const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { type: 'module', name: 'livequery-todos', extendedLifetime: true } as WorkerOptions)
     const linker = new ServiceLinker(new SharedWorkerChannel(worker))
     return { api: linker.linkService<any>('todos') as TodoApi, host: 'shared-worker' }
 }

@@ -916,7 +916,9 @@ new WorkerManager(new SharedWorkerChannel()).exposeService('livequery', new Live
 // tab
 import { ServiceLinker, SharedWorkerChannel } from '@livequery/rpc'
 import { createRemoteLivequeryClient } from '@livequery/client'
-const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+// extendedLifetime: without it, reloading the only tab leaves the worker with no page for a moment;
+// Chrome then stops it, closing its WebSocket, and every scope has to catch up again.
+const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { type: 'module', extendedLifetime: true } as WorkerOptions)
 const client = createRemoteLivequeryClient(new ServiceLinker(new SharedWorkerChannel(worker)).linkService('livequery'))
 // <LivequeryClientProvider core={client}>
 ```

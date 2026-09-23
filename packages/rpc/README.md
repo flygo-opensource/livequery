@@ -90,7 +90,8 @@ manager.exposeService("counter", new CounterService())
 import { ServiceLinker, SharedWorkerChannel, type WorkerService } from "@livequery/rpc"
 import type { CounterService } from "./CounterService"
 
-const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module" })
+// extendedLifetime keeps the worker (and its connections) alive through a reload of the last tab.
+const worker = new SharedWorker(new URL("./worker.ts", import.meta.url), { type: "module", extendedLifetime: true } as WorkerOptions)
 const channel = new SharedWorkerChannel(worker)
 const linker = new ServiceLinker(channel)
 
