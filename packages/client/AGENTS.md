@@ -25,6 +25,12 @@ This repository is a client library package. Optimize for reusable API design, b
 - `src/LivequeryCollection.ts`: consumer-facing collection/document wrapper, lifecycle, watcher subscription, local item list, sorting, selection, pagination helpers, and mutation forwarding.
 - `src/LivequeryDocument.ts`: per-document `BehaviorSubject` wrapper with convenience methods.
 - `src/LivequeryMemoryStorage.ts`: in-memory reference implementation of `LivequeryStorage`.
+- `src/LivequeryIndexedDBStorage.ts`: IndexedDB implementation of `LivequeryStorage` (one `docs` store keyed `[collection, id]`, memory fallback without `indexedDB`).
+- `src/LivequeryOutbox.ts`: durable FIFO queue of local-first writes, persisted under the reserved ref `__livequery_outbox`.
+- `src/testing/defineStorageConformanceSuite.ts`: runner-agnostic storage contract suite, published as `@livequery/client/testing`.
+- `src/helpers/AddLock.ts`: refcounted per-collection lock that holds realtime `added` events back while an add is reconciled.
+- `src/helpers/isRetryableError.ts`: which write failures the outbox retries (network, timeout, 5xx, 408, 429).
+- `src/helpers/sortDocs.ts`: `field:sort` sorting shared by both storages.
 - `src/LivequeryStorage.ts`: local storage contract.
 - `src/LivequeryStorge.ts`: backward-compatible alias for the old misspelled storage contract name.
 - `src/LivequeryTransporter.ts`: remote sync/action contract and query result shape.
@@ -68,7 +74,10 @@ Internal concepts:
 - `#refs`: collection ref to watching collection ids.
 - `#queries$`: query request stream.
 - `#cache`: query observable dedupe cache.
-- `#adding`: per-collection add lock used to delay realtime added events while a local add is being reconciled.
+- `#addLock`: refcounted per-collection add lock used to delay realtime added events while a local add is being reconciled.
+- `outbox`: the `LivequeryOutbox` every local-first write goes through; `#execute()` sends one entry, `#confirmAdd/#confirmUpdate/#confirmDelete` apply a success, `#failed()` classifies a failure.
+- `#ingestRemoteChange()`: the single choke point for every change a transporter reports (query and realtime). Writes storage before broadcast and rebases documents with `_prev` / `_deleting` (or calls `conflictResolver`).
+- `refetch()` / `#refetchLocal()`: re-read after a transporter reconnect (`status$`).
 - `#broadcast()`: async fan-out to watchers.
 - `#filterLocalEvents()`: local-first/local-only event filter using full docs from storage for `modified` events.
 
@@ -259,23 +268,30 @@ Current limitation:
 
 ### `add()`
 
-- `server-first`: creates local ids for push payloads and pushes directly through transporters.
-- `local-first`: stores locally with `_adding: true`, broadcasts `added`, pushes to transporters, then clears `_adding` or records `_adding_error`.
+- `server-first`: pushes directly through transporters (payload without `id` and `_` fields) and throws on failure. Never touches the outbox.
+- `local-first`: stores locally with `_adding: true`, broadcasts `added`, enqueues an outbox entry per transporter. Confirmation swaps the `local:` id for the server id (storage, collections, queued entries) and clears `_adding`; a 4xx records `_adding_error`; a retryable failure keeps the entry and sets `_queued`.
 - `local-only`: stores locally with `_adding: true` and `_local_only: true`, broadcasts `added`, and skips transporters.
 - Local documents receive ids prefixed with `local:` until a transporter returns persisted data.
 
 ### `update()`
 
 - `server-first`: pushes the provided fields to transporters.
-- `local-first`: reads the old local doc, records old values in `_prev`, stores `_updating: true`, broadcasts `modified`, pushes changed fields to transporters, then clears `_prev` and `_updating` or records `_updating_error`.
+- `local-first`: reads the old local doc, records old values in `_prev` (never `id` or `_` fields; the first unconfirmed value of each field is kept), stores `_updating: true`, broadcasts `modified`, enqueues. The outbox sends the `_prev` fields read at send time; confirmation clears only the `_prev` keys whose value is still the one sent, or records `_updating_error` on a 4xx.
+
+Outbox entries carry no payload, so unsent writes to one document coalesce (see `LivequeryOutbox.#coalesce`). Keep that property: do not snapshot payloads at enqueue time.
 - `local-only`: updates storage and broadcasts `modified`, but skips transporters.
 
 ### `delete()`
 
 - `server-first`: pushes delete to transporters.
 - Local-only cases and local `local:` ids are hard-deleted locally.
-- When transporters exist, non-local deletes first mark `_deleting: true`, broadcast `modified`, then hard-delete after remote confirmation.
+- When transporters exist, non-local deletes first mark `_deleting: true`, broadcast `modified`, then hard-delete after remote confirmation (a 404 counts as confirmed).
+- A `local:` delete still reaches the outbox: it drops the unsent add, or waits for an add already in flight and deletes the created document.
 - Remote errors are persisted into `_deleting_error` and rebroadcast as `modified`.
+
+## Remote changes and conflicts
+
+Every transporter emission passes `#ingestRemoteChange()` before any broadcast. A document with `_prev` is rebased (edited fields keep the local value), `_deleting` swallows `modified`, `removed` always wins. `conflictResolver` replaces the rebase. Keep storage writes and the rebase in that one place.
 
 ## Filters
 
@@ -459,7 +475,8 @@ function TodoList({ collection }: { collection: LivequeryCollection<Todo> }) {
 ## Validation
 
 - Preferred build check: `bun run build`.
-- There is no dedicated test suite in this package at the moment.
+- `bun test tests/` runs the package suite: collections, outbox, conflict rebase, reconnect refetch, write path, and the storage conformance suite for memory and IndexedDB (`fake-indexeddb`).
+- Cross-package e2e without MongoDB: `tests/client-offline.e2e.test.ts` and `tests/client-strict-schema.e2e.test.ts` at the repo root.
 - If you change public types or exports, build before finishing.
 - If you change filter behavior, verify both type-level filters and runtime matching.
 - If you change RxJS query/broadcast flow, build and reason through async ordering.

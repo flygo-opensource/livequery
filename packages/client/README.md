@@ -24,6 +24,8 @@ bun add @livequery/client @livequery/react rxjs
 export * from "./LivequeryCollection"
 export * from "./LivequeryClient"
 export * from "./LivequeryMemoryStorage"
+export * from "./LivequeryIndexedDBStorage"
+export * from "./LivequeryOutbox"
 export * from "./LivequeryStorage"
 export * from "./LivequeryStorge"
 export * from "./LivequeryTransporter"
@@ -31,6 +33,8 @@ export * from "./types"
 export * from "./helpers/filterDocs"
 export * from "./LivequeryDocument"
 ```
+
+`@livequery/client/testing` is a separate entry point with `defineStorageConformanceSuite` for storage adapter authors (see [Writing a storage adapter](#writing-a-storage-adapter)); it is not part of the main bundle.
 
 The public storage interface is `LivequeryStorage`. The previous misspelled name `LivequeryStorge` remains exported as a backward-compatible alias.
 
@@ -202,6 +206,7 @@ type DocState<T extends Doc> = T & {
   _updating_error?: { code: string; message: string; transporter_id: string }
   _adding?: boolean
   _adding_error?: { code: string; message: string; transporter_id: string }
+  _queued?: boolean
   _remotes?: Record<string, string | number>
   _prev?: Record<string, any>
   _selected?: boolean
@@ -221,8 +226,9 @@ Field reference:
 | `_updating_error` | Server update rejected | Error from the failed transporter call |
 | `_deleting` | `local-first` delete in progress | Document is pending deletion on the server |
 | `_deleting_error` | Server delete rejected | Error from the failed transporter call |
+| `_queued` | `local-first` write stuck behind a network failure | The write sits in the outbox and will be retried; see [Offline-first](#offline-first) |
 | `_local_only` | `local-only` add | Document was created locally and never sent to the server |
-| `_prev` | `local-first` update pending | Fields that existed before the local update — used to push only changed fields to the server |
+| `_prev` | `local-first` update pending | Values from BEFORE the first unconfirmed edit of each field. Its keys are the fields to push, and while it is set those fields keep their local value against remote changes |
 | `_selected` | `select()` called | Whether the document is currently selected |
 | `_index` | Assigned on insert | Stable insertion order used for sort reset |
 | `_remotes` | Transporter-specific | Optional metadata from transporters; not used by the client core |
@@ -266,6 +272,20 @@ new LivequeryClient({
 
 - `storage`: a `LivequeryStorage` adapter.
 - `transporters`: a map of transporter id to `LivequeryTransporter`. Use one transporter for a simple app. Use multiple transporters when the same client should fan out to more than one backend.
+- `conflictResolver` (optional): decides what happens when a remote change reaches a document with unconfirmed local edits. See [Conflicts](#conflicts).
+
+The client starts its outbox on construction, so writes queued by an earlier session (a reload, a killed service worker) are sent without anything else to call.
+
+### `outbox`
+
+The client's `LivequeryOutbox`. Useful members:
+
+- `pending()`: the queued writes, oldest first.
+- `trigger()`: retry now instead of waiting for the backoff — e.g. from a "retry" button.
+
+### `refetch()`
+
+Re-runs the last first-page query of every live collection and reconciles the result with what is on screen. The client calls it by itself when a transporter reconnects; call it yourself if your app has a better signal (a tab regaining focus after hours, say).
 
 ### `watch(ref, collection_id, mode)`
 
@@ -291,15 +311,15 @@ Consumers should usually call `collection.query(filters)` instead.
 
 Lower-level mutation entry point used by `LivequeryCollection.add()`.
 
-- `server-first`: push to transporters first.
-- `local-first`: add to storage with `_adding: true`, broadcast locally, then push remote and reconcile.
+- `server-first`: push to transporters first; throws on failure.
+- `local-first`: add to storage with `_adding: true`, broadcast locally, then hand the write to the outbox. Resolves with the server's document, or with the local document (`_queued: true`) when the network is down.
 - `local-only`: add to storage with `_adding: true` and `_local_only: true`, broadcast locally, and skip transporters.
 
 ### `update(collection_ref, documents, mode)`
 
 Lower-level mutation entry point used by `LivequeryCollection.update()`.
 
-For local-first style updates, the client reads the old local document, records previous field values in `_prev`, stores `_updating: true`, broadcasts a `modified` event, then pushes only changed fields to transporters.
+For local-first style updates, the client reads the old local document, records previous field values in `_prev`, stores `_updating: true`, broadcasts a `modified` event, then hands the write to the outbox, which pushes only the fields in `_prev`.
 
 ### `delete(collection_ref, ids, mode)`
 
@@ -307,7 +327,7 @@ Lower-level delete entry point used by `LivequeryCollection.delete()`.
 
 - Local-only documents and explicit `local-only` deletes are hard-deleted from storage.
 - Documents with transporters are soft-deleted first with `_deleting: true`, then hard-deleted after remote confirmation.
-- Remote delete errors are persisted as `_deleting_error`.
+- Remote delete errors are persisted as `_deleting_error`. A delete the server answers with 404 counts as done.
 
 ### `trigger(action)`
 
@@ -332,11 +352,11 @@ Broadcasts a wildcard local removal for a collection and clears storage.
 await client.flush("todos")
 ```
 
-This is broad because the current storage contract has `flush(): Promise<void>` without a collection argument.
+This is broad because the current storage contract has `flush(): Promise<void>` without a collection argument. It also empties the outbox: writes that never reached the server are dropped, and the client logs a warning when there were any.
 
 ### `destroy()`
 
-Unsubscribes the client's internal query pipelines. Call it when permanently disposing a client instance.
+Unsubscribes the client's internal query pipelines and stops the outbox. Queued writes stay in storage for the next client on the same storage. Call it when permanently disposing a client instance.
 
 ## `LivequeryCollection`
 
@@ -758,6 +778,7 @@ type LivequeryStorage = {
   update<T extends Doc>(collection: string, id: string, document: Record<string, any>): Promise<DocState<T> | null>
   delete<T extends Doc>(collection: string, id: string): Promise<DocState<T> | null>
   flush(): Promise<void>
+  readonly shared?: string
 }
 ```
 
@@ -771,6 +792,27 @@ Adapter guidance:
 - `update()` should merge patch fields into the stored document.
 - `delete()` should return the deleted document or `null`.
 - `flush()` currently clears all storage.
+- `shared` is for adapters whose data several contexts see at once (IndexedDB is shared by every tab of an origin). Contexts with the same value elect one outbox drainer through `navigator.locks`, so a queued write is not sent twice.
+
+### Writing a storage adapter
+
+`@livequery/client/testing` exports the contract every adapter must pass. The outbox, the conflict rebase and the id remap call nothing but the six storage methods, so an adapter that passes the suite can back an offline-first client:
+
+```ts
+import { describe, test, expect } from "bun:test" // or vitest / jest
+import { defineStorageConformanceSuite } from "@livequery/client/testing"
+
+defineStorageConformanceSuite({
+  name: "MyStorage",
+  create: () => new MyStorage(),
+  dispose: (storage) => storage.close(),
+  describe,
+  test,
+  expect,
+})
+```
+
+It pins: `add` keeps a given id and assigns a `local:` id otherwise; `update` with a different `id` moves the document; documents round-trip as plain JSON; `query()` answers exactly like `filterDocs()`, with paging totals; collections are isolated; `flush()` empties everything.
 
 ## `LivequeryMemoryStorage`
 
@@ -793,6 +835,29 @@ const page = await storage.query<Todo>("todos", {
 
 It stores documents in a `Map<string, Map<string, Doc>>`, generates ids with `uuidv7`, applies runtime filtering through `filterDocs()`, and supports nested path sorting such as `"author.profile.createdAt:sort"`.
 
+Everything in it — cache, pending flags, queued writes — is gone on reload. Use `LivequeryIndexedDBStorage` for an offline-first web app.
+
+## `LivequeryIndexedDBStorage`
+
+A `LivequeryStorage` on IndexedDB, with no runtime dependency. Data, pending flags and the outbox survive reloads and browser restarts.
+
+```ts
+import { LivequeryClient, LivequeryIndexedDBStorage } from "@livequery/client"
+
+const client = new LivequeryClient({
+  storage: new LivequeryIndexedDBStorage({ name: "my-app", persist: true }),
+  transporters: { rest },
+})
+```
+
+Options:
+
+- `name`: database name, default `livequery`. Two storages with the same name share their data.
+- `persist`: call `navigator.storage.persist()` to ask the browser not to evict the origin. Recommended for offline-first apps.
+- `indexedDB`: an `IDBFactory` to use instead of the global one (tests, embedded runtimes).
+
+One object store holds every collection under the key `[collection, id]` — IndexedDB can only create stores during a version upgrade, and collection refs are only known at runtime. `query()` loads the collection and filters it with `filterDocs()`, exactly like the memory storage; that is fine up to roughly 10k documents per collection. An id change (the outbox swapping a `local:` id for the server id) is read, re-keyed and written in one transaction. Where `indexedDB` does not exist (SSR, Node, Bun) it falls back to memory. `close()` closes the connection.
+
 ## `LivequeryTransporter`
 
 Transporters connect the client to remote systems.
@@ -804,8 +869,11 @@ type LivequeryTransporter = {
   update<T extends Doc>(ref: string, id: string, doc: Partial<T>, context?: Record<string, any>): Promise<T>
   delete<T extends Doc>(ref: string, id: string, context?: Record<string, any>): Promise<T>
   trigger<T>(action: LivequeryAction): Promise<T>
+  status$?: Observable<{ connected: boolean }>
 }
 ```
+
+`status$` is optional, for transporters that hold a connection. When it turns `connected` the client retries queued writes; when it turns connected AGAIN after a drop, the client refetches live queries, because realtime events sent while the connection was down are lost. `RestTransporter` exposes its WebSocket state here when `ws` is configured.
 
 The optional trailing `context` on `add`/`update`/`delete` (and `LivequeryQueryParams.context` / `LivequeryAction.context` for `query`/`trigger`) is the collection's [`context`](#context) option. Transporters that don't need it can ignore the argument.
 
@@ -934,6 +1002,88 @@ await drafts.add(
   "local-only"
 )
 ```
+
+## Offline-first
+
+With `local-first` collections and a persistent storage, the client keeps working without a network: reads come from storage, writes apply locally at once and wait in a durable outbox until they reach the server.
+
+### What each mode does offline
+
+| Mode | Reads offline | Writes offline |
+|---|---|---|
+| `server-first` | Nothing new; the query errors | **Throws** (`NETWORK_ERROR`). By design: a resolved server-first write means the server has it |
+| `cache-first` | First page from storage, then the query errors | Mutations default to `server-first`: they throw |
+| `local-first` | From storage | Applied locally, queued, sent when the network is back |
+| `local-only` | From storage | Local only, never sent |
+
+An offline-first app uses `local-first` collections (their mutations default to `local-first`) and passes `"server-first"` explicitly on the rare write that must be confirmed before continuing.
+
+### Choosing a storage
+
+| Environment | Storage | Notes |
+|---|---|---|
+| Chrome / Edge / Firefox | `LivequeryIndexedDBStorage` | Pass `persist: true` |
+| Android Chrome, PWA | `LivequeryIndexedDBStorage` | No SharedWorker: every tab runs its own client, `navigator.locks` elects one outbox drainer |
+| iOS Safari, PWA | `LivequeryIndexedDBStorage` | **Weakest**: Safari evicts origins unused for ~7 days, queued writes included. Installed PWAs fare better. Treat storage as a cache that can disappear |
+| Chrome extension (MV3) | `LivequeryIndexedDBStorage` in the service worker | The worker is killed after ~30s idle; the outbox resumes from storage on the next start |
+| Capacitor / Cordova WebView | `LivequeryIndexedDBStorage` | The OS may clear WebView data; a native SQLite adapter would be sturdier |
+| React Native | a native adapter (MMKV, SQLite) | Not shipped yet; any adapter passing the [conformance suite](#writing-a-storage-adapter) works |
+| Node / Bun / SSR | `LivequeryMemoryStorage` | `LivequeryIndexedDBStorage` falls back to memory by itself |
+
+### The outbox
+
+`client.outbox` is a FIFO queue of writes, persisted through the storage under the reserved ref `__livequery_outbox` — as durable as the storage you chose. Collections cannot watch that ref.
+
+- **Every** `local-first` write goes through it. Online that is invisible: the write is sent at once and the mutation resolves with the server's answer.
+- A retryable failure — network error, timeout, HTTP 5xx, 408 or 429 — keeps the entry, marks the document `_queued: true` and resolves the mutation with the local document. Order is strict and one write is in flight at a time, so a failure stalls the queue behind it.
+- A 4xx (validation, permission) is the request's own fault: it is not queued, and the error lands on the document (`_adding_error`, `_updating_error`, `_deleting_error`) as before.
+- Retries back off from 2s to 30s. They also run at once when the client starts (resuming a previous session), on the global `online` event, when a transporter's `status$` turns connected, and on `client.outbox.trigger()`.
+- Entries carry no payload. An add sends the stored document and an update sends the fields in `_prev`, read when the entry is sent — so queued writes to one document fold together: add + update is one add with the latest fields, add + delete sends nothing, update + update is one update, update + delete is only the delete.
+- When an add is confirmed the `local:` id is swapped for the server id — in storage, on screen, and in every queued entry still pointing at it.
+- This changes what `local-first` users saw before: `_adding`, `_updating` and `_prev` now stay set until the write is actually confirmed, instead of turning into an error flag on the first network failure.
+
+### Conflicts
+
+When a remote change (a query result or a realtime event) reaches a document with unconfirmed local edits, the client rebases it before storage or any collection sees it:
+
+- Each field in `_prev` keeps its local value until its write is confirmed; every other field takes the remote value. The stored copy is rebased too.
+- A pending delete ignores remote `modified` events: the user already chose to delete.
+- A remote `removed` wins over a pending edit: the server no longer has the document.
+
+Once the write is confirmed `_prev` clears and remote changes win again. The rebase works per field: if two people edit the same field, the one whose write reaches the server last wins that field. Merging inside a field (text, lists) is CRDT territory and out of scope.
+
+To decide yourself, pass `conflictResolver`:
+
+```ts
+const client = new LivequeryClient({
+  storage,
+  transporters: { rest },
+  conflictResolver: ({ from, old_document, change }) => ({
+    approved: true, // false drops the remote change
+    document: { ...old_document, ...change.data },
+  }),
+})
+```
+
+It is only called for documents with unconfirmed edits (`_prev`) or a pending delete. `from` is `{ transporter_id }`; the returned `document` is written to storage and delivered to collections.
+
+### Reconnecting
+
+A realtime event sent while the socket was down never arrives. When a transporter's `status$` reconnects, the client:
+
+- re-runs the last first-page query of every `server-first` / `cache-first` collection, without a loading spinner;
+- re-reads every page of each `local-first` sync once, and deletes stored documents the server no longer returns (a failed read deletes nothing);
+- reconciles each collection with the result: updates what it holds, drops what is gone, keeps documents that only exist on this device (`local:` ids, `_adding`, `_local_only`).
+
+A collection that had loaded several pages is back to its first page after a refetch, as after any new query.
+
+### Limits
+
+- Several tabs on one IndexedDB elect one outbox drainer with `navigator.locks`. Without Web Locks every tab may send the same queued write. The other tabs do not see the drainer's confirmations until their next read.
+- `trigger()` actions are never queued.
+- `flush()` drops queued writes (with a warning).
+- Conflicts are resolved per field.
+- With several transporters each gets its own outbox entries; the first confirmed add decides the server id.
 
 ## Broadcast Filtering
 
@@ -1147,12 +1297,11 @@ A document ref still exposes `items`; the matching document is represented as a 
 ## Caveats
 
 - `LivequeryCollection.initialize()` is browser-only in the current implementation.
-- Mutations default to `server-first` because the method parameter has that default. Pass `"local-first"` or `"local-only"` explicitly when needed.
-- `ConflictResolverFunction` is exported as a TypeScript type but is not wired into `LivequeryClient`. It documents the intended shape for future conflict resolution support. Do not pass it to the client — there is currently no parameter that accepts it.
+- Mutations default to the collection's mode, except `cache-first` (and no mode), which default to `server-first`. Pass the mode explicitly to override it per call.
 - `LivequeryCollection` has no initialized `metadata` subject in the current constructor, so transporter `metadata` should not be considered reliable consumer state yet.
 - `trigger()` returns an observable with a Promise-like `then()` method.
 - Transporter streams should emit incremental changes. Do not send full snapshots as repeated `added` events unless the client can safely deduplicate by id.
-- Run `bun test` to execute the test suite. It covers collection behavior, seed loading, mutation mode defaults, query error propagation, filter parsing, and sort stability.
+- Run `bun test` to execute the test suite. It covers collection behavior, seed loading, mutation mode defaults, query error propagation, filter parsing, sort stability, the outbox, conflict rebase, reconnect refetch, and the storage conformance suite (memory and IndexedDB).
 
 ## Development
 

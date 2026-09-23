@@ -1,14 +1,14 @@
 # Kế hoạch offline-first cho `@livequery/client`
 
-Trạng thái: **đã duyệt 2026-09-23, chưa implement**. Làm theo từng increment, mỗi increment
-build + test xanh độc lập rồi mới sang cái kế. Cập nhật checkbox ở đây khi xong.
+Trạng thái: **đã duyệt 2026-09-23, đã implement đủ 6 increment trên nhánh `worktree-offline-first`**
+(mỗi increment một commit). Những chỗ làm khác kế hoạch ghi ở mục "Sai khác so với kế hoạch" cuối file.
 
 - [x] Increment 1 — Sửa write-path (tiên quyết)
 - [x] Increment 2 — `LivequeryIndexedDBStorage` + conformance suite
 - [x] Increment 3 — Outbox bền vững + drain
 - [x] Increment 4 — Conflict rebase
 - [x] Increment 5 — Refetch khi reconnect
-- [ ] Increment 6 — Test & docs chốt sổ
+- [x] Increment 6 — Test & docs chốt sổ
 
 ## Context
 
@@ -234,3 +234,44 @@ topology A (client trong tab + `navigator.locks`) là fallback vĩnh viễn, kh�
 - Giữ `_prev`/`_adding` sống khi queued đổi ngữ nghĩa cờ với user local-first hiện tại — nêu rõ
   trong README.
 - Độ trung thực fake-indexeddb với composite key + đổi id — có test riêng.
+
+## Sai khác so với kế hoạch
+
+Ghi lại lúc implement (2026-09-23), để người review không phải tự dò:
+
+1. **Mọi write local-first đều đi qua outbox**, không chỉ khi lỗi. Kế hoạch chỉ enqueue khi
+   `#push` gặp lỗi retryable, nhưng như vậy một write mới lúc queue còn entry sẽ vượt mặt entry cũ
+   (vỡ FIFO), và `update` trên doc `local:` đang add dở sẽ gọi `add` lần hai. Khi online thì không
+   thấy khác biệt: write gửi ngay, mutation vẫn resolve bằng dữ liệu server.
+2. **Entry không lưu `payload`.** Lúc gửi mới đọc từ storage: add gửi cả doc, update gửi các field
+   trong `_prev`. Nhờ vậy coalescing gần như tự nhiên (entry chưa gửi luôn mang state mới nhất), và
+   confirm chỉ xoá những key `_prev` mà giá trị hiện tại vẫn bằng giá trị vừa gửi — sửa tiếp trong
+   lúc request đang bay không bị mất.
+3. **Increment 5 không dùng `groupBy` + `switchMap`.** `switchMap` theo collection sẽ huỷ luôn stream
+   realtime của trang đầu mỗi lần `loadMore`. Thay bằng `takeUntil` "query trang đầu tiếp theo của
+   cùng collection": re-query (reconnect hay đổi filter) thay stream cũ, còn query phân trang giữ
+   nguyên. `realtime-leak.test.ts` vẫn xanh; `reconnect-refetch.test.ts` ghim cả hai điều.
+4. **Refetch không bật spinner**, và collection nhận kết quả có cờ `refetch: true` để reconcile
+   (cập nhật item đang có, bỏ item không còn, giữ doc chỉ có trên máy). Local-first refetch là một
+   lần đọc hết các trang (không mở thêm realtime), kèm xoá khỏi storage các doc server không còn trả;
+   đọc lỗi thì không xoá gì.
+5. **Test strict-schema của Increment 1 dùng server Hono + Map in-process**
+   (`tests/helpers/memoryServer.ts`) thay vì sửa `tests/helpers/servers.ts` / `client-suite.ts`:
+   hai file đó cần MongoDB trên LAN, không chạy được ở đây. Cùng server đó dùng cho e2e offline.
+6. **Conformance suite nhận `{ name, create, dispose?, describe, test, expect }`** thay vì chỉ
+   `factory`, để chạy được với bun:test, vitest lẫn jest.
+7. **`LivequeryStorage.shared?`** (optional) được thêm để chọn tên `navigator.locks` cho outbox;
+   IndexedDB đặt `indexeddb:<name>`, memory storage không đặt nên không khoá.
+8. `client.refetch()` và `client.outbox` là public.
+
+Bug tìm thêm trong lúc làm, đã sửa kèm:
+
+- Collection local-first làm mất item vừa add xong: bộ lọc tra storage theo id `local:` cũ, không
+  thấy, đổi event thành `removed`.
+- Xoá một doc `local:` ở local-first từng gọi `transporter.add`.
+- Collection xoá nhầm item bên cạnh khi một batch có hai lần `removed` cùng id.
+- Delete replay nhận 404 giờ tính là xong thay vì `_deleting_error`.
+
+`todo.md` gốc chưa cập nhật trên nhánh này (bản trong checkout chính đang có sửa đổi chưa commit).
+Plan này đóng: write-path mục 1, 2, 3, 5 và "Realtime drops updates across a reconnect, and the
+client never refetches" — phần phía client; phần server (replay event rơi trong grace window) vẫn mở.
