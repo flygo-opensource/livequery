@@ -281,7 +281,13 @@ The client starts its outbox on construction, so writes queued by an earlier ses
 The client's `LivequeryOutbox`. Useful members:
 
 - `pending()`: the queued writes, oldest first.
-- `trigger()`: retry now instead of waiting for the backoff — e.g. from a "retry" button.
+- `pending$`: the same list as an observable, for a sync indicator:
+
+  ```ts
+  client.outbox.pending$.subscribe(entries => setBadge(entries.length ? `${entries.length} unsynced` : ""))
+  ```
+
+- `trigger()`: retry now instead of waiting for the backoff — e.g. from a "retry" button, or after refreshing an expired token.
 
 ### `refetch()`
 
@@ -1035,8 +1041,10 @@ An offline-first app uses `local-first` collections (their mutations default to 
 `client.outbox` is a FIFO queue of writes, persisted through the storage under the reserved ref `__livequery_outbox` — as durable as the storage you chose. Collections cannot watch that ref.
 
 - **Every** `local-first` write goes through it. Online that is invisible: the write is sent at once and the mutation resolves with the server's answer.
-- A retryable failure — network error, timeout, HTTP 5xx, 408 or 429 — keeps the entry, marks the document `_queued: true` and resolves the mutation with the local document. Order is strict and one write is in flight at a time, so a failure stalls the queue behind it.
-- A 4xx (validation, permission) is the request's own fault: it is not queued, and the error lands on the document (`_adding_error`, `_updating_error`, `_deleting_error`) as before.
+- A retryable failure — network error, timeout, HTTP 5xx, 401, 408 or 429 — keeps the entry, marks the document `_queued: true` and resolves the mutation with the local document. Order is strict and one write is in flight at a time, so a failure stalls the queue behind it.
+- **401 is retryable on purpose.** A write queued offline is often replayed hours later, after the login expired; dropping it would lose the user's work. The queue waits; refresh the token (the transporter reads it at send time, e.g. in `RestTransporter`'s `onRequest`) and call `client.outbox.trigger()`.
+- Any other 4xx (validation, permission, not found) is the request's own fault: it is not queued, and the error lands on the document (`_adding_error`, `_updating_error`, `_deleting_error`) as before.
+- If the queue itself cannot be written (storage quota, a closed database), the document gets an `_adding_error` / `_updating_error` / `_deleting_error` with code `OUTBOX_WRITE_FAILED` instead of the write silently not being durable.
 - Retries back off from 2s to 30s. They also run at once when the client starts (resuming a previous session), on the global `online` event, when a transporter's `status$` turns connected, and on `client.outbox.trigger()`.
 - Entries carry no payload. An add sends the stored document and an update sends the fields in `_prev`, read when the entry is sent — so queued writes to one document fold together: add + update is one add with the latest fields, add + delete sends nothing, update + update is one update, update + delete is only the delete.
 - When an add is confirmed the `local:` id is swapped for the server id — in storage, on screen, and in every queued entry still pointing at it.
@@ -1084,6 +1092,10 @@ A collection that had loaded several pages is back to its first page after a ref
 - `flush()` drops queued writes (with a warning).
 - Conflicts are resolved per field.
 - With several transporters each gets its own outbox entries; the first confirmed add decides the server id.
+- **No idempotency key yet.** If an add reaches the server but the response is lost (a timeout), the retry creates a second document. Closing this needs server-side deduplication.
+- The document and its outbox entry are two storage writes, not one transaction: a crash exactly between them leaves a pending document with no entry, which is never sent.
+- The outbox has no size cap or age limit, and a queued write cannot be cancelled from the API.
+- No end-to-end encryption: the server sees the data. It can be layered in a transporter.
 
 ## Broadcast Filtering
 

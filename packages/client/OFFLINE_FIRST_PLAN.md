@@ -273,15 +273,51 @@ Bug tìm thêm trong lúc làm, đã sửa kèm:
 - Collection xoá nhầm item bên cạnh khi một batch có hai lần `removed` cùng id.
 - Delete replay nhận 404 giờ tính là xong thay vì `_deleting_error`.
 
+## Đối chiếu tiêu chuẩn local-first (2026-09-23)
+
+Nguồn: 7 tiêu chuẩn của Ink & Switch ("Local-first software", 2019) và các checklist outbox /
+offline-sync thực hành (thứ tự FIFO, phân loại lỗi HTTP, token lúc replay, idempotency, giới hạn
+queue). ✅ = có và có test; ⚠️ = có một phần; ❌ = chưa có (ghi rõ trong README mục Limits).
+
+| Tiêu chuẩn | Trạng thái | Bằng chứng (test) |
+| --- | --- | --- |
+| 1. No spinners — ghi hiện ngay, trước khi server trả lời | ✅ | `local-first-standards.test.ts` (no spinners), e2e `local-first-sync` bước 1 |
+| 2. Nhiều thiết bị, đồng bộ qua server | ✅ | e2e `local-first-sync.e2e.test.ts`: 2 thiết bị hội tụ về cùng trạng thái |
+| 3. Network optional — đọc khi cold start offline | ✅ | `local-first-standards.test.ts` (cold start offline) |
+| 3. Network optional — CRUD offline | ✅ | `outbox.test.ts`, e2e `client-offline`, e2e `local-first-sync` |
+| 3. Tự đồng bộ khi có mạng lại (backoff, `online`, `status$` reconnect) | ✅ | `outbox.test.ts` (resume), e2e `client-offline` (backoff tự chạy) |
+| 3. Sống qua reload / service worker bị kill | ✅ | `outbox.test.ts` (resume), e2e `client-offline` (IndexedDB reload) |
+| 3. Đọc bù sau reconnect | ✅ | `reconnect-refetch.test.ts` |
+| 4. Cộng tác — sửa khác field thì merge | ✅ | `conflict-rebase.test.ts`, e2e `local-first-sync` (title của A + done của B) |
+| 4. Cộng tác — cùng field | ⚠️ last-writer-wins theo field, có `conflictResolver`; không có CRDT (merge trong text/list) | `conflict-rebase.test.ts`, e2e `local-first-sync` |
+| 5. The Long Now — dữ liệu ở định dạng mở, đọc được không cần app | ⚠️ JSON thuần trong IndexedDB; chưa có API export / migration schema | conformance suite (round-trip JSON) |
+| 6. Bảo mật, mã hoá đầu-cuối | ❌ server đọc được dữ liệu; có thể thêm ở tầng transporter | — |
+| 7. Người dùng sở hữu dữ liệu | ⚠️ bản chính nằm trên máy (local-first); không có export | — |
+| Outbox: FIFO, một request đang bay | ✅ | `outbox.test.ts` (FIFO) |
+| Outbox: phân loại lỗi — retry 5xx/401/408/429/mạng, bỏ 400/403/404/422 | ✅ (401 mới thêm: login hết hạn không làm mất ghi) | `local-first-standards.test.ts` (401, 403), `outbox.test.ts` (4xx, 5xx) |
+| Outbox: token đọc lúc replay, không lưu trong entry | ✅ entry không chứa header; `onRequest` chạy lúc gửi | e2e `local-first-sync` (dùng `onRequest`) |
+| Outbox: gộp ghi thừa | ✅ | `outbox.test.ts` (coalescing 4 cặp) |
+| Outbox: trạng thái đồng bộ cho UI | ✅ cờ `_queued` trên doc + `outbox.pending$` (mới) | `local-first-standards.test.ts` (pending$) |
+| Outbox: storage đầy / không ghi được queue | ✅ (mới) cờ lỗi `OUTBOX_WRITE_FAILED` trên doc | `local-first-standards.test.ts` |
+| Outbox: idempotency (mất response → gửi lại tạo bản trùng) | ❌ cần server dedupe theo key | — |
+| Outbox: doc + entry trong cùng transaction | ❌ hai lần ghi storage riêng; cửa sổ crash nhỏ | — |
+| Outbox: giới hạn kích thước / TTL, huỷ entry | ❌ | — |
+| Nhiều tab | ⚠️ một drainer qua `navigator.locks`; tab khác không thấy xác nhận tới lần đọc sau | `outbox.test.ts` (lock) |
+
+Việc tiếp theo đề xuất, theo thứ tự giá trị: (1) idempotency key — `RestTransporter` gửi header
+`Idempotency-Key` = id của entry, server (`@livequery/core`) dedupe trong một khoảng TTL;
+(2) bước repair khi boot cho doc đang pending mà thiếu entry; (3) `outbox.discard(entry_id)` + giới hạn
+queue; (4) export dữ liệu; (5) CRDT cho field text nếu có nhu cầu cộng tác thời gian thực.
+
 ## Tiến độ kiểm chứng (2026-09-23)
 
 | Hạng mục Verify | Kết quả |
 | --- | --- |
 | 1. `bun run build` toàn workspace (kèm typecheck examples) | ✅ |
-| 2. `bun run test` — mọi package + examples | ✅ (client 127 test, tổng các package xanh) |
+| 2. `bun run test` — mọi package + examples | ✅ (client 133 test, tổng các package xanh) |
 | 3. E2e offline: ghi lúc server tắt, drain khi bật lại (cả qua reload với IndexedDB) | ✅ `tests/client-offline.e2e.test.ts` |
 | 4. `realtime-leak.test.ts` + `ws-reconnect.e2e.test.ts` | ✅ |
-| Toàn bộ e2e gốc `tests/` với replica set LAN (`192.168.2.4:27018`) | ✅ 111/111, gồm hai suite fullstack client (Hono, NestJS) |
+| Toàn bộ e2e gốc `tests/` với replica set LAN (`192.168.2.4:27018`) | ✅ 114/114, gồm hai suite fullstack client và `local-first-sync` (2 thiết bị) |
 
 `todo.md` gốc đã cập nhật trong checkout chính (chưa commit, cùng các sửa đổi khác của bạn): mục
 write-path 1, 2, 3, 5 đánh dấu đã sửa; mục "Realtime drops updates across a reconnect" ghi phần

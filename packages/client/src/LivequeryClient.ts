@@ -2,7 +2,7 @@ import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, grou
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
-import { LIVEQUERY_OUTBOX_REF, LivequeryOutbox, type OutboxEntry, type OutboxExecution, type OutboxOperation } from "./LivequeryOutbox.js"
+import { LIVEQUERY_OUTBOX_REF, LivequeryOutbox, type OutboxEntry, type OutboxExecution, type OutboxOperation, type OutboxSettlement } from "./LivequeryOutbox.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
@@ -716,7 +716,18 @@ export class LivequeryClient {
     async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string }>, context?: Record<string, any>) {
         const results = await Promise.all(docs.flatMap(doc =>
             Object.keys(this.config.transporters).map(async transporter_id => {
-                const settlement = await this.outbox.enqueue({ transporter_id, collection_ref, op, doc_id: doc.id, context })
+                const entry = { transporter_id, collection_ref, op, doc_id: doc.id, context }
+                const settlement = await this.outbox.enqueue(entry).catch(async (e): Promise<OutboxSettlement> => {
+                    // The queue itself could not be written (storage quota, a closed database):
+                    // the write is not durable, so say so on the document instead of dropping it.
+                    const error: DocError = {
+                        code: 'OUTBOX_WRITE_FAILED',
+                        message: (e as any)?.message ?? String(e),
+                        transporter_id,
+                    }
+                    await this.#failed({ ...entry, id: '', attempts: 0 }, error)
+                    return { status: 'failed', error }
+                })
                 if (settlement.status === 'done') return settlement.data
                 if (settlement.status === 'queued') return await this.config.storage.get<T>(collection_ref, doc.id) ?? doc
             })

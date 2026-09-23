@@ -1,3 +1,4 @@
+import { BehaviorSubject, type Observable } from 'rxjs'
 import { uuidv7 } from 'uuidv7'
 import type { LivequeryStorage } from './LivequeryStorage.js'
 import type { DocError } from './types.js'
@@ -61,6 +62,13 @@ type Waiter = (settlement: OutboxSettlement) => void
  * enqueue, on the global `online` event and whenever `trigger()` is called.
  */
 export class LivequeryOutbox {
+    readonly #pending$ = new BehaviorSubject<OutboxEntry[]>([])
+    /**
+     * Writes not yet confirmed, oldest first — for a sync indicator ("3 changes waiting"). Emits on
+     * every enqueue, confirmation, retry and flush.
+     */
+    readonly pending$: Observable<OutboxEntry[]> = this.#pending$.asObservable()
+
     readonly #options: LivequeryOutboxOptions
     readonly #waiters = new Map<string, Waiter[]>()
     readonly #reported = new Set<string>()
@@ -74,6 +82,7 @@ export class LivequeryOutbox {
     #stopped = false
     #timer: ReturnType<typeof setTimeout> | undefined
     #serial: Promise<unknown> = Promise.resolve()
+    #publishing: Promise<void> = Promise.resolve()
 
     constructor(options: LivequeryOutboxOptions) {
         this.#options = options
@@ -85,6 +94,7 @@ export class LivequeryOutbox {
         this.#started = true
         // Feature-detected on globalThis, not window: the client also runs in workers.
         globalThis.addEventListener?.('online', this.#online)
+        this.#publish()
         this.trigger()
     }
 
@@ -135,6 +145,7 @@ export class LivequeryOutbox {
                 : new Promise<OutboxSettlement>(resolve => this.#wait(result.entry_id, resolve))
             return { ...result, settlement }
         })
+        this.#publish()
         if (decision.settled) return decision.settled
         if (this.#stalled) {
             decision.created && await this.#report([decision.created])
@@ -153,12 +164,14 @@ export class LivequeryOutbox {
                 await this.#options.storage.update(LIVEQUERY_OUTBOX_REF, entry.id, { doc_id: to_id })
             }
         })
+        this.#publish()
     }
 
     /** The storage was flushed: every entry is gone, release whoever waits on one. */
     cleared() {
         this.#reported.clear()
         this.#stalled = false
+        this.#pending$.next([])
         this.#settleAll({
             status: 'failed',
             error: { code: 'OUTBOX_CLEARED', message: 'The outbox was flushed before this write was sent', transporter_id: '' },
@@ -234,6 +247,7 @@ export class LivequeryOutbox {
             if (result.status === 'retry') {
                 const attempts = head.attempts + 1
                 await this.#options.storage.update(LIVEQUERY_OUTBOX_REF, head.id, { attempts, last_error: result.error })
+                this.#publish()
                 this.#stalled = true
                 await this.#report(entries)
                 this.#settleAll({ status: 'queued' })
@@ -247,7 +261,16 @@ export class LivequeryOutbox {
                 this.#stalled = false
                 this.#settle(head.id, result)
             })
+            this.#publish()
         }
+    }
+
+    // Reads are chained so an older read can never land after a newer one.
+    #publish() {
+        this.#publishing = this.#publishing
+            .then(() => this.pending())
+            .then(entries => this.#pending$.next(entries))
+            .catch(e => console.error('livequery outbox: reading pending entries failed', e))
     }
 
     async #report(entries: OutboxEntry[]) {
