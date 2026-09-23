@@ -6,6 +6,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { MongoClient } from 'mongodb'
 import { MongoDatasource } from '../src/MongoDatasource.js'
+import { withVersion } from '../src/withVersion.js'
 
 const URL = process.env.LIVEQUERY_E2E_MONGO_URL
 const DB_NAME = process.env.LIVEQUERY_E2E_DB_NAME ?? 'livequery'
@@ -92,5 +93,42 @@ describe.skipIf(!URL)('sync route on a real MongoDB', () => {
         while (seen.length < 3 && Date.now() - started < 10_000) await new Promise(resolve => setTimeout(resolve, 100))
         await stream.close()
         expect(seen).toEqual(['insert', 'update', 'update'])
+    })
+
+    test('versions follow commit order: a slow write never ends up below one that committed first', async () => {
+        const db = client!.db(DB_NAME)
+        const coll = db.collection(collection_name)
+        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+        let a_version = 0
+        const slow = withVersion(db, collection_name, async (version, session) => {
+            a_version = version
+            await sleep(1500)  // allocated, not committed yet
+            await coll.insertOne({ text: 'slow', updated_at: version }, { session })
+        })
+        await sleep(200)
+        const fast = withVersion(db, collection_name, (version, session) =>
+            coll.insertOne({ text: 'fast', updated_at: version }, { session }).then(() => version))
+        // While the slow one is open, the fast one cannot commit: a reader sees neither.
+        await sleep(600)
+        expect(await coll.countDocuments({ text: { $in: ['slow', 'fast'] } })).toBe(0)
+        const [, fast_version] = await Promise.all([slow, fast])
+        expect(fast_version).toBeGreaterThan(a_version)
+        const stored = await coll.find({ text: { $in: ['slow', 'fast'] } }).sort({ updated_at: 1 }).toArray()
+        expect(stored.map(d => d.text)).toEqual(['slow', 'fast'])
+    })
+
+    test('If-Match on a real database: the stale write is refused, the fresh one lands', async () => {
+        const datasource = new MongoDatasource({ connections: { default: client!.db(DB_NAME) } })
+        const options = { collection: collection_name, sync: true }
+        const run = (overrides: Record<string, any>) => datasource.query(request(overrides) as any, options) as Promise<any>
+        const doc = (await run({ method: 'post', body: { id: uuidv7(), text: 'v1' } })).item
+        const b = (await run({ method: 'patch', is_collection: false, document_id: doc.id, keys: { id: doc.id }, body: { text: 'from B' }, if_version: doc.updated_at })).item
+        expect(b.updated_at).toBeGreaterThan(doc.updated_at)
+        const stale = await run({ method: 'patch', is_collection: false, document_id: doc.id, keys: { id: doc.id }, body: { text: 'from A' }, if_version: doc.updated_at }).then(() => null, e => e)
+        expect(stale).toMatchObject({ status: 409, code: 'VERSION_CONFLICT' })
+        const fresh = (await run({ method: 'patch', is_collection: false, document_id: doc.id, keys: { id: doc.id }, body: { text: 'from A' }, if_version: b.updated_at })).item
+        expect(fresh.updated_at).toBeGreaterThan(b.updated_at)
+        const raw = await client!.db(DB_NAME).collection(collection_name).findOne({ updated_at: fresh.updated_at })
+        expect(raw?.text).toBe('from A')
     })
 })

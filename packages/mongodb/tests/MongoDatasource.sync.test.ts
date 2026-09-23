@@ -17,37 +17,37 @@ const request = (overrides: Record<string, any>) => ({
 
 function setup() {
     const messages = createMockCollection('messages', collectionReadResponse([]))
-    const datasource = new MongoDatasource({ connections: { default: createMockDb({ messages }) as any } })
-    return { messages, datasource }
+    const db = createMockDb({ messages })
+    const datasource = new MongoDatasource({ connections: { default: db as any } })
+    return { messages, datasource, versions: db.versions }
 }
 
 const matchOf = (pipeline: any[]) => JSON.stringify(pipeline.filter(stage => stage.$match))
 
 describe('MongoDatasource sync routes', () => {
-    test('writes take updated_at from the database clock', async () => {
-        const { messages, datasource } = setup()
+    test('every write takes the next version of the collection, inside a transaction', async () => {
+        const { messages, datasource, versions } = setup()
         const added = await datasource.query(request({ method: 'post', body: { text: 'hi', price: '$100' } }) as any, { collection: 'messages', sync: true }) as any
-        const insert = messages.findOneAndUpdateCalls[0]!
-        // An upsert no existing document can match: a taken _id still fails as a duplicate.
-        expect(Object.keys(insert.filter)).toEqual(['_id', '__livequery_inserting'])
-        expect(insert.options).toMatchObject({ upsert: true, returnDocument: 'after' })
-        expect(insert.update[0].$set).toMatchObject({ text: { $literal: 'hi' }, price: { $literal: '$100' }, updated_at: { $toLong: '$$NOW' } })
-        expect(insert.update[1]).toEqual({ $unset: '__livequery_inserting' })
-        expect(messages.insertOneCalls).toHaveLength(0)
-        expect(added.item).toMatchObject({ text: 'hi', price: '$100', updated_at: messages.dbNow, id: expect.any(String) })
+        expect(messages.insertOneCalls[0]).toMatchObject({ text: 'hi', price: '$100', updated_at: versions.state.last })
+        expect(added.item).toMatchObject({ text: 'hi', updated_at: versions.state.last, id: expect.any(String) })
 
-        messages.dbNow++
         const updated = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'hey' } }) as any, { collection: 'messages', sync: true }) as any
-        const patch = messages.findOneAndUpdateCalls[1]!
-        expect(patch.filter).toEqual({ _id: ObjectId.createFromHexString(id), deleted_at: null })
-        expect(patch.update[0].$set).toEqual({ text: { $literal: 'hey' }, updated_at: { $toLong: '$$NOW' } })
-        expect(updated.item).toMatchObject({ id, text: 'hey', updated_at: messages.dbNow })
+        expect(messages.updateOneCalls[0]).toEqual({
+            filter: { _id: ObjectId.createFromHexString(id), deleted_at: null },
+            update: { $set: { text: 'hey', updated_at: versions.state.last } },
+        })
+        expect(updated.item).toMatchObject({ id, text: 'hey', updated_at: versions.state.last })
+
+        // Operators get a version too.
+        await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { $inc: { likes: 1 } } }) as any, { collection: 'messages', sync: true })
+        expect(messages.updateOneCalls[1]!.update).toEqual({ $inc: { likes: 1 }, $set: { updated_at: versions.state.last } })
+        expect(versions.state.transactions).toBe(3)
     })
 
     test('If-Match: the write only matches the version it was based on; another one is a 409', async () => {
         const { messages, datasource } = setup()
         await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'a' }, if_version: 7 }) as any, { collection: 'messages', sync: true })
-        expect(messages.findOneAndUpdateCalls[0]!.filter).toMatchObject({ deleted_at: null, updated_at: 7 })
+        expect(messages.updateOneCalls[0]!.filter).toMatchObject({ deleted_at: null, updated_at: 7 })
 
         // Someone else wrote version 8 in between.
         messages.stored = { _id: id, updated_at: 8 }
@@ -57,23 +57,15 @@ describe('MongoDatasource sync routes', () => {
         // Without If-Match: no condition, as before.
         messages.stored = null
         await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'c' } }) as any, { collection: 'messages', sync: true })
-        expect(messages.findOneAndUpdateCalls.at(-1)!.filter).not.toHaveProperty('updated_at')
-    })
-
-    test('an operator body is stamped by the server instead', async () => {
-        const { messages, datasource } = setup()
-        const before = Date.now()
-        const updated = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { $inc: { likes: 1 } } }) as any, { collection: 'messages', sync: true }) as any
-        expect(messages.updateOneCalls[0]!.update).toMatchObject({ $inc: { likes: 1 }, $set: { updated_at: expect.any(Number) } })
-        expect(updated.item.updated_at).toBeGreaterThanOrEqual(before)
+        expect(messages.updateOneCalls.at(-1)!.filter).not.toHaveProperty('updated_at')
     })
 
     test('a delete leaves a tombstone', async () => {
-        const { messages, datasource } = setup()
+        const { messages, datasource, versions } = setup()
         const deleted = await datasource.query(request({ method: 'delete', is_collection: false, document_id: id, keys: { id } }) as any, { collection: 'messages', sync: true }) as any
         expect(messages.deleteOneCalls).toHaveLength(0)
-        expect(messages.findOneAndUpdateCalls[0]!.update[0].$set).toEqual({ deleted_at: { $toLong: '$$NOW' }, updated_at: { $toLong: '$$NOW' } })
-        expect(deleted.item).toMatchObject({ id, deleted_at: messages.dbNow, updated_at: messages.dbNow })
+        expect(messages.updateOneCalls[0]!.update).toEqual({ $set: { deleted_at: versions.state.last, updated_at: versions.state.last } })
+        expect(deleted.item).toMatchObject({ id, deleted_at: versions.state.last, updated_at: versions.state.last })
     })
 
     test('reads hide tombstones unless a delta asks for them', async () => {

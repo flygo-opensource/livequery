@@ -9,8 +9,10 @@
  *                                  over the array)
  *   chats/:chat_id/messages      → one chat's messages
  *
- * Every route serves local-first sync: each write stamps `updated_at`, so a device that was offline
- * asks only for what changed since (see `sync: true` in @livequery/mongodb). Chats are ordered by
+ * Every route serves local-first sync: each write gets the collection's next version in
+ * `updated_at` (in commit order, see `withVersion`), so a device that was offline asks only for
+ * what changed since and misses nothing (see `sync: true` in @livequery/mongodb). The hand-written
+ * routes below use `withVersion` too. Chats are ordered by
  * `active_at` (last message), not `updated_at`, so a read receipt does not reorder the list.
  */
 import { Hono, type Context, type Next } from 'hono'
@@ -19,7 +21,7 @@ import * as z from 'zod/mini'
 import { MongoClient, UUID, type Collection } from 'mongodb'
 import { uuidv7 } from 'uuidv7'
 import { LIVEQUERY_REALTIME_PATH, resolveClientId, toLivequeryError } from '@livequery/core'
-import { MongodbRealtime, fromMongoId, mongodb } from '@livequery/mongodb'
+import { MongodbRealtime, fromMongoId, mongodb, withVersion } from '@livequery/mongodb'
 import { errorHandler, livequery, realtime, realtimeGateway, serve, validator } from '@livequery/honojs'
 import { seed } from './seed.ts'
 
@@ -116,16 +118,18 @@ app.post('/livequery/accounts', cap(accounts, MAX.accounts, 'accounts'), async c
     const body = await c.req.json().catch(() => ({}))
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (name.length < 1 || name.length > 32) throw fail(400, 'INVALID_NAME', 'A name is 1 to 32 characters')
-    const now = Date.now()
-    const doc = {
-        _id: idOf(newId(body)),
-        name,
-        name_key: name.toLowerCase(),
-        color: colors[Math.floor(Math.random() * colors.length)],
-        created_at: now,
-        updated_at: now,
-    }
-    await accounts.insertOne(doc).catch(e => {
+    const doc = await withVersion(db, 'accounts', async (version, session) => {
+        const doc = {
+            _id: idOf(newId(body)),
+            name,
+            name_key: name.toLowerCase(),
+            color: colors[Math.floor(Math.random() * colors.length)],
+            created_at: Date.now(),
+            updated_at: version,
+        }
+        await accounts.insertOne(doc, { session })
+        return doc
+    }).catch(e => {
         if (e?.code !== 11000) throw e
         if (e?.keyPattern?._id) throw fail(409, 'ID_ALREADY_EXISTS', 'This account was already created')
         throw fail(409, 'NAME_TAKEN', `"${name}" is taken — pick it from the list to sign in`)
@@ -149,7 +153,7 @@ app.post('/livequery/accounts/:account_id/chats', cap(chats, MAX.chats, 'chats')
     const type = member_ids.length === 2 && !title ? 'direct' : 'group'
     const member_key = type === 'direct' ? [...member_ids].sort().join(':') : undefined
     const now = Date.now()
-    const doc = {
+    const fields = {
         _id: idOf(newId(body)),
         type,
         ...title ? { title } : {},
@@ -158,13 +162,16 @@ app.post('/livequery/accounts/:account_id/chats', cap(chats, MAX.chats, 'chats')
         read_at: Object.fromEntries(member_ids.map(m => [m, now])),
         unread: Object.fromEntries(member_ids.map(m => [m, 0])),
         active_at: now,
-        updated_at: now,
         created_at: now,
     }
     // A direct chat between two people exists once: the app opens the existing one from its synced
     // list; two devices creating it at the same moment get this answer.
     if (member_key && await chats.findOne({ member_key })) throw fail(409, 'CHAT_EXISTS', 'You already have a chat with this person')
-    await chats.insertOne(doc).catch(e => {
+    const doc = await withVersion(db, 'chats', async (version, session) => {
+        const doc = { ...fields, updated_at: version }
+        await chats.insertOne(doc, { session })
+        return doc
+    }).catch(e => {
         if (e?.code === 11000 && e?.keyPattern?._id) throw fail(409, 'ID_ALREADY_EXISTS', 'This chat was already created')
         throw e
     })
@@ -177,10 +184,14 @@ app.post('/livequery/accounts/:account_id/chats/:id/~read', async c => {
     const _id = idOf(c.req.param('id') ?? '')
     const now = Date.now()
     // Only write when something changes, so an open chat does not spam change events.
-    await chats.updateOne(
-        { _id, member_ids: account_id, $or: [{ [`unread.${account_id}`]: { $gt: 0 } }, { [`read_at.${account_id}`]: { $lt: now - 1500 } }] },
-        { $set: { [`read_at.${account_id}`]: now, [`unread.${account_id}`]: 0, updated_at: now } },
-    )
+    const filter = { _id, member_ids: account_id, $or: [{ [`unread.${account_id}`]: { $gt: 0 } }, { [`read_at.${account_id}`]: { $lt: now - 1500 } }] }
+    if (await chats.countDocuments(filter, { limit: 1 }) > 0) {
+        await withVersion(db, 'chats', (version, session) => chats.updateOne(
+            filter,
+            { $set: { [`read_at.${account_id}`]: now, [`unread.${account_id}`]: 0, updated_at: version } },
+            { session },
+        ))
+    }
     return c.json({ data: { ok: true } })
 })
 
@@ -205,16 +216,16 @@ const afterSend = async (c: Context, next: Next) => {
     if (c.res.status < 300 && chat && body) {
         const now = Date.now()
         const others = chat.member_ids.filter((m: string) => m !== body.sender_id)
-        await chats.updateOne({ _id: chat._id }, {
+        await withVersion(db, 'chats', (version, session) => chats.updateOne({ _id: chat._id }, {
             $set: {
                 last_message: { text: String(body.text).slice(0, 200), sender_id: body.sender_id, created_at: body.created_at },
                 active_at: now,
-                updated_at: now,
+                updated_at: version,
                 [`read_at.${body.sender_id}`]: now,
                 [`unread.${body.sender_id}`]: 0,
             },
             $inc: Object.fromEntries(others.map((m: string) => [`unread.${m}`, 1])),
-        })
+        }, { session }))
     }
     await next()
 }

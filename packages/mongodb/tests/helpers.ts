@@ -45,7 +45,8 @@ export function createMockCollection(name = 'items', aggregateResponse: Aggregat
         },
         async updateOne(filter: any, update: any) {
             collection.updateOneCalls.push({ filter, update })
-            return { acknowledged: true, matchedCount: 1, modifiedCount: 1 }
+            const matched = collection.stored && filter.updated_at !== undefined && filter.updated_at !== collection.stored.updated_at ? 0 : 1
+            return { acknowledged: true, matchedCount: matched, modifiedCount: matched }
         },
         // Applies a pipeline's `$set` stages to `{ _id }`: literals unwrapped, `$$NOW` as dbNow.
         async findOneAndUpdate(filter: any, update: any, options: any = {}) {
@@ -72,10 +73,35 @@ export function createMockCollection(name = 'items', aggregateResponse: Aggregat
     return collection
 }
 
-export function createMockDb(collections: Record<string, MockCollection>) {
+// Version counters (`withVersion`): each call hands out the next number.
+export function createMockVersions(start = 1_790_000_000_000) {
+    const state = { last: start, transactions: 0 }
+    const collection = {
+        async findOneAndUpdate() {
+            return { v: ++state.last }
+        },
+    }
+    return { state, collection }
+}
+
+export function createMockDb(collections: Record<string, MockCollection>, versions = createMockVersions()) {
     return {
         collectionCalls: [] as string[],
+        versions,
+        client: {
+            startSession() {
+                return {
+                    async withTransaction(fn: () => Promise<any>) {
+                        versions.state.transactions++
+                        return await fn()
+                    },
+                    async endSession() {},
+                }
+            },
+        },
+        async createCollection() {},
         collection(name: string) {
+            if (name === '__livequery_versions') return versions.collection
             this.collectionCalls.push(name)
             const collection = collections[name]
             if (!collection) throw new Error(`Missing mock collection "${name}"`)

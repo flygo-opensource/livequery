@@ -7,10 +7,11 @@ import type {
 import type { LivequeryRequest, LivequeryBaseEntity, Paging, UpdatedData } from '@livequery/core'
 import { ID_ALREADY_EXISTS, resolveClientId } from '@livequery/core'
 import { MongoQuery } from "./MongoQuery.js";
-import type { Collection, Db, MongoClient } from 'mongodb';
+import type { ClientSession, Collection, Db, MongoClient } from 'mongodb';
 import { Binary, ObjectId, UUID } from 'mongodb';
 import { fromMongoId, toMongoId } from './helpers/index.js';
 import { SmartCache } from './SmartCache.js';
+import { withVersion } from './withVersion.js';
 import { Subject } from 'rxjs';
 
 
@@ -48,21 +49,13 @@ export const VERSION_CONFLICT = 'VERSION_CONFLICT'
 // Hidden unless a read asks for them.
 const LIVE = { deleted_at: null }
 
-// Versions come from the database's clock (ms), not from whichever server process wrote: every
-// instance then stamps from one clock. Needs MongoDB 4.2+.
-const DB_NOW = { $toLong: '$$NOW' }
-// Set only in an insert's filter, so an existing document never matches it (see `#insertVersioned`).
-const INSERTING = '__livequery_inserting'
-// Pipeline stages read `$field` strings as paths: data goes in as literals.
-const literals = (fields: Record<string, unknown>) =>
-    Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, { $literal: value }]))
-const isPlainBody = (body: unknown): body is Record<string, unknown> =>
-    !!body && typeof body === 'object' && !Object.keys(body).some(key => key.startsWith('$'))
 
 
 export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> implements CoreLivequeryDatasource<RouteOptions> {
 
     #collections = new SmartCache()
+    // The database of each collection handed out: versions are allocated per database.
+    readonly #dbs = new WeakMap<Collection<any>, Db>()
     public readonly refs = new Map<string, Set<string>>()
 
     config: MongoDatasourceConfig
@@ -158,7 +151,9 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             const connection = this.config.connections[connectionName]
             if (!connection) throw { status: 500, code: 'DB_CONNECTION_NOT_FOUND', message: `Database connection "${connectionName}" not found` }
             const db = this.#isDb(connection) ? connection : connection.db(dbName)
-            return db.collection(collectionName)
+            const collection = db.collection(collectionName)
+            this.#dbs.set(collection, db)
+            return collection
         })
     }
 
@@ -238,7 +233,12 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             ...cleanBody,
             ...client_id ? { _id: new UUID(client_id) } : {}
         };
-        const inserted = options.sync ? this.#insertVersioned(collection, merged) : collection.insertOne(merged).then(r => ({ ...merged, _id: r.insertedId }))
+        const inserted = options.sync
+            ? this.#versioned(collection, (version, session) => {
+                const doc = { ...merged, updated_at: version }
+                return collection.insertOne(doc, { session }).then(r => ({ ...doc, _id: r.insertedId }))
+            })
+            : collection.insertOne(merged).then(r => ({ ...merged, _id: r.insertedId }))
         const stored = await inserted.catch(e => {
             if (e?.code !== 11000) throw e
             // A retried add finds its own first attempt here; the client treats the 409 as
@@ -257,16 +257,11 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         };
     }
 
-    // An insert whose `updated_at` is the database's clock: an upsert whose filter no existing
-    // document can match, so an `_id` already taken still fails with a duplicate key (11000).
-    async #insertVersioned(collection: Collection<any>, doc: Record<string, any>) {
-        const { _id = new ObjectId(), ...fields } = doc
-        const stored = await collection.findOneAndUpdate(
-            { _id, [INSERTING]: true },
-            [{ $set: { ...literals(fields), updated_at: DB_NOW } }, { $unset: INSERTING }],
-            { upsert: true, returnDocument: 'after' },
-        )
-        return stored as Record<string, any> & { _id: unknown }
+    // A write with the collection's next version, in commit order (see `withVersion`).
+    #versioned<R>(collection: Collection<any>, write: (version: number, session: ClientSession | undefined) => Promise<R>) {
+        const db = this.#dbs.get(collection)
+        if (!db) throw { status: 500, code: 'DB_NOT_FOUND', message: `No database known for ${collection.collectionName}` }
+        return withVersion(db, collection.collectionName, write)
     }
 
     async #put(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
@@ -277,28 +272,21 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         // A tombstone stays deleted: an update racing a delete must not bring it back. With
         // `If-Match`, only the version the edit was based on may be overwritten.
         const filter = { ...this.#keys(req), ...LIVE, ...req.if_version !== undefined ? { updated_at: req.if_version } : {} }
-        if (!isPlainBody(req.body)) {
-            // Operators ($inc, $push…) cannot run in a pipeline: this one is stamped by the server.
-            const updated_at = Date.now()
-            const update = this.#update(req.body) ?? {}
-            const result = await collection.updateOne(filter, { ...update, $set: { ...update.$set, updated_at } })
-            if (result.matchedCount === 0) await this.#assertNoConflict(req, collection)
-            return { item: { ...this.#writtenItem(req), updated_at } }
-        }
-        const { id: _id, _id: _raw_id, ...fields } = req.body
-        const stored = await collection.findOneAndUpdate(
-            filter,
-            [{ $set: { ...literals(fields), updated_at: DB_NOW } }],
-            { returnDocument: 'after', projection: { updated_at: 1 } },
-        )
-        if (!stored) await this.#assertNoConflict(req, collection)
-        return { item: { ...this.#writtenItem(req), ...stored ? { updated_at: stored.updated_at } : {} } }
+        const update = this.#update(req.body) ?? {}
+        const updated_at = await this.#versioned(collection, async (version, session) => {
+            const result = await collection.updateOne(filter, { ...update, $set: { ...update.$set, updated_at: version } }, { session })
+            if (result.matchedCount > 0) return version
+            // Nothing written: throw before the transaction commits, so the version is not spent.
+            await this.#assertNoConflict(req, collection, session)
+            return undefined
+        })
+        return { item: { ...this.#writtenItem(req), ...updated_at !== undefined ? { updated_at } : {} } }
     }
 
     // A conditional write matched nothing: when the document is there, another write got in first.
-    async #assertNoConflict(req: LivequeryRequest, collection: Collection<any>) {
+    async #assertNoConflict(req: LivequeryRequest, collection: Collection<any>, session?: ClientSession) {
         if (req.if_version === undefined) return
-        const current = await collection.findOne({ ...this.#keys(req), ...LIVE }, { projection: { updated_at: 1 } })
+        const current = await collection.findOne({ ...this.#keys(req), ...LIVE }, { projection: { updated_at: 1 }, session })
         if (!current) return
         throw {
             status: 409,
@@ -312,12 +300,11 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             await collection.deleteOne(this.#keys(req))
             return { item: this.#writtenItem(req) }
         }
-        const stored = await collection.findOneAndUpdate(
-            { ...this.#keys(req), ...LIVE },
-            [{ $set: { deleted_at: DB_NOW, updated_at: DB_NOW } }],
-            { returnDocument: 'after', projection: { deleted_at: 1, updated_at: 1 } },
-        )
-        return { item: { ...this.#writtenItem(req), ...stored ? { deleted_at: stored.deleted_at, updated_at: stored.updated_at } : {} } }
+        const version = await this.#versioned(collection, async (version, session) => {
+            const result = await collection.updateOne({ ...this.#keys(req), ...LIVE }, { $set: { deleted_at: version, updated_at: version } }, { session })
+            return result.matchedCount > 0 ? version : undefined
+        })
+        return { item: { ...this.#writtenItem(req), ...version !== undefined ? { deleted_at: version, updated_at: version } : {} } }
     }
 
     // Build the standard Livequery `{ id, ...data }` shape for a write response from the

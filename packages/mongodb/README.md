@@ -763,11 +763,23 @@ keeps what the scope covers on the device and catches up with **deltas**: "every
 the newest `updated_at` I hold, deletes included". `sync: true` on a route (or `mongodb({ sync: true })`)
 gives it what it needs:
 
-- Every write stamps `updated_at` (ms since epoch) — add, update, delete — from the **database's
-  clock** (`$$NOW`, MongoDB 4.2+), so several server instances with drifting clocks still give one
-  order. An add is an upsert whose filter no existing document matches, so a taken id still fails
-  with 409 `ID_ALREADY_EXISTS`; values are stored as literals (`"$100"` stays a string). A PATCH
-  body using operators (`$inc`…, only from your own server code) is stamped by the server clock.
+- Every write — add, update, delete — gets the collection's next **version** in `updated_at`:
+  `max(database clock in ms, previous version + 1)`, handed out inside a transaction on a
+  per-collection counter. Two writes cannot take versions out of commit order, so a device that
+  read everything up to version N and asks for what came after misses nothing — not even a write
+  that took seconds to commit, nor one from a server with a wrong clock. Needs a replica set (as
+  change streams do); a standalone server gets a warning and versions in allocation order.
+- A PATCH with `If-Match: <version>` (the client sends it with every queued edit) only applies
+  to that version; otherwise it answers **409 `VERSION_CONFLICT`** and the client resolves the
+  conflict (`conflictResolver`) before sending again.
+- Writes of your own on a sync collection must take a version the same way:
+
+  ```ts
+  import { withVersion } from '@livequery/mongodb'
+
+  await withVersion(db, 'chats', (version, session) =>
+      db.collection('chats').updateOne({ _id }, { $set: { title, updated_at: version } }, { session }))
+  ```
 - A delete keeps the document as a **tombstone**: `deleted_at` and `updated_at` are set, the rest stays.
   An update never touches a tombstone, so a late edit cannot bring a deleted document back.
 - Reads hide tombstones — lists and `GET /:id` alike — unless the query has `:tombstones=1`, which
