@@ -1,0 +1,36 @@
+{
+  "name": "todo-offline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite",
+    "build": "tsc --noEmit && vite build",
+    "server": "bun server.ts",
+    "bundle": "vite build && bun build server.ts --target=bun --outfile=dist-server/server.js",
+    "check:browser": "bun browser-check.ts",
+    "check:smoke": "bun smoke.ts"
+  },
+  "dependencies": {
+    "@livequery/client": "workspace:*",
+    "@livequery/core": "workspace:*",
+    "@livequery/honojs": "workspace:*",
+    "@livequery/mongodb": "workspace:*",
+    "@livequery/react": "workspace:*",
+    "@livequery/rest": "workspace:*",
+    "hono": "^4.13.5",
+    "mongodb": "^6.20.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "rxjs": "^7.8.2",
+    "zod": "^4.0.0",
+    "@livequery/rpc": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0",
+    "puppeteer-core": "^24.0.0"
+  }
+}

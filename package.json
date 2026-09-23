@@ -6,7 +6,8 @@
     "packages/*",
     "examples",
     "examples/cf-worker",
-    "examples/todo-app"
+    "examples/todo-app",
+    "examples/todo-offline"
   ],
   "scripts": {
     "build": "bun scripts/build-packages.ts && bun run --cwd examples typecheck && bun run --cwd examples/cf-worker type-check",
