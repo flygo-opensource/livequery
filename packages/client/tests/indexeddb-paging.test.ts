@@ -93,8 +93,8 @@ describe('IndexedDB paging from an index', () => {
         await storage.query('big', { ':limit': 3, 'created_at:sort': 'desc' })
         await storage.close()
         const names = await indexNames(factory, name)
-        expect(names).toContain('sort:created_at')
-        expect(names).not.toContain('sort:text')
+        expect(names).toContain('order:created_at')
+        expect(names).not.toContain('order:text')
     })
 
     test('a document without the sort field is in the index too, placed like the reference', async () => {
@@ -177,8 +177,43 @@ describe('IndexedDB paging from an index', () => {
         expect(reads[0].documents).toHaveLength(5)
         const after = await b.query<Msg>('c', base)
         expect(after.documents[0]!.id).toBe('during')
-        expect(await indexNames(factory, name)).toContain('sort:created_at')
+        expect(await indexNames(factory, name)).toContain('order:created_at')
         await a.close()
         await b.close()
+    })
+
+    test('mixed types, emoji, and mixed id kinds page in the same order from the index as in memory', async () => {
+        const values: unknown[] = [null, undefined, 3, -1, 2.5, 'b', 'B', '\u{1F600}', '\uFF01', '', true, false, 10, '10']
+        const docs: any[] = values.map((value, i) => ({ id: i % 3 === 0 ? `0192${String(i).padStart(4, '0')}-0000-7000-8000-000000000000` : i % 3 === 1 ? `65${String(i).padStart(22, '0')}` : `x${i}`, rank: value, text: `#${i}` }))
+        const storage = storageOf(new IDBFactory(), 5)
+        await seed(storage, 'c', docs)
+        for (const base of [{ ':limit': 3, 'rank:sort': 'asc' }, { ':limit': 4, 'rank:sort': 'desc' }, { ':limit': 3 }]) {
+            await storage.query('c', base)
+            const before = scans.count
+            expect(await walk(f => storage.query<Msg>('c', f), base)).toEqual(await walk(async f => queryDocs(docs, f), base))
+            expect(scans.count - before).toBe(0)
+        }
+        await storage.close()
+    })
+
+    test('a field holding arrays: the scan answers, ordered by smallest / largest element like MongoDB', async () => {
+        const docs: any[] = [
+            { id: 'a', tags: [5, 1] }, { id: 'b', tags: [3] }, { id: 'c', tags: 2 }, { id: 'd', tags: [] }, { id: 'e', tags: null },
+            ...messages(12).map(m => ({ ...m, tags: 7 })),
+        ]
+        const storage = storageOf(new IDBFactory(), 5)
+        await seed(storage, 'c', docs)
+        const base = { ':limit': 4, 'tags:sort': 'asc' }
+        await storage.query('c', base)
+        const before = scans.count
+        const pages = await walk(f => storage.query<Msg>('c', f), base)
+        expect(pages).toEqual(await walk(async f => queryDocs(docs, f), base))
+        expect(scans.count - before).toBeGreaterThan(0)
+        // [] < null < a (min 1) < c (2) < b (3)
+        expect(pages[0]!.ids).toEqual(['d', 'e', 'a', 'c'])
+        const desc = await storage.query<any>('c', { ':limit': 3, 'tags:sort': 'desc' })
+        // largest element first: 7s…, then a (max 5)
+        expect(desc.documents.map(d => d.id).includes('a')).toBe(false)
+        await storage.close()
     })
 })

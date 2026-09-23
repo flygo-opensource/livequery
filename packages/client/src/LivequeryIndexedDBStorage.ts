@@ -5,7 +5,7 @@ import { LivequeryMemoryStorage } from './LivequeryMemoryStorage.js'
 import { queryDocs } from './helpers/queryDocs.js'
 import { getByPath } from './helpers/filterDocs.js'
 import { CURSOR_INDEX, decodeCursor, encodeCursor } from './helpers/paginateDocs.js'
-import { sortersOf, type Sorter } from './helpers/sortDocs.js'
+import { idRank, rankOf, sortersOf, TYPE_RANK, type Sorter } from './helpers/sortDocs.js'
 
 export type LivequeryIndexedDBStorageOptions = {
     /** Database name. Two storages with the same name share their data. Default `livequery`. */
@@ -30,36 +30,72 @@ type Row = {
     collection: string
     id: string
     doc: Doc
-    /** One key per sort index of the database (see `keysOf`), so every row is in every index. */
-    keys?: Record<string, number | string>
+    /** One key per sort index of the database (see `indexFields`). */
+    keys?: Record<string, IDBValidKey>
+    /** The id as MongoDB orders it (`idRank`): the tie-break of every index. */
+    idkey?: IDBValidKey
+    /** `collection|path` of each indexed field holding an array or object: no index key for it. */
+    odd?: string[]
 }
 
 const STORE = 'docs'
 const BY_COLLECTION = 'by_collection'
 // Rows holding how many documents a collection has: `{ id: collection, count }`.
 const COUNTS = '__livequery_counts'
-const SORT_INDEX_PREFIX = 'sort:'
+const SORT_INDEX_PREFIX = 'order:'
+// Indexes from before sort keys followed MongoDB's order; dropped at the next upgrade.
+const STALE_INDEX_PREFIX = 'sort:'
+const BY_ID = 'by_id'
+const ODD = 'odd'
 const sortIndex = (path: string) => `${SORT_INDEX_PREFIX}${path}`
 // An index key path is dot-separated identifiers; `$` is kept free to flatten a path.
 const PATH_SEGMENT = /^[A-Za-z_][A-Za-z0-9_]*$/
 const flat = (path: string) => path.split('.').join('$')
-// Arrays sort after every string and number: `[collection, HIGHEST]` bounds a whole collection.
-const HIGHEST: [] = []
+// Above every `[rank, value]` key: `[collection, HIGHEST]` bounds a whole collection.
+const HIGHEST = [Infinity]
 
-// Only numbers and strings order the same in IndexedDB and in `compareDocs`. Anything else (a
-// missing field, null) sorts first, as `compareDocs` sorts a null.
-const isSortValue = (value: unknown): value is number | string =>
-    typeof value === 'string' || (typeof value === 'number' && !Number.isNaN(value))
-const sortKey = (value: unknown) => isSortValue(value) ? value : -Infinity
+// IndexedDB compares strings by UTF-16 unit, MongoDB by code point. Moving the units of U+E000…
+// U+FFFF below the surrogates (and those above) makes the first order the second.
+const codePointOrder = (value: string) => {
+    let out = ''
+    for (let i = 0; i < value.length; i++) {
+        const unit = value.charCodeAt(i)
+        out += String.fromCharCode(unit >= 0xE000 ? unit - 0x800 : unit >= 0xD800 ? unit + 0x2000 : unit)
+    }
+    return out
+}
 
-function keysOf(doc: Record<string, any>, indexes: DOMStringList): Row['keys'] {
-    const keys: Record<string, number | string> = {}
+/**
+ * A value's index key in MongoDB's order: `[type rank, value]`. Null when no index key can order it
+ * like MongoDB (an array sorts by its smallest or largest element depending on the direction; an
+ * object field by field) — the row is then marked `odd` and such queries read the collection.
+ */
+function sortKey(value: unknown): IDBValidKey | null {
+    const rank = rankOf(value)
+    if (rank === TYPE_RANK.null) return [rank]
+    if (rank === TYPE_RANK.number) return Number.isNaN(value) ? null : [rank, value as number]
+    if (rank === TYPE_RANK.string) return [rank, codePointOrder(value as string)]
+    if (rank === TYPE_RANK.boolean) return [rank, value ? 1 : 0]
+    return null
+}
+
+const idKey = (id: string): IDBValidKey => {
+    const [rank, value] = idRank(id)
+    return [rank, codePointOrder(value)]
+}
+
+// What a row carries for the indexes: a key per sort index, its id key, and the fields it cannot key.
+function indexFields(collection: string, doc: Record<string, any>, indexes: DOMStringList): Pick<Row, 'keys' | 'idkey' | 'odd'> {
+    const keys: Record<string, IDBValidKey> = {}
+    const odd: string[] = []
     for (const name of Array.from(indexes)) {
         if (!name.startsWith(SORT_INDEX_PREFIX)) continue
         const path = name.slice(SORT_INDEX_PREFIX.length)
-        keys[flat(path)] = sortKey(getByPath(doc, path))
+        const key = sortKey(getByPath(doc, path))
+        if (key === null) odd.push(`${collection}|${path}`)
+        else keys[flat(path)] = key
     }
-    return keys
+    return { keys, idkey: idKey(String(doc.id)), ...odd.length > 0 ? { odd } : {} }
 }
 
 // A query an index answers on its own: one page, sorted by one field (or by id), nothing to filter.
@@ -165,7 +201,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
         })
         if (plan && !counted) this.#startCounting(collection).catch(() => undefined)
         // Big enough to be worth an index for next time.
-        if (plan?.path && sources.length >= this.#indexAfter) this.#createIndex(plan.path)
+        if (plan && sources.length >= this.#indexAfter) this.#createIndex(plan.path)
         return queryDocs(sources, filters)
     }
 
@@ -186,7 +222,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
         return await this.#transaction<T>('readwrite', (store, done) => {
             const existing = store.getKey([collection, doc.id])
             existing.onsuccess = () => {
-                store.put({ collection, id: doc.id, doc, keys: keysOf(doc, store.indexNames) } satisfies Row)
+                store.put({ collection, id: doc.id, doc, ...indexFields(collection, doc, store.indexNames) } satisfies Row)
                 if (existing.result === undefined) this.#count(store, collection, +1)
                 done(doc)
             }
@@ -205,7 +241,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
                 const next = { ...row.doc, ...document } as T
                 const next_id = document.id && document.id !== id ? document.id as string : id
                 next_id !== id && store.delete([collection, id])
-                store.put({ collection, id: next_id, doc: next, keys: keysOf(next, store.indexNames) } satisfies Row)
+                store.put({ collection, id: next_id, doc: next, ...indexFields(collection, next, store.indexNames) } satisfies Row)
                 done(next)
             }
         })
@@ -275,8 +311,8 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
     async #indexedPage<T extends Doc>(collection: string, plan: Plan): Promise<Page<T> | null> {
         const range = this.#keyRange!
         const keyOf = (doc: Record<string, any>) => plan.path === null
-            ? [collection, doc.id]
-            : [collection, sortKey(getByPath(doc, plan.path)), doc.id]
+            ? [collection, idKey(String(doc.id))]
+            : [collection, sortKey(getByPath(doc, plan.path))!, idKey(String(doc.id))]
         const whole = range.bound([collection], [collection, HIGHEST])
         const position = plan.after ?? plan.before
         // Walking towards later documents in index order? `:before` walks back against the order.
@@ -286,14 +322,16 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
             : range.bound([collection], keyOf(doc), false, true)
 
         return await this.#transaction<Page<T> | null>('readonly', (store, done) => {
-            const name = plan.path === null ? null : sortIndex(plan.path)
-            if (name !== null && !store.indexNames.contains(name)) return done(null)
-            const source: IDBObjectStore | IDBIndex = name === null ? store : store.index(name)
+            const name = plan.path === null ? BY_ID : sortIndex(plan.path)
+            if (!store.indexNames.contains(name)) return done(null)
+            const source = store.index(name)
 
+            // Documents whose field holds an array or object are not in the index: read them all.
+            const odd = plan.path === null ? null : store.index(ODD).count(`${collection}|${plan.path}`)
             const counted = store.get([COUNTS, collection])
             counted.onsuccess = () => {
                 const counter = counted.result as Row | undefined
-                if (!counter) return done(null)
+                if (!counter || (odd && odd.result > 0)) return done(null)
                 const total = (counter.doc as unknown as { count: number }).count
 
                 // One more than the page: whether another page follows in this direction.
@@ -346,12 +384,14 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
 
     // Indexes are created in a version upgrade: close, reopen one version up. Other connections
     // to the database close themselves on `versionchange` and reopen on their next request.
-    #createIndex(path: string) {
-        if (this.#indexing.has(path)) return
-        this.#indexing.add(path)
+    // `path` null: the id index, for pages sorted by id.
+    #createIndex(path: string | null) {
+        const name = path === null ? BY_ID : sortIndex(path)
+        if (this.#indexing.has(name)) return
+        this.#indexing.add(name)
         const previous = this.#open()
         const upgraded: Promise<IDBDatabase> = previous.then(db => {
-            if (db.transaction(STORE, 'readonly').objectStore(STORE).indexNames.contains(sortIndex(path))) return db
+            if (db.transaction(STORE, 'readonly').objectStore(STORE).indexNames.contains(name)) return db
             db.close()
             return this.#connect(db.version + 1, path)
         })
@@ -360,7 +400,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
             // a later query asks again.
             if (this.#db === settled) this.#db = undefined
             return this.#open()
-        }).finally(() => this.#indexing.delete(path))
+        }).finally(() => this.#indexing.delete(name))
         this.#db = settled
     }
 
@@ -370,7 +410,7 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
     }
 
     // `version` undefined opens the current version (creating version 1 the first time).
-    #connect(version?: number, index?: string) {
+    #connect(version?: number, index?: string | null) {
         const connection = new Promise<IDBDatabase>((resolve, reject) => {
             const request = version === undefined ? this.#factory!.open(this.#name) : this.#factory!.open(this.#name, version)
             request.onupgradeneeded = event => {
@@ -378,15 +418,20 @@ export class LivequeryIndexedDBStorage implements LivequeryStorage {
                     ? request.result.createObjectStore(STORE, { keyPath: ['collection', 'id'] })
                     : request.transaction!.objectStore(STORE)
                 if (!store.indexNames.contains(BY_COLLECTION)) store.createIndex(BY_COLLECTION, 'collection')
-                if (!index || store.indexNames.contains(sortIndex(index))) return
-                store.createIndex(sortIndex(index), ['collection', `keys.${flat(index)}`, 'id'])
-                // Every row gets its key for the new index, so the index holds every document.
+                if (index === undefined) return
+                for (const name of Array.from(store.indexNames)) name.startsWith(STALE_INDEX_PREFIX) && store.deleteIndex(name)
+                if (!store.indexNames.contains(BY_ID)) store.createIndex(BY_ID, ['collection', 'idkey'])
+                if (!store.indexNames.contains(ODD)) store.createIndex(ODD, 'odd', { multiEntry: true })
+                if (index !== null && !store.indexNames.contains(sortIndex(index))) {
+                    store.createIndex(sortIndex(index), ['collection', `keys.${flat(index)}`, 'idkey'])
+                }
+                // Every row gets its keys for the indexes, so each index holds every document it can.
                 const rows = store.openCursor()
                 rows.onsuccess = () => {
                     const cursor = rows.result
                     if (!cursor) return
                     const row = cursor.value as Row
-                    if (row.collection !== COUNTS) cursor.update({ ...row, keys: keysOf(row.doc, store.indexNames) })
+                    if (row.collection !== COUNTS) cursor.update({ ...row, ...indexFields(row.collection, row.doc, store.indexNames) })
                     cursor.continue()
                 }
             }

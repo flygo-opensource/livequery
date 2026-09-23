@@ -4,7 +4,9 @@
  *   LIVEQUERY_E2E_MONGO_URL=mongodb://… bun test tests/sync.e2e.test.ts
  */
 import { afterAll, describe, expect, test } from 'bun:test'
-import { MongoClient } from 'mongodb'
+import { MongoClient, ObjectId, UUID } from 'mongodb'
+import { compareDocs } from '../../client/src/helpers/sortDocs.js'
+import { fromMongoId } from '../src/helpers/index.js'
 import { MongoDatasource } from '../src/MongoDatasource.js'
 import { withVersion } from '../src/withVersion.js'
 
@@ -130,5 +132,20 @@ describe.skipIf(!URL)('sync route on a real MongoDB', () => {
         expect(fresh.updated_at).toBeGreaterThan(b.updated_at)
         const raw = await client!.db(DB_NAME).collection(collection_name).findOne({ updated_at: fresh.updated_at })
         expect(raw?.text).toBe('from A')
+    })
+
+    test("the client's local order is MongoDB's order: types, code points, arrays, id kinds", async () => {
+        const coll = client!.db(DB_NAME).collection<any>(`${collection_name}_order`)
+        const values: unknown[] = [null, 3, -1, 2.5, 'b', 'B', '\u{1F600}', '\uFF01', '', true, false, 10, '10', { a: 1 }, [5, 1], [3], [], 'z']
+        const ids = values.map((_, i) => i % 3 === 0 ? new UUID() : i % 3 === 1 ? new ObjectId() : `s${String(i).padStart(3, '0')}`)
+        await coll.insertMany(values.map((v, i) => ({ _id: ids[i], v })))
+        await coll.insertOne({ _id: `missing`, other: 1 })
+        const docs = (await coll.find({}).toArray()).map(d => ({ ...d, id: fromMongoId(d._id) }))
+        for (const direction of [1, -1] as const) {
+            const server = (await coll.find({}).sort({ v: direction, _id: direction }).toArray()).map(d => fromMongoId(d._id))
+            const local = [...docs].sort(compareDocs([['v', direction === 1 ? 'asc' : 'desc']])).map(d => d.id)
+            expect(local).toEqual(server)
+        }
+        await coll.drop()
     })
 })
