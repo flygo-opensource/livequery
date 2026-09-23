@@ -8,7 +8,7 @@
     "url": "git+https://github.com/flygo-opensource/livequery.git",
     "directory": "packages/d1"
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Cloudflare D1 datasource mapping for @livequery ecosystem",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",

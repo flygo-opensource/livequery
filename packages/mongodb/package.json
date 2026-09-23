@@ -35,6 +35,8 @@
     "build": "rm -rf build && tsc -b ."
   },
   "peerDependencies": {
+    "@livequery/core": "^3.0.0",
+    "rxjs": "^7.8.1",
     "mongodb": "^6.20.0"
   },
   "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/mongodb#readme",

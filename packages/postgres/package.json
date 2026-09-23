@@ -13,7 +13,8 @@
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
-    "build/**/*"
+    "build/**/*",
+    "!build/tsconfig.tsbuildinfo"
   ],
   "exports": {
     ".": {
@@ -36,6 +37,8 @@
     "build": "rm -rf build; tsc -b ."
   },
   "peerDependencies": {
+    "@livequery/core": "^3.0.0",
+    "rxjs": "^7.8.1",
     "pg": "^8.0.0"
   },
   "peerDependenciesMeta": {

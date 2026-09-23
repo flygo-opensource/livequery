@@ -12,7 +12,8 @@
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
-    "build/**/*"
+    "build/**/*",
+    "!build/tsconfig.tsbuildinfo"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -34,7 +35,6 @@
     "@types/node": "x",
     "@types/ws": "^8.5.10",
     "rxjs": "x",
-    "tslib": "^2.6.1",
     "typescript": "^5.1.6",
     "ws": "^8.18.0"
   },
@@ -46,10 +46,12 @@
     "@nestjs/platform-ws": "^11.0.10",
     "@nestjs/websockets": "^10.3.7",
     "express": "^4.21.2",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "rxjs": "^7.8.1"
   },
   "dependencies": {
-    "msgpackr": "^1.11.9"
+    "msgpackr": "^1.11.9",
+    "tslib": "^2.6.1"
   },
   "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/nestjs#readme",
   "bugs": {

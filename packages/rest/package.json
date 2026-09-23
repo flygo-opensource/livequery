@@ -40,6 +40,7 @@
     "typescript": "5.6.3"
   },
   "peerDependencies": {
+    "@livequery/client": "^3.0.0",
     "rxjs": "^7.8.1",
     "uuid": "^13.0.0"
   },

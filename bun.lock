@@ -127,7 +127,7 @@
     },
     "packages/core": {
       "name": "@livequery/core",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "dependencies": {
         "rxjs": "x",
       },
@@ -150,7 +150,7 @@
     },
     "packages/d1": {
       "name": "@livequery/d1",
-      "version": "3.0.0",
+      "version": "3.0.1",
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20241205.0",
         "@livequery/core": "^3.0.0",
@@ -192,7 +192,9 @@
         "typescript": "*",
       },
       "peerDependencies": {
+        "@livequery/core": "^3.0.0",
         "mongodb": "^6.20.0",
+        "rxjs": "^7.8.1",
       },
     },
     "packages/nestjs": {
@@ -200,6 +202,7 @@
       "version": "3.0.0",
       "dependencies": {
         "msgpackr": "^1.11.9",
+        "tslib": "^2.6.1",
       },
       "devDependencies": {
         "@livequery/core": "^3.0.0",
@@ -208,7 +211,6 @@
         "@types/node": "x",
         "@types/ws": "^8.5.10",
         "rxjs": "x",
-        "tslib": "^2.6.1",
         "typescript": "^5.1.6",
         "ws": "^8.18.0",
       },
@@ -220,6 +222,7 @@
         "@nestjs/websockets": "^10.3.7",
         "express": "^4.21.2",
         "reflect-metadata": "x",
+        "rxjs": "^7.8.1",
         "ws": "^8.18.0",
       },
     },
@@ -235,7 +238,9 @@
         "typescript": "*",
       },
       "peerDependencies": {
+        "@livequery/core": "^3.0.0",
         "pg": "^8.0.0",
+        "rxjs": "^7.8.1",
       },
       "optionalPeers": [
         "pg",
@@ -269,6 +274,7 @@
         "typescript": "5.6.3",
       },
       "peerDependencies": {
+        "@livequery/client": "^3.0.0",
         "rxjs": "^7.8.1",
         "uuid": "^13.0.0",
       },

@@ -12,7 +12,8 @@
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
-    "build/**/*"
+    "build/**/*",
+    "!build/tsconfig.tsbuildinfo"
   ],
   "scripts": {
     "test": "bun test tests/",
