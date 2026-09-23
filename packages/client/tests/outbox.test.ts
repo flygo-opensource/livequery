@@ -20,7 +20,11 @@ async function waitUntil(check: () => boolean | Promise<boolean>, ms = 2000) {
 
 type Call = { op: 'add' | 'update' | 'delete', ref: string, id?: string, body?: Record<string, any> }
 
-/** A server behind a switchable network: offline, every call fails with NETWORK_ERROR. */
+/**
+ * A server behind a switchable network: offline, every call fails with NETWORK_ERROR. It ignores
+ * the id a client sends and assigns its own (`srv-N`), like servers before 3.0, so these tests also
+ * cover renaming a document to the server's id.
+ */
 function makeServer() {
     const docs = new Map<string, Record<string, any>>()
     const calls: Call[] = []
@@ -77,7 +81,7 @@ describe('queue on network failure', () => {
         server.state.online = false
 
         const result = await col.add({ title: 'offline' }) as DocState<Todo>
-        expect(result.id).toStartWith('local:')
+        expect(result.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/)
         expect(result._queued).toBe(true)
         expect(result._adding).toBe(true)
         expect(item(col, 'offline')?._queued).toBe(true)
@@ -101,7 +105,7 @@ describe('queue on network failure', () => {
         const doc = item(col, 'later')!
         expect(doc._adding).toBeUndefined()
         expect(doc._queued).toBeUndefined()
-        expect(server.calls).toEqual([{ op: 'add', ref: 'todos', body: { title: 'later' } }])
+        expect(server.calls).toEqual([{ op: 'add', ref: 'todos', body: { title: 'later', id: local.id } }])
         expect(col.items.value.some(d => d.value.id === local.id)).toBe(false)
         expect(await client.outbox.pending()).toEqual([])
         client.destroy()
@@ -176,7 +180,7 @@ describe('coalescing', () => {
         server.state.online = true
         client.outbox.trigger()
         await waitUntil(() => item(col, 'final')?.id === 'srv-1')
-        expect(server.calls).toEqual([{ op: 'add', ref: 'todos', body: { title: 'final', done: false } }])
+        expect(server.calls).toEqual([{ op: 'add', ref: 'todos', body: { title: 'final', done: false, id: local.id } }])
         expect(item(col, 'final')?._prev).toBeUndefined()
         expect(item(col, 'final')?._updating).toBeUndefined()
         client.destroy()
@@ -263,7 +267,7 @@ describe('local id remap', () => {
         await adding
         await updating
         expect(server.calls.map(c => [c.op, c.id ?? null, c.body])).toEqual([
-            ['add', null, { title: 'slow' }],
+            ['add', null, { title: 'slow', id: local.id }],
             ['update', 'srv-1', { title: 'slow-2' }],
         ])
         expect(item(col, 'slow-2')).toMatchObject({ id: 'srv-1' })
@@ -314,7 +318,8 @@ describe('resume', () => {
         const server = makeServer()
         const second = makeClient(server, storage)
         await waitUntil(() => server.calls.length === 1)
-        expect(server.calls[0]).toEqual({ op: 'add', ref: 'todos', body: { title: 'survives' } })
+        expect(server.calls[0]).toMatchObject({ op: 'add', ref: 'todos', body: { title: 'survives' } })
+        expect(server.calls[0]!.body?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/)
         await waitUntil(async () => (await storage.query(LIVEQUERY_OUTBOX_REF)).documents.length === 0)
         expect(await storage.get('todos', 'srv-1')).toMatchObject({ title: 'survives' })
         second.client.destroy()

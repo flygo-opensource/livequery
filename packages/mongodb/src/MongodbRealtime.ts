@@ -2,6 +2,7 @@ import type { ChangeStream, Collection, Db, MongoClient } from 'mongodb'
 import { EMPTY, Observable, from, map, mergeAll, mergeMap, retry } from 'rxjs'
 import type { UpdatedData } from '@livequery/core'
 import type { MongoDatasourceConfig, RouteOptions } from './MongoDatasource.js'
+import { fromMongoId } from './helpers/index.js'
 
 export type MongoRealtimeChangeType = 'added' | 'modified' | 'removed'
 
@@ -61,7 +62,7 @@ export class MongodbRealtime {
         if (!obj) return undefined
         const { _id, __v, id, ...rest } = obj
         return {
-            id: _id ? String(_id) : id || '#',
+            id: _id ? fromMongoId(_id) : id || '#',
             ...Object.entries(rest).reduce((acc, [key, value]) => {
                 if (key.startsWith('_')) return acc
                 return { ...acc, [key]: value }
@@ -211,7 +212,7 @@ export class MongodbRealtime {
             .reduce((acc, key) => ({ ...acc, [key]: event.new_data?.[key] }), { id: merged.id } as Record<string, any>)
 
         const toValues = (value: unknown): string[] =>
-            Array.isArray(value) ? value.map(item => String(item)) : value == null ? [] : [String(value)]
+            Array.isArray(value) ? value.map(item => fromMongoId(item)) : value == null ? [] : [fromMongoId(value)]
 
         const buildRefs = ([{ collection, field }, ...fields]: RefMetadata[]): Array<{ refs: string[], type: MongoRealtimeChangeType }> => {
             if (fields.length === 0 || !field) return [{ refs: [collection], type: event.type }]

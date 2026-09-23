@@ -1,4 +1,5 @@
 import { ObjectId } from 'mongodb'
+import { fromMongoId, toMongoId } from './helpers/index.js'
 import type { Collection, Db, Filter } from 'mongodb'
 
 // Normalize a native doc for output: expose `id` (= _id.toString()) as an ENUMERABLE
@@ -17,7 +18,7 @@ function hydrate<T extends Record<string, any>>(doc: T | null): T | null {
         Object.defineProperty(doc, '__v', { value: (doc as any).__v, enumerable: false, configurable: true, writable: true })
     }
     Object.defineProperty(doc, 'id', {
-        value: oid ? oid.toString() : undefined,
+        value: oid ? fromMongoId(oid) : undefined,
         enumerable: true,
         configurable: true,
         writable: true,
@@ -53,7 +54,11 @@ function isHex24(s: string) {
     return /^[a-f\d]{24}$/i.test(s)
 }
 function toFilter(filter: string | ObjectId | Filter<any> = {}): Filter<any> {
-    if (typeof filter === 'string') return { _id: isHex24(filter) ? ObjectId.createFromHexString(filter) : filter } as any
+    if (typeof filter === 'string') {
+        // 24 hex → ObjectId, a uuid → BSON UUID (client-created documents), anything else as-is.
+        const is_uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(filter)
+        return { _id: isHex24(filter) || is_uuid ? toMongoId('id', filter) : filter } as any
+    }
     if (filter instanceof ObjectId) return { _id: filter } as any
     return filter as Filter<any>
 }

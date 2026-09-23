@@ -862,7 +862,7 @@ Options:
 - `persist`: call `navigator.storage.persist()` to ask the browser not to evict the origin. Recommended for offline-first apps.
 - `indexedDB`: an `IDBFactory` to use instead of the global one (tests, embedded runtimes).
 
-One object store holds every collection under the key `[collection, id]` — IndexedDB can only create stores during a version upgrade, and collection refs are only known at runtime. `query()` loads the collection and filters it with `filterDocs()`, exactly like the memory storage; that is fine up to roughly 10k documents per collection. An id change (the outbox swapping a `local:` id for the server id) is read, re-keyed and written in one transaction. Where `indexedDB` does not exist (SSR, Node, Bun) it falls back to memory. `close()` closes the connection.
+One object store holds every collection under the key `[collection, id]` — IndexedDB can only create stores during a version upgrade, and collection refs are only known at runtime. `query()` loads the collection and filters it with `filterDocs()`, exactly like the memory storage; that is fine up to roughly 10k documents per collection. An id change (a server that assigned its own id to a new document) is read, re-keyed and written in one transaction. Where `indexedDB` does not exist (SSR, Node, Bun) it falls back to memory. `close()` closes the connection.
 
 ## `LivequeryTransporter`
 
@@ -1047,7 +1047,9 @@ An offline-first app uses `local-first` collections (their mutations default to 
 - If the queue itself cannot be written (storage quota, a closed database), the document gets an `_adding_error` / `_updating_error` / `_deleting_error` with code `OUTBOX_WRITE_FAILED` instead of the write silently not being durable.
 - Retries back off from 2s to 30s. They also run at once when the client starts (resuming a previous session), on the global `online` event, when a transporter's `status$` turns connected, and on `client.outbox.trigger()`.
 - Entries carry no payload. An add sends the stored document and an update sends the fields in `_prev`, read when the entry is sent — so queued writes to one document fold together: add + update is one add with the latest fields, add + delete sends nothing, update + update is one update, update + delete is only the delete.
-- When an add is confirmed the `local:` id is swapped for the server id — in storage, on screen, and in every queued entry still pointing at it.
+- **Ids are chosen on the device.** `add()` gives every new document a uuidv7 and sends it; the 3.0 datasources (MongoDB, D1, Postgres) keep it as the document's id. So the id is final from the first moment: nothing is renamed after sync, and a document created offline can already be referenced by another one (`parent_id: parent.id`).
+- **A retried add cannot duplicate.** If the first attempt reached the server but its answer was lost, the retry reuses the id and the server answers 409 `ID_ALREADY_EXISTS`. On a retry the client reads that as "already created" and sends what was edited since as an update. A 409 on the first attempt is a real conflict and lands on the document as `_adding_error`.
+- A server that ignores the client id (before 3.0, or `clientIds: false` on the route) still works: when an add is confirmed under a different id, the client renames the document — in storage, on screen, and in every queued entry still pointing at it.
 - This changes what `local-first` users saw before: `_adding`, `_updating` and `_prev` now stay set until the write is actually confirmed, instead of turning into an error flag on the first network failure.
 
 ### Conflicts
@@ -1081,7 +1083,7 @@ A realtime event sent while the socket was down never arrives. When a transporte
 
 - re-runs the last first-page query of every `server-first` / `cache-first` collection, without a loading spinner;
 - re-reads every page of each `local-first` sync once, and deletes stored documents the server no longer returns (a failed read deletes nothing);
-- reconciles each collection with the result: updates what it holds, drops what is gone, keeps documents that only exist on this device (`local:` ids, `_adding`, `_local_only`).
+- reconciles each collection with the result: updates what it holds, drops what is gone, keeps documents that only exist on this device (`_adding`, `_local_only`, legacy `local:` ids).
 
 A collection that had loaded several pages is back to its first page after a refetch, as after any new query.
 
@@ -1092,7 +1094,7 @@ A collection that had loaded several pages is back to its first page after a ref
 - `flush()` drops queued writes (with a warning).
 - Conflicts are resolved per field.
 - With several transporters each gets its own outbox entries; the first confirmed add decides the server id.
-- **No idempotency key yet.** If an add reaches the server but the response is lost (a timeout), the retry creates a second document. Closing this needs server-side deduplication.
+- Retried adds are deduplicated by id (above). `trigger()` actions have no such protection; they are not queued either.
 - The document and its outbox entry are two storage writes, not one transaction: a crash exactly between them leaves a pending document with no entry, which is never sent.
 - The outbox has no size cap or age limit, and a queued write cannot be cancelled from the API.
 - No end-to-end encryption: the server sees the data. It can be layered in a transporter.

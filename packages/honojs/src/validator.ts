@@ -94,8 +94,13 @@ export function validator<E extends Env = any>(
             return next()
         }
 
+        // `id` on a create belongs to the protocol, not to the app's schema: clients send the
+        // uuidv7 the new document should get, and the datasource validates it. Keep it out of
+        // the schema check (a strictObject would reject it) and put it back afterwards.
+        const has_client_id = !is_patch && typeof body === 'object' && body !== null && 'id' in body
+        const { id: client_id, ...fields } = has_client_id ? body as Record<string, unknown> : {}
         const target = is_patch && partial ? partial : schema
-        const result = await target['~standard'].validate(body)
+        const result = await target['~standard'].validate(has_client_id ? fields : body)
         if (result.issues?.length) {
             return c.json({
                 error: {
@@ -108,7 +113,10 @@ export function validator<E extends Env = any>(
             }, 400)
         }
 
-        c.set(LIVEQUERY_VARS.body as never, result.value as never)
+        const value = has_client_id && typeof result.value === 'object' && result.value !== null
+            ? { ...result.value as Record<string, unknown>, id: client_id }
+            : result.value
+        c.set(LIVEQUERY_VARS.body as never, value as never)
         await next()
     }
 }

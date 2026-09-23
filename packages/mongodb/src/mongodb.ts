@@ -21,6 +21,8 @@ export type MongodbMiddlewareOptions = {
     collection?: RouteOptions['collection']
     /** Fields stored as ObjectId, so a hex string in a filter is converted before the query. */
     objectIdFields?: string[]
+    /** Accept the uuidv7 a client sends as the new document's id (default true). See `RouteOptions.clientIds`. */
+    clientIds?: boolean
     /**
      * Fields a client may filter, sort or search on. Defaults to the fields of the route's
      * `validator()` schema; without either, any field name in the query reaches MongoDB.
@@ -96,6 +98,7 @@ export function mongodb(options: MongodbMiddlewareOptions) {
             collection,
             ...options.db ? { db: options.db } : {},
             ...options.objectIdFields ? { objectIdFields: options.objectIdFields } : {},
+            ...options.clientIds === false ? { clientIds: false } : {},
         }
 
         let result: unknown

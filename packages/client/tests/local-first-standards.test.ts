@@ -112,7 +112,7 @@ describe('writes are never lost to an expired login', () => {
         token_valid = true
         client.outbox.trigger()
         await waitUntil(() => sent.length === 1)
-        expect(sent[0]).toEqual({ title: 'written before re-login' })
+        expect(sent[0]).toEqual({ title: 'written before re-login', id: result.id })
         await waitUntil(async () => (await client.outbox.pending()).length === 0)
         client.destroy()
     })

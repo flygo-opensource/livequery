@@ -150,19 +150,22 @@ describe("RestTransporter", () => {
         expect(sent).toEqual({ title: "Updated" });
     });
 
-    test("add and update never send id in the body", async () => {
+    test("add sends the client id but never a legacy local: one; update never sends id", async () => {
         const calls: Array<{ init?: RequestInit }> = [];
         globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
             calls.push({ init });
             return new Response(JSON.stringify({ data: { id: "todo-1", title: "x" } }));
         }) as typeof fetch;
 
+        const id = "01890a5d-ac96-774b-bcce-b302099a8057";
         const transporter = new RestTransporter({ api: "https://api.example.com" });
+        await transporter.add("todos", { id, title: "x", _adding: true } as any);
         await transporter.add("todos", { id: "local:abc", title: "x", _adding: true } as any);
         await transporter.update("todos", "todo-1", { id: "todo-1", title: "y" } as any);
 
-        expect(JSON.parse(calls[0].init?.body as string)).toEqual({ title: "x" });
-        expect(JSON.parse(calls[1].init?.body as string)).toEqual({ title: "y" });
+        expect(JSON.parse(calls[0].init?.body as string)).toEqual({ id, title: "x" });
+        expect(JSON.parse(calls[1].init?.body as string)).toEqual({ title: "x" });
+        expect(JSON.parse(calls[2].init?.body as string)).toEqual({ title: "y" });
     });
 
     test("non-2xx errors carry the HTTP status", async () => {

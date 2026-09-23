@@ -331,16 +331,20 @@ export class RestTransporter implements LivequeryTransporter {
         )
     }
 
-    // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) and `id` before
-    // sending a write to the server. The server owns the id (it is in the URL for PATCH and
-    // assigned on POST); a `local:` id in the body makes strict schemas answer 400.
-    #stripPrivateFields(data: Record<string, any>) {
-        return Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith('_') && k !== 'id'))
+    // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) before sending a write.
+    // `id` goes only on an add, and only as a real id: the client picks a uuidv7 so a retried add
+    // cannot create a duplicate. A legacy `local:` id is never sent; on update the id is in the URL.
+    #stripPrivateFields(data: Record<string, any>, keep_id = false) {
+        return Object.fromEntries(Object.entries(data).filter(([k, v]) => {
+            if (k.startsWith('_')) return false
+            if (k !== 'id') return true
+            return keep_id && typeof v === 'string' && !v.startsWith('local:')
+        }))
     }
 
     async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>, context?: Record<string, any>) {
         type DT = { id: string, _id: string } & T
-        const body = this.#stripPrivateFields(data)
+        const body = this.#stripPrivateFields(data, true)
         const r = await this.#call<DT & { [key: string]: DT }>({ method: 'POST', ref, body, query: {}, context })
         for (const [k, v] of [['', r], ...Object.entries(r)]) {
             const target = v as any as DT

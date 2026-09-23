@@ -5,6 +5,7 @@ import type {
     LivequeryDatasourceInitConfig
 } from '@livequery/core'
 import type { LivequeryRequest, LivequeryBaseEntity, Paging, UpdatedData } from '@livequery/core'
+import { ID_ALREADY_EXISTS, resolveClientId } from '@livequery/core'
 import { PostgresQuery, type PostgresTable } from './PostgresQuery.js'
 import { SmartCache } from './SmartCache.js'
 import { Sql, ident, qualifiedTable, exec, type PostgresConnection } from './Sql.js'
@@ -25,6 +26,10 @@ export type RouteOptions = {
     idField?: string,
     // Columns scanned (case-insensitively) by the `:search` query option.
     searchFields?: string[],
+    // Accept the uuidv7 a client sends as the new row's id, so a retried add cannot create a
+    // second row (the primary key rejects it: 409 ID_ALREADY_EXISTS). Default true. Set false for
+    // tables whose key is not a uuid/text column (serial, bigint); the id is then ignored.
+    clientIds?: boolean,
 }
 
 
@@ -71,7 +76,7 @@ export class PostgresDatasource extends Subject<UpdatedData<LivequeryBaseEntity>
         const query = this.#normalizeRequest(req)
 
         if (query.method == 'get') return await this.#get(query, table)
-        if (query.method == 'post') return this.#post(query, table)
+        if (query.method == 'post') return this.#post(query, table, options)
         if (query.method == 'put') return this.#put(query, table)
         if (query.method == 'patch') return this.#patch(query, table)
         if (query.method == 'delete') return this.#del(query, table)
@@ -202,8 +207,10 @@ export class PostgresDatasource extends Subject<UpdatedData<LivequeryBaseEntity>
 
     }
 
-    async #post(req: LivequeryRequest, table: PostgresTable) {
-        const merged = this.#mapId({ ...req.keys, ...req.body }, table.idField)
+    async #post(req: LivequeryRequest, table: PostgresTable, options: RouteOptions) {
+        const client_id = options.clientIds === false ? undefined : resolveClientId(req.body)
+        const { id: _bodyId, ...body } = (req.body ?? {}) as Record<string, any>
+        const merged = this.#mapId({ ...req.keys, ...body, ...client_id ? { id: client_id } : {} }, table.idField)
         const cols = Object.keys(merged)
         const sql = new Sql()
 
@@ -211,7 +218,20 @@ export class PostgresDatasource extends Subject<UpdatedData<LivequeryBaseEntity>
             ? `INSERT INTO ${table.name} DEFAULT VALUES RETURNING *`
             : `INSERT INTO ${table.name} (${cols.map(ident).join(', ')}) VALUES (${cols.map(c => sql.param(merged[c])).join(', ')}) RETURNING *`
 
-        const rows = await exec(table.db, text, sql.values)
+        const rows = await exec(table.db, text, sql.values).catch(e => {
+            // unique_violation: a retried add finds its own first attempt on the primary key.
+            if (e?.code === '23505') {
+                const on_key = String(e?.constraint ?? '').endsWith('_pkey')
+                throw on_key
+                    ? { status: 409, code: ID_ALREADY_EXISTS, message: `A row with id ${client_id} already exists` }
+                    : { status: 409, code: 'DUPLICATE_KEY', message: String(e?.detail ?? e?.message ?? e) }
+            }
+            // invalid_text_representation on the key: the column is not a uuid/text column.
+            if (e?.code === '22P02' && client_id) {
+                throw { status: 400, code: 'INVALID_ID', message: `The key of ${table.name} does not take a uuid; set clientIds: false on this route` }
+            }
+            throw e
+        })
         return { item: this.#mapRow(rows[0], table.idField) ?? this.#writtenItem(req) }
     }
 

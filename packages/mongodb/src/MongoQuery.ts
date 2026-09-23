@@ -1,6 +1,7 @@
 import type { LivequeryBaseEntity, LivequeryRequest, FilterConditions } from "@livequery/core"
 import { Cursor } from "./Cursor.js"
-import { ObjectId } from "mongodb";
+import { Binary, ObjectId } from "mongodb";
+import { fromMongoId, toMongoId } from "./helpers/index.js";
 import type { Collection } from "mongodb";
 
 // `query` is optional on the core LivequeryRequest. `MongoQuery.query` normalizes it to
@@ -98,15 +99,6 @@ export class MongoQuery {
 
     static #escape_regex(value: string): string {
         return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    }
-
-    // Convert a hex string to an ObjectId, throwing a 400 (not a 500) that names the
-    // offending field when the value is not a valid ObjectId.
-    static #objectId(field: string, value: unknown): ObjectId {
-        if (typeof value != 'string' || !ObjectId.isValid(value)) {
-            throw { status: 400, code: 'INVALID_OBJECT_ID', message: `Invalid ObjectId for field "${field}": ${JSON.stringify(value)}` }
-        }
-        return ObjectId.createFromHexString(value)
     }
 
     static #parse_cursor(token: string) {
@@ -390,6 +382,24 @@ export class MongoQuery {
         return l
     }
 
+    // `$lt` / `$gt` only match values of the same BSON type, but a collection can hold both
+    // ObjectId `_id`s (server-created) and UUID ones (client-created), which sort binData < ObjectId.
+    // Paging past the last document of one type must continue into the other, so the other type
+    // joins the page condition when it lies in the direction of travel.
+    static #idTypesBeyond(id: unknown, downward: boolean): string | undefined {
+        if (downward && id instanceof ObjectId) return 'binData'
+        if (!downward && id instanceof Binary) return 'objectId'
+        return undefined
+    }
+
+    // The public `id` of a result is a string: ObjectId → hex, BSON UUID → dashed uuid.
+    static #publicIds<T>(items: T[] | undefined): T[] | undefined {
+        return items?.map(item => {
+            const id = (item as any)?.id
+            return id instanceof ObjectId || id instanceof Binary ? { ...item, id: fromMongoId(id) } : item
+        })
+    }
+
     static #rename_id() {
         return [
             {
@@ -426,10 +436,16 @@ export class MongoQuery {
             if (type == 'string' || type == 'number') {
                 const expr = `${desc ? (reverse ? '$gt' : '$lt') : (reverse ? '$lt' : '$gt')}${reverse || around ? 'e' : ''}`
                 const prevs = arr.slice(0, index).reduce((p, [key]) => ({ ...p, [key]: cursor[key] }), {})
-                const cpr = (key == 'id' || key == '_id') ? new ObjectId(value as string) : value
+                if (key == 'id' || key == '_id') {
+                    const cpr = toMongoId('id', value)
+                    const beyond = this.#idTypesBeyond(cpr, expr.startsWith('$lt'))
+                    return beyond
+                        ? { ...prevs, $or: [{ [key]: { [expr]: cpr } }, { [key]: { $type: beyond } }] }
+                        : { ...prevs, [key]: { [expr]: cpr } }
+                }
                 return {
                     ...prevs,
-                    [key]: { [expr]: cpr }
+                    [key]: { [expr]: value }
                 }
 
             }
@@ -620,7 +636,7 @@ export class MongoQuery {
                 {
                     $match: {
                         ...keysWithoutId,
-                        ...id ? { _id: this.#objectId('id', id) } : {}
+                        ...id ? { _id: toMongoId('id', id) } : {}
                     }
                 },
                 ...this.#rename_id(),
@@ -631,7 +647,7 @@ export class MongoQuery {
                 }
             ]
 
-            const items = await collection.aggregate(aggregates).toArray() as T[]
+            const items = this.#publicIds(await collection.aggregate(aggregates).toArray() as T[]) ?? []
 
             return {
                 items,
@@ -671,6 +687,7 @@ export class MongoQuery {
 
         return {
             ...response[0],
+            ...response[0] ? { items: this.#publicIds(response[0].items) } : {},
             limit: this.#get_limit(request)
         }
 

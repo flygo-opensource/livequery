@@ -258,3 +258,46 @@ describe('validator() on PATCH', () => {
         expect(res.status).toBe(400)
     })
 })
+
+// ─── client id on create ───────────────────────────────────────────────────────
+
+describe('validator() and the client id', () => {
+    const ID = '01890a5d-ac96-774b-bcce-b302099a8057'
+
+    const make = async () => {
+        const { z } = await import('zod')
+        const Strict = z.strictObject({ title: z.string() })
+        const bodies: unknown[] = []
+        const app = new Hono()
+        app.post('/livequery/tasks', validator(Strict), async c => {
+            bodies.push(c.get(LIVEQUERY_VARS.body as never))
+            return c.json({ ok: true })
+        })
+        app.patch('/livequery/tasks/:id', validator(Strict), async c => c.json({ ok: true }))
+        const send = (method: string, path: string, body: unknown) => app.request(path, {
+            method,
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+        })
+        return { send, bodies }
+    }
+
+    test('a strictObject schema accepts a create carrying id, and the id reaches the datasource', async () => {
+        const { send, bodies } = await make()
+        const res = await send('POST', '/livequery/tasks', { id: ID, title: 'x' })
+        expect(res.status).toBe(200)
+        expect(bodies).toEqual([{ title: 'x', id: ID }])
+    })
+
+    test('the schema still rejects every other unknown key', async () => {
+        const { send } = await make()
+        const res = await send('POST', '/livequery/tasks', { id: ID, title: 'x', admin: true })
+        expect(res.status).toBe(400)
+    })
+
+    test('on PATCH id is not special: the id belongs in the URL', async () => {
+        const { send } = await make()
+        const res = await send('PATCH', '/livequery/tasks/t1', { id: ID, title: 'x' })
+        expect(res.status).toBe(400)
+    })
+})

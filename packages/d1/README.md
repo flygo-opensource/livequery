@@ -94,6 +94,18 @@ Other limits enforced before querying:
 - `in` / `nin` accept at most `MAX_IN_VALUES` (50) values, keeping a statement under D1's
   100 bound-parameter limit (`400 TOO_MANY_VALUES`).
 
+## Client ids
+
+A POST body may carry the id the client chose (a uuidv7). It becomes the row `id`, so an add
+retried after a lost response cannot create a second row: the primary key rejects the duplicate
+and the datasource answers **409 `ID_ALREADY_EXISTS`** (another unique index: 409
+`DUPLICATE_KEY`). A legacy `local:` id is ignored and a random id assigned, as before; any other
+id is **400 `INVALID_ID`**. Set `clientIds: false` on the route (or `d1({ clientIds: false })`) to
+always assign the id on the server.
+
+`validator()` keeps `id` out of the schema check on POST, so a `z.strictObject` schema does not
+need to declare it.
+
 ## Edge runtime
 
 The package imports only the runtime-neutral root of `@livequery/core`, so a Worker

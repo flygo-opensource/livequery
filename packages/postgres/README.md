@@ -187,6 +187,16 @@ Because writes use `RETURNING *`, the response `item` is the real row (unlike th
 adapter, which reconstructs it from the request). If `RETURNING` yields nothing, it falls
 back to the `{ id, ...body }` shape.
 
+### Client ids
+
+A POST body may carry the id the client chose (a uuidv7); it is inserted into the key column
+(`idField`), so an add retried after a lost response cannot create a second row. A second insert
+with the same key answers **409 `ID_ALREADY_EXISTS`** (another unique constraint: 409
+`DUPLICATE_KEY`). A legacy `local:` id is ignored; any other id is **400 `INVALID_ID`**.
+
+The key column must take a uuid (`uuid` or `text`). For `serial` / `bigint` keys set
+`clientIds: false` on the route: the id is then ignored and the database assigns the key.
+
 ## Realtime (`LISTEN` / `NOTIFY`)
 
 `PostgresRealtime` is the Postgres equivalent of `MongodbRealtime`. It listens on a NOTIFY

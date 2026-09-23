@@ -25,6 +25,8 @@ export type D1MiddlewareOptions = {
      * `validator()` schema; without either, only well-formed column names are enforced.
      */
     fields?: readonly string[]
+    /** Accept the uuidv7 a client sends as the new row's id (default true). See `D1RouteOptions.clientIds`. */
+    clientIds?: boolean
 }
 
 type SchemaLike = { shape?: Record<string, unknown>; entries?: Record<string, unknown> }
@@ -77,7 +79,11 @@ export function d1(options: D1MiddlewareOptions = {}) {
                 + 'add validator(Schema) or d1({ fields }) so clients cannot reach other columns')
         }
 
-        const route: D1RouteOptions = fields ? { table, fields } : { table }
+        const route: D1RouteOptions = {
+            table,
+            ...fields ? { fields } : {},
+            ...options.clientIds === false ? { clientIds: false } : {},
+        }
         const method = req.method?.toUpperCase() ?? c.req.method.toUpperCase()
         let result: unknown
         try {

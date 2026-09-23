@@ -733,6 +733,25 @@ Use query suffixes for filter values:
 }
 ```
 
+## Client ids
+
+Since 3.0 a client picks the id of a new document (a uuidv7) and sends it in the POST body, so an
+add retried after a lost response cannot create a second document.
+
+- A valid uuidv7 is stored as a **BSON UUID** `_id` (`Binary` subtype 4). Responses, realtime
+  payloads and cursors expose it as the dashed uuid string.
+- Documents created without one keep an ObjectId `_id`, as before. Both kinds live in the same
+  collection: `GET/PATCH/DELETE /:id` accept either (24 hex → ObjectId, uuid → UUID), and cursor
+  paging crosses from one type to the other (MongoDB sorts `binData` before `objectId`, and
+  `$lt`/`$gt` alone never match across types).
+- A second add with the same id answers **409 `ID_ALREADY_EXISTS`**; another unique index answers
+  409 `DUPLICATE_KEY`. A legacy `local:` id (clients before 3.0) is ignored. Anything else is
+  **400 `INVALID_ID`**, as is a uuidv7 timestamped more than a day in the future.
+- `clientIds: false` on a route (or `mongodb({ clientIds: false })`) ignores the client id.
+
+Sorting on `id` in a collection that mixes both kinds groups them by type (UUIDs first
+ascending), not strictly by creation time.
+
 ## Build And Verification
 
 ```sh

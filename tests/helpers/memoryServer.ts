@@ -5,11 +5,16 @@
  *
  * `stop()` / `start()` take the server down and bring it back on the same port, so tests can drive
  * a real `NETWORK_ERROR` and a real recovery.
+ *
+ * Like the 3.0 datasources it keeps the uuidv7 a client sends as the new id and answers 409
+ * ID_ALREADY_EXISTS when an add reuses one; `loseNextResponse()` writes the next add and then
+ * drops the connection, the case client ids exist for.
  */
 
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { validator } from '../../packages/honojs/src/validator.js'
+import { ID_ALREADY_EXISTS, resolveClientId } from '../../packages/core/src/helpers/resolveClientId.js'
 
 export type MemoryTask = {
     id: string
@@ -32,6 +37,7 @@ export async function createMemoryServer() {
     const tasks = new Map<string, MemoryTask>()
     const requests: MemoryServerRequest[] = []
     let next_id = 1
+    let lose_next_response = false
 
     const app = new Hono()
 
@@ -63,8 +69,20 @@ export async function createMemoryServer() {
 
     app.post('/livequery/tasks', validator(Task), async c => {
         const body = await c.req.json()
-        const item = { ...body, id: `srv-${next_id++}` } as MemoryTask
+        let id: string
+        try {
+            id = resolveClientId(body) ?? `srv-${next_id++}`
+        } catch (e: any) {
+            return c.json({ error: { code: e.code, message: e.message } }, e.status)
+        }
+        if (tasks.has(id)) return c.json({ error: { code: ID_ALREADY_EXISTS, message: 'taken' } }, 409)
+        const item = { ...body, id } as MemoryTask
         tasks.set(item.id, item)
+        if (lose_next_response) {
+            lose_next_response = false
+            // Written, then the connection drops before the answer: a fetch TypeError on the client.
+            return new Response(new ReadableStream({ start: controller => controller.error(new TypeError('connection reset')) }))
+        }
         return c.json({ data: item })
     })
 
@@ -94,6 +112,9 @@ export async function createMemoryServer() {
         tasks,
         requests,
         writes: () => requests.filter(r => r.method !== 'GET'),
+        loseNextResponse() {
+            lose_next_response = true
+        },
         async stop() {
             await server.stop(true)
         },

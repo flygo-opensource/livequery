@@ -13,6 +13,12 @@ export type D1RouteOptions = {
      * Leave unset only when every column of the table is safe to expose.
      */
     fields?: readonly string[]
+    /**
+     * Accept the id a client sends on add (a uuidv7), so a retried add cannot create a second
+     * row: the retry reuses the id and the primary key rejects it (409 ID_ALREADY_EXISTS).
+     * Default true; false ignores it and assigns a random id, as before 3.0.
+     */
+    clientIds?: boolean
 }
 
 export type QueryPlan = {

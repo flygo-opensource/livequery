@@ -73,12 +73,14 @@ describe('offline-first writes survive a server outage', () => {
         await waitFor(async () => (await client.outbox.pending()).length === 0, { label: 'outbox drained' })
         const replayed = server.writes().slice(before)
         expect(replayed.map(r => r.method)).toEqual(['POST', 'PATCH', 'DELETE'])
-        expect(replayed.map(r => r.body ?? null)).toEqual([{ title: 'offline', done: false }, { done: true }, null])
+        expect(replayed.map(r => r.body ?? null)).toEqual([{ title: 'offline', done: false, id: created.id }, { done: true }, null])
 
+        // The server kept the id chosen offline: nothing to rename.
         const offline = [...server.tasks.values()].find(t => t.title === 'offline')!
+        expect(offline.id).toBe(created.id)
         expect(server.tasks.get(kept.id)?.done).toBe(true)
         expect(server.tasks.has(doomed.id)).toBe(false)
-        await waitFor(() => byTitle(col, 'offline')?.id === offline.id, { label: 'local id swapped for the server id' })
+        await waitFor(() => byTitle(col, 'offline')?.id === offline.id, { label: 'collection holds the document under its id' })
 
         for (const { value } of col.items.value) {
             expect(value._queued).toBeUndefined()

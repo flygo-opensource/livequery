@@ -269,9 +269,9 @@ Current limitation:
 ### `add()`
 
 - `server-first`: pushes directly through transporters (payload without `id` and `_` fields) and throws on failure. Never touches the outbox.
-- `local-first`: stores locally with `_adding: true`, broadcasts `added`, enqueues an outbox entry per transporter. Confirmation swaps the `local:` id for the server id (storage, collections, queued entries) and clears `_adding`; a 4xx records `_adding_error`; a retryable failure keeps the entry and sets `_queued`.
+- `local-first`: assigns a uuidv7 id, stores locally with `_adding: true`, broadcasts `added`, enqueues an outbox entry per transporter. The add sends the id; 3.0 servers keep it. On a retry, 409 `ID_ALREADY_EXISTS` means the earlier attempt landed: `#execute` PATCHes the current fields instead. If a server returns a different id, confirmation renames the document (storage, collections, queued entries). A 4xx records `_adding_error`; a retryable failure keeps the entry and sets `_queued`.
 - `local-only`: stores locally with `_adding: true` and `_local_only: true`, broadcasts `added`, and skips transporters.
-- Local documents receive ids prefixed with `local:` until a transporter returns persisted data.
+- Ids are uuidv7 chosen by the client and final. "Never reached the server" is `_adding`, not an id prefix; legacy `local:` ids from queued pre-3.0 data are still recognised and never sent.
 
 ### `update()`
 
@@ -286,7 +286,7 @@ Outbox entries carry no payload, so unsent writes to one document coalesce (see 
 - `server-first`: pushes delete to transporters.
 - Local-only cases and local `local:` ids are hard-deleted locally.
 - When transporters exist, non-local deletes first mark `_deleting: true`, broadcast `modified`, then hard-delete after remote confirmation (a 404 counts as confirmed).
-- A `local:` delete still reaches the outbox: it drops the unsent add, or waits for an add already in flight and deletes the created document.
+- Deleting a document with `_adding` still reaches the outbox (with `unsynced: true`): it drops the unsent add, or waits for an add already in flight and deletes the created document.
 - Remote errors are persisted into `_deleting_error` and rebroadcast as `modified`.
 
 ## Remote changes and conflicts

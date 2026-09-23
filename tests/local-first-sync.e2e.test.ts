@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { z } from 'zod'
 import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../packages/client/src/index.js'
 import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
+import { fromMongoId } from '../packages/mongodb/src/helpers/index.js'
 import { buildHonoMongoApp, type AppHandle } from './helpers/servers.js'
 import { uniqueCollection } from './helpers/mongo.js'
 import { warmupRealtime } from './helpers/realtime.js'
@@ -52,7 +53,7 @@ describe('local-first: offline CRUD on one device, concurrent edits on another, 
 
     const doc = (device: Device, title: string) => device.col.items.value.find(d => d.value.title === title)?.value
     const byId = (device: Device, id: string) => device.col.items.value.find(d => d.value.id === id)?.value
-    const serverDocs = async () => (await app.collection.find({}).toArray()).map(d => ({ ...d, id: d._id.toString() }))
+    const serverDocs = async () => (await app.collection.find({}).toArray()).map(d => ({ ...d, id: fromMongoId(d._id) }))
 
     let x: string
     let y: string
@@ -97,7 +98,8 @@ describe('local-first: offline CRUD on one device, concurrent edits on another, 
         await a.col.update({ id: y, title: 'y-by-a' })
         await a.col.delete(z_id)
 
-        expect(created.id).toStartWith('local:')
+        // The final id, chosen on the device while offline.
+        expect(created.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
         expect(doc(a, 'a-new')?._queued).toBe(true)
         expect(byId(a, x)?.title).toBe('x-by-a')
         expect(byId(a, y)?.title).toBe('y-by-a')
@@ -141,6 +143,10 @@ describe('local-first: offline CRUD on one device, concurrent edits on another, 
         expect(server.find(d => d.id === z_id)).toBeUndefined()
         const created = server.filter(d => d.title === 'a-new')
         expect(created).toHaveLength(1)
+        // Stored under the id device A chose offline, as a BSON UUID `_id`.
+        const offline_add = (await a.client.outbox.pending()).length === 0 ? doc(a, 'a-new') : undefined
+        expect(created[0]!.id).toBe(offline_add?.id)
+        expect(created[0]!._id._bsontype).toBe('Binary')
 
         for (const [name, device] of [['A', a], ['B', b]] as const) {
             await waitFor(() => byId(device, y)?.title === 'y-by-a'

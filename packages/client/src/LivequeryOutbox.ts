@@ -49,7 +49,10 @@ export type LivequeryOutboxOptions = {
     retryMaxMs?: number
 }
 
-type Input = Pick<OutboxEntry, 'transporter_id' | 'collection_ref' | 'op' | 'doc_id' | 'context'>
+type Input = Pick<OutboxEntry, 'transporter_id' | 'collection_ref' | 'op' | 'doc_id' | 'context'> & {
+    /** The document has never been created on the server (its add is queued, in flight, or lost). */
+    unsynced?: boolean
+}
 
 type Waiter = (settlement: OutboxSettlement) => void
 
@@ -188,7 +191,7 @@ export class LivequeryOutbox {
             && e.doc_id === input.doc_id
         const same = (await this.pending()).filter(e => matches(e) && e.id !== inflight?.id)
         const adding_now = inflight?.op === 'add' && matches(inflight)
-        const is_local = input.doc_id.startsWith('local:')
+        const is_local = !!input.unsynced
         const done = { settled: { status: 'done' } as OutboxSettlement, entry_id: '' }
 
         if (input.op === 'update') {
@@ -211,7 +214,8 @@ export class LivequeryOutbox {
             if (add || (is_local && !adding_now)) return done
         }
 
-        const entry: OutboxEntry = { ...input, id: uuidv7(), attempts: 0 }
+        const { unsynced: _unsynced, ...fields } = input
+        const entry: OutboxEntry = { ...fields, id: uuidv7(), attempts: 0 }
         await storage.add(LIVEQUERY_OUTBOX_REF, entry)
         return { entry_id: entry.id, created: entry }
     }

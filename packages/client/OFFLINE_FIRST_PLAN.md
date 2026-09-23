@@ -299,25 +299,51 @@ queue). ✅ = có và có test; ⚠️ = có một phần; ❌ = chưa có (ghi 
 | Outbox: gộp ghi thừa | ✅ | `outbox.test.ts` (coalescing 4 cặp) |
 | Outbox: trạng thái đồng bộ cho UI | ✅ cờ `_queued` trên doc + `outbox.pending$` (mới) | `local-first-standards.test.ts` (pending$) |
 | Outbox: storage đầy / không ghi được queue | ✅ (mới) cờ lỗi `OUTBOX_WRITE_FAILED` trên doc | `local-first-standards.test.ts` |
-| Outbox: idempotency (mất response → gửi lại tạo bản trùng) | ❌ cần server dedupe theo key | — |
+| Outbox: idempotency (mất response → gửi lại tạo bản trùng) | ✅ id do client sinh (uuidv7) + server 409 khi trùng; xem mục "Id do client sinh" | `client-ids.test.ts`, e2e `client-strict-schema`, e2e `mongodb-client-ids` |
 | Outbox: doc + entry trong cùng transaction | ❌ hai lần ghi storage riêng; cửa sổ crash nhỏ | — |
 | Outbox: giới hạn kích thước / TTL, huỷ entry | ❌ | — |
 | Nhiều tab | ⚠️ một drainer qua `navigator.locks`; tab khác không thấy xác nhận tới lần đọc sau | `outbox.test.ts` (lock) |
 
-Việc tiếp theo đề xuất, theo thứ tự giá trị: (1) idempotency key — `RestTransporter` gửi header
-`Idempotency-Key` = id của entry, server (`@livequery/core`) dedupe trong một khoảng TTL;
-(2) bước repair khi boot cho doc đang pending mà thiếu entry; (3) `outbox.discard(entry_id)` + giới hạn
-queue; (4) export dữ liệu; (5) CRDT cho field text nếu có nhu cầu cộng tác thời gian thực.
+Việc tiếp theo đề xuất, theo thứ tự giá trị: (1) bước repair khi boot cho doc đang pending mà thiếu
+entry; (2) `outbox.discard(entry_id)` + giới hạn queue; (3) Idempotency-Key cho `trigger()` action;
+(4) export dữ liệu; (5) CRDT cho field text nếu có nhu cầu cộng tác thời gian thực.
+
+## Id do client sinh — chống trùng khi retry (2026-09-23)
+
+Quyết định (đã chốt với người dùng): client sinh id, server validate chuẩn uuidv7 và ghi thẳng vào
+DB; trùng id thì server báo lỗi; bật mặc định, tắt được theo route (`clientIds: false`). Mongo lưu
+id dạng BSON UUID. Đối chiếu: Firestore, CouchDB, Replicache, PowerSync, Realm đều sinh id ở client.
+Đã kiểm chứng trên MongoDB 8.0.32 thật bằng `tests/scripts/mongo-custom-id.probe.ts` (12/12).
+
+- **Core** `resolveClientId(body)`: không có id hoặc `local:…` (client cũ) → `undefined`, server tự
+  sinh như trước; uuidv7 hợp lệ, timestamp không vượt quá 24h tương lai → id; còn lại → 400
+  `INVALID_ID`. Hằng `ID_ALREADY_EXISTS`.
+- **Mongo** `_id = new UUID(id)`; lỗi 11000 trên `_id` → 409 `ID_ALREADY_EXISTS`, index khác → 409
+  `DUPLICATE_KEY`. Tra theo id nhận cả ObjectId (24 hex) lẫn UUID. Response, realtime, cursor trả
+  chuỗi uuid (`fromMongoId`; `String(binary)` ra sai). **Phân trang cursor qua ranh giới kiểu**:
+  `$lt/$gt` chỉ khớp cùng kiểu BSON nên collection lẫn ObjectId + UUID trước đây dừng ở ranh giới
+  (test: không sửa thì chỉ thấy 7/13 doc); điều kiện trang giờ thêm `$type` của kiểu nằm phía trước.
+- **D1** dùng id client làm `id`; `UNIQUE constraint failed: <table>.id` → 409. **Postgres** chèn vào
+  cột khoá; `23505` trên `_pkey` → 409; `22P02` (cột khoá là serial) → 400 kèm hướng dẫn tắt.
+- **honojs `validator()`** tách `id` khỏi schema check khi POST (schema strict không phải khai báo
+  `id`), rồi gắn lại cho datasource tự validate. PATCH không đổi.
+- **Client**: `add()` sinh uuidv7 thay `local:…`; payload add kèm `id`; "chưa lên server" nhận biết
+  bằng `_adding` thay vì tiền tố. Retry nhận 409 `ID_ALREADY_EXISTS` (attempts > 0) → coi là đã tạo,
+  PATCH các field hiện tại (lần gửi đầu có thể mang dữ liệu cũ hơn). 409 ở lần đầu → `_adding_error`.
+  Server cũ bỏ qua id vẫn chạy: đường đổi id giữ nguyên.
+- **Hệ quả tốt**: không còn đổi id sau đồng bộ; doc tạo offline tham chiếu được doc khác ngay.
+- **Lưu ý**: collection Mongo lẫn hai kiểu sort theo `id` sẽ gom theo kiểu, không thuần theo thời gian.
+  Client 2.x vẫn chạy (id `local:` bị bỏ qua).
 
 ## Tiến độ kiểm chứng (2026-09-23)
 
 | Hạng mục Verify | Kết quả |
 | --- | --- |
 | 1. `bun run build` toàn workspace (kèm typecheck examples) | ✅ |
-| 2. `bun run test` — mọi package + examples | ✅ (client 133 test, tổng các package xanh) |
+| 2. `bun run test` — mọi package + examples | ✅ (client 139, core 133, d1 40, postgres 27, honojs 43…) |
 | 3. E2e offline: ghi lúc server tắt, drain khi bật lại (cả qua reload với IndexedDB) | ✅ `tests/client-offline.e2e.test.ts` |
 | 4. `realtime-leak.test.ts` + `ws-reconnect.e2e.test.ts` | ✅ |
-| Toàn bộ e2e gốc `tests/` với replica set LAN (`192.168.2.4:27018`) | ✅ 114/114, gồm hai suite fullstack client và `local-first-sync` (2 thiết bị) |
+| Toàn bộ e2e gốc `tests/` với replica set LAN (`192.168.2.4:27018`) | ✅ 121/121, gồm hai suite fullstack client, `local-first-sync` (2 thiết bị) và `mongodb-client-ids` |
 
 `todo.md` gốc đã cập nhật trong checkout chính (chưa commit, cùng các sửa đổi khác của bạn): mục
 write-path 1, 2, 3, 5 đánh dấu đã sửa; mục "Realtime drops updates across a reconnect" ghi phần

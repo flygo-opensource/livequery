@@ -1,5 +1,7 @@
 import {
     hidePrivateFields,
+    ID_ALREADY_EXISTS,
+    resolveClientId,
     type LivequeryContext,
     type LivequeryDatasource as CoreLivequeryDatasource,
     type LivequeryDatasourceInitConfig,
@@ -112,13 +114,23 @@ export class D1Datasource implements CoreLivequeryDatasource<D1RouteOptions> {
     ): Promise<D1ItemResult<T>> {
         const table = await this.#resolveTable(req, options)
         const body = (req.body as Record<string, unknown> | undefined) ?? {}
-        // Client-side optimistic IDs must never replace the authoritative D1 ID.
+        // A client id is only taken once validated as a uuidv7; legacy `local:` ids are ignored.
+        const client_id = options.clientIds === false ? undefined : resolveClientId(body)
         const { id: _clientId, ...rest } = body
         const keys = req.keys ?? {}
-        const data = { ...keys, ...rest, id: crypto.randomUUID() }
+        const data = { ...keys, ...rest, id: client_id ?? crypto.randomUUID() }
         // Route keys are set by the route definition, so they are writable even when absent from `fields`.
         const fields = options.fields && [...options.fields, ...Object.keys(keys)]
-        const item = await D1Query.insert<T>(db, table, data, fields)
+        const item = await D1Query.insert<T>(db, table, data, fields).catch(e => {
+            const message = String((e as any)?.message ?? e)
+            if (!message.includes('UNIQUE constraint failed')) throw e
+            // A retried add finds its own first attempt here; the client treats the 409 as
+            // "already created" and sends what changed since as an update.
+            if (message.includes(`${table}.id`)) {
+                throw { status: 409, code: ID_ALREADY_EXISTS, message: `A row with id ${data.id} already exists` }
+            }
+            throw { status: 409, code: 'DUPLICATE_KEY', message }
+        })
         return { item: hidePrivateFields({ item }).item as T }
     }
 

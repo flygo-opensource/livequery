@@ -92,6 +92,16 @@ const rebase = (local: Record<string, any>, remote: Record<string, any>) => {
     return data
 }
 
+// What a transporter receives for an add: the editable fields plus the id the client chose, so a
+// retry after a lost response reuses it and the server rejects the duplicate. A legacy `local:` id
+// (documents created before 3.0 and still queued) is left out: the server assigns one.
+const toAddPayload = (doc: Record<string, any>) => ({
+    ...toWritePayload(doc),
+    ...typeof doc.id === 'string' && !doc.id.startsWith('local:') ? { id: doc.id } : {},
+})
+
+const isIdAlreadyExists = (e: DocError) => e.code === 'ID_ALREADY_EXISTS'
+
 // Exists only on this device so far: a refetch that does not see it must not remove it.
 const isUnsynced = (doc: Record<string, any>) => String(doc.id).startsWith('local:') || !!doc._adding || !!doc._local_only
 
@@ -485,19 +495,21 @@ export class LivequeryClient {
     async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
             return await this.#sendNow<T>(documents, async ([tid, transporter], doc) => {
-                // Placeholder id: the add lock and the confirm path address the document by it.
-                const local_id = `local:${uuidv7()}`
-                const payload = toWritePayload(doc)
+                const id = doc.id ?? uuidv7()
+                const payload = toAddPayload({ ...doc, id })
                 using _lock = this.#addLock.acquire(collection_ref)
                 const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, payload as T, context), tid)
                 if (e) throw e
-                await this.#confirmAdd(collection_ref, local_id, data as Doc, payload)
+                await this.#confirmAdd(collection_ref, id, data as Doc, toWritePayload(payload))
                 return data
             })
         }
         const docs = await Promise.all(documents.map(doc =>
             this.config.storage.add<T>(collection_ref, {
                 ...doc,
+                // The final id, chosen here: the server keeps it, so nothing is renamed later and
+                // other documents can point at this one while offline.
+                id: doc.id ?? uuidv7(),
                 _adding: true,
                 ...mode === 'local-only' ? { _local_only: true } : {}
             } as DocState<T>) as Promise<DocState<T>>
@@ -566,7 +578,9 @@ export class LivequeryClient {
         }
         const soft = Object.keys(this.config.transporters).length > 0
         const merged = (await Promise.all(ids.map(async id => {
-            const is_local_doc = id.startsWith('local:')
+            // Never reached the server (its add is still queued or in flight): no soft delete.
+            const current = await this.config.storage.get<DocState<T>>(collection_ref, id)
+            const is_local_doc = id.startsWith('local:') || !!current?._adding
             if (!soft || is_local_doc || mode == 'local-only') {
                 return await this.config.storage.delete<T>(collection_ref, id)
             }
@@ -604,8 +618,8 @@ export class LivequeryClient {
 
 
         if (mode == 'local-only') return merged
-        // For a `local:` document the outbox drops the unsent add, or deletes it on the server
-        // once an add already in flight comes back with the real id.
+        // For a document never created on the server the outbox drops the unsent add, or deletes it
+        // on the server once an add already in flight comes back.
         return await this.#enqueue<T>(collection_ref, 'delete', merged, context)
     }
 
@@ -713,11 +727,12 @@ export class LivequeryClient {
 
     // local-first: the outbox sends the write. Resolve with the server's answer, or with the local
     // document when the write is stuck behind a network failure.
-    async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string }>, context?: Record<string, any>) {
+    async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string, _adding?: boolean }>, context?: Record<string, any>) {
         const results = await Promise.all(docs.flatMap(doc =>
             Object.keys(this.config.transporters).map(async transporter_id => {
                 const entry = { transporter_id, collection_ref, op, doc_id: doc.id, context }
-                const settlement = await this.outbox.enqueue(entry).catch(async (e): Promise<OutboxSettlement> => {
+                const unsynced = op !== 'add' && (doc.id.startsWith('local:') || !!doc._adding)
+                const settlement = await this.outbox.enqueue({ ...entry, unsynced }).catch(async (e): Promise<OutboxSettlement> => {
                     // The queue itself could not be written (storage quota, a closed database):
                     // the write is not durable, so say so on the document instead of dropping it.
                     const error: DocError = {
@@ -746,11 +761,20 @@ export class LivequeryClient {
         if (entry.op === 'add') {
             // Deleted locally before it was sent.
             if (!doc) return { status: 'done' }
-            const payload = toWritePayload(doc)
+            const payload = toAddPayload(doc)
+            const sent = toWritePayload(payload)
             using _lock = this.#addLock.acquire(collection_ref)
             const [e, data] = await tryCatch(() => transporter.add(collection_ref, payload as Doc, context), tid)
+            // A retry, and the id is taken: the earlier attempt got through but its answer was lost.
+            // The document exists; bring it up to date with what was edited since.
+            if (e && isIdAlreadyExists(e) && entry.attempts > 0) {
+                const [update_error, updated] = await tryCatch(() => transporter.update(collection_ref, id, sent, context), tid)
+                if (update_error) return await this.#failed(entry, update_error)
+                await this.#confirmAdd(collection_ref, id, { ...updated, id } as Doc, sent)
+                return { status: 'done', data: updated }
+            }
             if (e) return await this.#failed(entry, e)
-            await this.#confirmAdd(collection_ref, id, data as Doc, payload)
+            await this.#confirmAdd(collection_ref, id, data as Doc, sent)
             return { status: 'done', data }
         }
 

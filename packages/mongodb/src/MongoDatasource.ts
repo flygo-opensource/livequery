@@ -5,9 +5,11 @@ import type {
     LivequeryDatasourceInitConfig
 } from '@livequery/core'
 import type { LivequeryRequest, LivequeryBaseEntity, Paging, UpdatedData } from '@livequery/core'
+import { ID_ALREADY_EXISTS, resolveClientId } from '@livequery/core'
 import { MongoQuery } from "./MongoQuery.js";
 import type { Collection, Db, MongoClient } from 'mongodb';
-import { ObjectId } from 'mongodb';
+import { Binary, ObjectId, UUID } from 'mongodb';
+import { fromMongoId, toMongoId } from './helpers/index.js';
 import { SmartCache } from './SmartCache.js';
 import { Subject } from 'rxjs';
 
@@ -25,6 +27,12 @@ export type RouteOptions = {
     db?: string | ((req: LivequeryRequest) => Promise<string> | string),
     connection?: string | ((req: LivequeryRequest) => Promise<string> | string),
     objectIdFields?: string[]
+    /**
+     * Accept the id a client sends on add (a uuidv7, stored as a BSON UUID `_id`), so a retried
+     * add cannot create a second document. Default true; false ignores it and lets MongoDB assign
+     * an ObjectId, as before 3.0.
+     */
+    clientIds?: boolean
 }
 
 
@@ -71,7 +79,7 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const query = this.#normalizeObjectIds(this.#normalizeRequest(req), options.objectIdFields || [])
 
         if (query.method == 'get') return await this.#get(query, collection)
-        if (query.method == 'post') return this.#post(query, collection)
+        if (query.method == 'post') return this.#post(query, collection, options)
         if (query.method == 'put') return this.#put(query, collection)
         if (query.method == 'patch') return this.#patch(query, collection)
         if (query.method == 'delete') return this.#del(query, collection)
@@ -197,18 +205,28 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
 
     }
 
-    async #post(req: LivequeryRequest, collection: Collection<any>) {
+    async #post(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
+        const client_id = options.clientIds === false ? undefined : resolveClientId(req.body)
         const { id: _bodyId, _id: _bodyRawId, ...cleanBody } = req.body || {}
         const merged = {
             ...req.keys,
-            ...cleanBody
+            ...cleanBody,
+            ...client_id ? { _id: new UUID(client_id) } : {}
         };
-        const result = await collection.insertOne(merged);
+        const result = await collection.insertOne(merged).catch(e => {
+            if (e?.code !== 11000) throw e
+            // A retried add finds its own first attempt here; the client treats the 409 as
+            // "already created" and sends what changed since as an update.
+            if (e?.keyPattern?._id) {
+                throw { status: 409, code: ID_ALREADY_EXISTS, message: `A document with id ${client_id} already exists` }
+            }
+            throw { status: 409, code: 'DUPLICATE_KEY', message: `Duplicate value for unique index ${JSON.stringify(e?.keyPattern ?? {})}` }
+        });
         return {
             item: this.#stringifyOids({
                 ...merged,
                 _id: undefined,
-                id: result.insertedId.toString()
+                id: fromMongoId(result.insertedId)
             })
         };
     }
@@ -248,7 +266,8 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
     // string shape clients send (and that `id` already uses), instead of leaking ObjectId.
     #stringifyOids(item: Record<string, any>) {
         return Object.entries(item).reduce((p, [k, v]) => {
-            return { ...p, [k]: v instanceof ObjectId ? v.toString() : v }
+            const is_id = v instanceof ObjectId || (v instanceof Binary && v.sub_type === Binary.SUBTYPE_UUID)
+            return { ...p, [k]: is_id ? fromMongoId(v) : v }
         }, {} as Record<string, any>)
     }
 
@@ -257,21 +276,12 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             return {
                 ...p,
                 ...k == 'id' ? {
-                    _id: this.#objectId('id', req.keys.id)
+                    _id: toMongoId('id', req.keys.id)
                 } : {
                     [k]: c
                 }
             }
         }, {} as { [key: string]: any })
-    }
-
-    // Validate + convert a hex string to an ObjectId, reporting which field is bad as
-    // a 400 instead of letting bson throw an opaque 500.
-    #objectId(field: string, value: unknown): ObjectId {
-        if (typeof value != 'string' || !ObjectId.isValid(value)) {
-            throw { status: 400, code: 'INVALID_OBJECT_ID', message: `Invalid ObjectId for field "${field}": ${JSON.stringify(value)}` }
-        }
-        return ObjectId.createFromHexString(value)
     }
 
     #update(body: any) {
