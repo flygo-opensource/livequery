@@ -40,6 +40,33 @@
         "wrangler": "^4.128.0",
       },
     },
+    "examples/chat-demo": {
+      "name": "chat-demo",
+      "dependencies": {
+        "@livequery/client": "workspace:*",
+        "@livequery/core": "workspace:*",
+        "@livequery/honojs": "workspace:*",
+        "@livequery/mongodb": "workspace:*",
+        "@livequery/react": "workspace:*",
+        "@livequery/rest": "workspace:*",
+        "@livequery/rpc": "workspace:*",
+        "hono": "^4.13.5",
+        "mongodb": "^6.20.0",
+        "react": "^19.2.5",
+        "react-dom": "^19.2.5",
+        "rxjs": "^7.8.2",
+        "uuidv7": "^1.2.1",
+        "zod": "^4.0.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.2.14",
+        "@types/react-dom": "^19.2.3",
+        "@vitejs/plugin-react": "^4.3.0",
+        "puppeteer-core": "^24.0.0",
+        "typescript": "^5.5.0",
+        "vite": "^5.4.0",
+      },
+    },
     "examples/todo-app": {
       "name": "todo-app",
       "dependencies": {
@@ -672,6 +699,8 @@
     "call-bound": ["call-bound@1.0.4", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.2", "get-intrinsic": "^1.3.0" } }, "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg=="],
 
     "caniuse-lite": ["caniuse-lite@1.0.30001810", "", {}, "sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg=="],
+
+    "chat-demo": ["chat-demo@workspace:examples/chat-demo"],
 
     "chromium-bidi": ["chromium-bidi@14.0.0", "", { "dependencies": { "mitt": "^3.0.1", "zod": "^3.24.1" }, "peerDependencies": { "devtools-protocol": "*" } }, "sha512-9gYlLtS6tStdRWzrtXaTMnqcM4dudNegMXJxkR0I/CXObHalYeYcAMPrL19eroNZHtJ8DQmu1E+ZNOYu/IXMXw=="],
 
