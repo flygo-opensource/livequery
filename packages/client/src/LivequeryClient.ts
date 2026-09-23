@@ -105,6 +105,17 @@ const isIdAlreadyExists = (e: DocError) => e.code === 'ID_ALREADY_EXISTS'
 // Exists only on this device so far: a refetch that does not see it must not remove it.
 const isUnsynced = (doc: Record<string, any>) => String(doc.id).startsWith('local:') || !!doc._adding || !!doc._local_only
 
+/** Server-maintained version of a document (ms). Changes older than the stored one are ignored. */
+export const VERSION_FIELD = 'updated_at'
+/** Set by the server on a soft-deleted document, so a sync read can tell this device to delete it. */
+export const TOMBSTONE_FIELD = 'deleted_at'
+
+const isOlder = (incoming: Record<string, any>, stored: Record<string, any> | null) => {
+    const a = incoming[VERSION_FIELD]
+    const b = stored?.[VERSION_FIELD]
+    return typeof a === 'number' && typeof b === 'number' && a < b
+}
+
 const isNotFound = (e: DocError) => e.status === 404 || e.code === 'NOT_FOUND' || e.code === 'HTTP_404'
 
 
@@ -691,6 +702,15 @@ export class LivequeryClient {
         if (!change.data) return change
 
         const local = await storage.get<DocState<Doc>>(collection_ref, id)
+        // Two sources (realtime, a sync read) can deliver the same document out of order: never let
+        // an older version overwrite a newer one.
+        if (isOlder(change.data, local)) return null
+        // A tombstone: the document was deleted on the server while this device was not looking.
+        if (change.data[TOMBSTONE_FIELD] != null) {
+            if (!local) return null
+            await storage.delete(collection_ref, id)
+            return { collection_ref, id, type: 'removed' }
+        }
         if (!local?._prev && !local?._deleting) {
             if (change.type === 'added') {
                 await storage.add(collection_ref, { id: change.data.id, ...change.data })
