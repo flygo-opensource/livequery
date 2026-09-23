@@ -56,7 +56,7 @@ button { font: inherit; cursor: pointer; }
 .link { border: 0; background: none; color: var(--muted); font-size: 12px; }
 .link:hover { color: var(--bad); }
 .join { display: flex; gap: 8px; margin-top: 12px; }
-.join input, .group-title { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 14px; }
+.join input, .group-title { flex: 1; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 16px; }
 .join button, .toolbar button, .dialog-actions button, .composer button, .failed-actions button {
     border: 0; border-radius: 10px; padding: 8px 14px; background: var(--accent); color: white; font-weight: 600; }
 button:disabled { opacity: .5; cursor: default; }
@@ -82,7 +82,9 @@ button.secondary { background: #e5e7eb; color: var(--ink); }
 .unread-badge { background: var(--accent); color: white; font-size: 11px; font-weight: 700; min-width: 20px; padding: 1px 6px; border-radius: 999px; text-align: center; }
 .sentinel { list-style: none; text-align: center; color: var(--muted); font-size: 12px; padding: 12px; min-height: 12px; }
 
-.chat-page { height: 100vh; }
+/* 100vh on phones includes the strip under the browser's toolbar, which hides the composer;
+   dvh is the height actually visible (100vh stays as the fallback for older browsers). */
+.chat-page { height: 100vh; height: 100dvh; min-height: 0; }
 .messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 2px; padding: 12px 12px 8px; background: #f9fafb; }
 .bubble-row { display: flex; align-items: flex-end; gap: 6px; }
 .bubble-row.mine { justify-content: flex-end; }
@@ -101,8 +103,9 @@ button.secondary { background: #e5e7eb; color: var(--ink); }
 .failed-actions { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--bad); margin-top: 3px; }
 .failed-actions button { padding: 3px 10px; font-size: 12px; }
 
-.composer { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); background: white; }
-.composer textarea { flex: 1; resize: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 18px; font: inherit; max-height: 120px; }
+.composer { display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: white; }
+/* 16px: iOS zooms the page into any smaller input on focus. */
+.composer textarea { flex: 1; resize: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 18px; font: inherit; font-size: 16px; max-height: 120px; }
 
 .dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 10; }
 .dialog { background: white; border-radius: 14px; padding: 18px; width: min(420px, 92vw); max-height: 80vh; overflow: auto; }
