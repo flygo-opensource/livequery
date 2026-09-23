@@ -62,15 +62,15 @@ parameter decorators — DI then constructs interceptors with undefined deps.
 | `realtime-self-emit` | `gateway.next()` thủ công, `gateway.link()` pipe, doc-level subscription, unsubscribe |
 | `realtime-nested-ref` | Fan-out `users/:userId/posts`, array membership added/removed với Mongo thật |
 | `gateway-multinode` | 2 gateway bridge nhau: sync route xuyên node về client |
-| `gateway-rotation` | Client WS@A, HTTP rotate qua 2 ApiGatewayHandler → service node: sub luôn trỏ đúng gateway của client (x-lgid), mutations qua proxy nhận realtime đúng 1 lần |
-| `ws-reconnect` | WS rớt → reconnect trong grace window (5s) → realtime hồi phục không cần re-query; quá grace thì sub bị xoá; dead peer không chặn fan-out |
+| `gateway-multinode-throughput` | Fan-out xuyên 2 gateway dưới tải: không mất, không nhân đôi sync |
+| `keepalive-frame` | Hai frame ping/pong là hằng số giao thức, client và `setWebSocketAutoResponse` khớp nguyên văn |
+| `ws-reconnect` | WS rớt → reconnect trong grace window (5s) → realtime hồi phục không cần re-query; quá grace thì sub bị xoá và chỉ một lần GET mới khôi phục; dead peer không chặn fan-out. Write xảy ra lúc mất kết nối (trong grace) được gateway gửi bù khi nối lại — test đơn vị ở `packages/core/tests/websocket-gateway.test.ts` |
 | `gateway-security` | WS subscribe-bypass (documented), không subscribe hộ client_id khác, realtime ẩn private field, gateway-to-gateway auth (sai token bị từ chối, đúng token relay được) |
 | `malformed-requests` | Input lỗi trả 4xx (không 500): malformed cursor → 400 INVALID_CURSOR, bad oid → 400 INVALID_OBJECT_ID (ghi rõ field); limit clamp, doc-not-found 200 |
 | `subscription-lifecycle` | subscribe/unsubscribe 100 lần, connect/disconnect 25 lần → không rò `_subscriptions`/`_connections`/`_pendingDisconnects`; ref sống tới subscriber cuối |
 | `react-fullstack` | useCollection/useDocument/useObservable/useAction với backend thật (react-test-renderer) |
 | `rpc-livequery-bridge` | Collection sống ở "worker", stream qua WorkerManager/ServiceLinker về UI |
 | `rest-mongodb-nestjs-realtime` | REST client → NestJS → MongoDatasource + MongodbRealtime (legacy suite) |
-| `rest-mongoose-nestjs-realtime` | REST client → NestJS → MongooseDatasource + change stream thủ công (legacy suite) |
 
 Shared infra in `helpers/`: `servers.ts` (full Hono/NestJS app builders), `client-suite.ts` (shared client matrix), `realtime.ts` (change-stream warmup), `mongo.ts`, `ws.ts`, `wait.ts`.
 

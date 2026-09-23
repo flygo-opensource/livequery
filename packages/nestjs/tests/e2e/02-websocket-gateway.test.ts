@@ -63,19 +63,21 @@ describe('WebsocketGateway — connect & hello', () => {
         ws.close()
     })
 
-    test('duplicate client id is rejected — second socket closed', async () => {
+    test('a second socket with the same client id takes over — the first is closed', async () => {
         const ws1 = await connectClient(gw.wsUrl, 'c-dup', gw.gateway.id)
-
-        const ws2 = await wsConnect(gw.wsUrl)
-        sendJson(ws2, { event: 'start', data: { id: 'c-dup', auth: '' } })
-
-        const closed = await new Promise<boolean>(resolve => {
-            ws2.addEventListener('close', () => resolve(true))
+        const first_closed = new Promise<boolean>(resolve => {
+            ws1.addEventListener('close', () => resolve(true))
             setTimeout(() => resolve(false), 2000)
         })
 
-        expect(closed).toBe(true)
-        ws1.close()
+        // The client reconnected before the server saw its old socket drop (a half-open TCP).
+        const ws2 = await wsConnect(gw.wsUrl)
+        sendJson(ws2, { event: 'start', data: { id: 'c-dup', auth: '' } })
+        const hello = await waitForWsMessage<any>(ws2, m => m.event === 'hello')
+
+        expect(hello.gid).toBe(gw.gateway.id)
+        expect(await first_closed).toBe(true)
+        ws2.close()
     })
 
     test('invalid auth closes the socket', async () => {
