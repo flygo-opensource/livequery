@@ -23,6 +23,8 @@ export type MongodbMiddlewareOptions = {
     objectIdFields?: string[]
     /** Accept the uuidv7 a client sends as the new document's id (default true). See `RouteOptions.clientIds`. */
     clientIds?: boolean
+    /** Serve local-first sync: versions, tombstones and deltas. See `RouteOptions.sync`. */
+    sync?: boolean
     /**
      * Fields a client may filter, sort or search on. Defaults to the fields of the route's
      * `validator()` schema; without either, any field name in the query reaches MongoDB.
@@ -90,7 +92,8 @@ export function mongodb(options: MongodbMiddlewareOptions) {
         if (!collection) throw new Error('mongodb(): cannot infer a collection from the request ref')
 
         const fields = options.fields ?? fieldsOf(c.get(LIVEQUERY_VARS.schema))
-        if (fields) assertFields(req.query ?? {}, fields)
+        // Deltas filter and sort on the version, whatever the schema declares.
+        if (fields) assertFields(req.query ?? {}, options.sync ? [...fields, 'updated_at', 'deleted_at'] : fields)
         else warnOnce(String(collection), `livequery: mongodb() on "${String(collection)}" has no field allowlist; `
             + 'add validator(Schema) or mongodb({ fields }) so clients cannot query other fields')
 
@@ -99,6 +102,7 @@ export function mongodb(options: MongodbMiddlewareOptions) {
             ...options.db ? { db: options.db } : {},
             ...options.objectIdFields ? { objectIdFields: options.objectIdFields } : {},
             ...options.clientIds === false ? { clientIds: false } : {},
+            ...options.sync ? { sync: true } : {},
         }
 
         let result: unknown

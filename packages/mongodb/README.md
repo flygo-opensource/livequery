@@ -581,6 +581,8 @@ type RouteOptions = {
   db?: string | ((req: LivequeryRequest) => Promise<string> | string)
   connection?: string | ((req: LivequeryRequest) => Promise<string> | string)
   objectIdFields?: string[]
+  clientIds?: boolean
+  sync?: boolean
 }
 ```
 
@@ -591,6 +593,8 @@ Fields:
 - `db`: optional database name or resolver function.
 - `connection`: optional connection name or resolver function.
 - `objectIdFields`: top-level request fields that should be converted from valid string ids to `ObjectId`.
+- `clientIds`: accept the uuidv7 id a client sends on add (default `true`). See [Client ids](#client-ids).
+- `sync`: serve local-first sync. See [Sync](#sync).
 
 Use function values when tenant, database, or collection depends on request keys.
 
@@ -751,6 +755,32 @@ add retried after a lost response cannot create a second document.
 
 Sorting on `id` in a collection that mixes both kinds groups them by type (UUIDs first
 ascending), not strictly by creation time.
+
+## Sync
+
+A client collection declared local-first with a scope (`mode: { scope: 'full' | 'window' | 'on-demand' }`)
+keeps what the scope covers on the device and catches up with **deltas**: "everything changed since
+the newest `updated_at` I hold, deletes included". `sync: true` on a route (or `mongodb({ sync: true })`)
+gives it what it needs:
+
+- Every write stamps `updated_at` (ms since epoch) — add, update, delete.
+- A delete keeps the document as a **tombstone**: `deleted_at` and `updated_at` are set, the rest stays.
+  An update never touches a tombstone, so a late edit cannot bring a deleted document back.
+- Reads hide tombstones — lists and `GET /:id` alike — unless the query has `:tombstones=1`, which
+  a delta sends together with `updated_at:gt=<version>&updated_at:sort=asc`.
+- Realtime sends a delete as a `modified` change carrying `deleted_at`; clients treat any change with
+  `deleted_at` as a removal.
+- With a field allowlist (`validator(Schema)` or `fields`), `updated_at` and `deleted_at` stay queryable.
+
+Without `sync`, a client can still declare a scope: it falls back to re-reading the scope on reconnect,
+since it cannot ask for what changed.
+
+Tombstones pile up. Purge the old ones once every device has had time to sync — a device offline
+longer than that re-reads its scope instead (the client evicts scopes unused for 30 days by default):
+
+```ts
+await collection.deleteMany({ deleted_at: { $lt: Date.now() - 30 * 86400_000 } })
+```
 
 ## Build And Verification
 

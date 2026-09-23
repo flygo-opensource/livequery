@@ -33,7 +33,17 @@ export type RouteOptions = {
      * an ObjectId, as before 3.0.
      */
     clientIds?: boolean
+    /**
+     * Serve local-first sync (`mode: { scope: ... }` on the client): every write stamps
+     * `updated_at` (ms), a delete keeps the document as a tombstone with `deleted_at`, reads hide
+     * tombstones, and a delta read (`updated_at:gt` + `:tombstones`) returns them so devices that
+     * were offline learn about deletes.
+     */
+    sync?: boolean
 }
+
+// Hidden unless a read asks for them.
+const LIVE = { deleted_at: null }
 
 
 export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> implements CoreLivequeryDatasource<RouteOptions> {
@@ -78,11 +88,11 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const collection = await this.#getCollection(req, options)
         const query = this.#normalizeObjectIds(this.#normalizeRequest(req), options.objectIdFields || [])
 
-        if (query.method == 'get') return await this.#get(query, collection)
+        if (query.method == 'get') return await this.#get(query, collection, options)
         if (query.method == 'post') return this.#post(query, collection, options)
-        if (query.method == 'put') return this.#put(query, collection)
-        if (query.method == 'patch') return this.#patch(query, collection)
-        if (query.method == 'delete') return this.#del(query, collection)
+        if (query.method == 'put') return this.#put(query, collection, options)
+        if (query.method == 'patch') return this.#put(query, collection, options)
+        if (query.method == 'delete') return this.#del(query, collection, options)
         throw { status: 500, code: 'INVAILD_METHOD', message: 'Invaild method' }
     }
 
@@ -142,7 +152,8 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         return typeof (connection as Db).collection == 'function'
     }
 
-    async #get<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>, collection: Collection<any>) {
+    async #get<T extends LivequeryBaseEntity>(req: LivequeryRequest<T>, collection: Collection<any>, options: RouteOptions) {
+        if (options.sync && !req.query?.[':tombstones']) req = { ...req, keys: { ...req.keys, ...LIVE } as any }
 
         const {
             limit,
@@ -211,6 +222,7 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const merged = {
             ...req.keys,
             ...cleanBody,
+            ...options.sync ? { updated_at: Date.now() } : {},
             ...client_id ? { _id: new UUID(client_id) } : {}
         };
         const result = await collection.insertOne(merged).catch(e => {
@@ -231,19 +243,26 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         };
     }
 
-    async #put(req: LivequeryRequest, collection: Collection<any>) {
-        await collection.updateOne(this.#keys(req), this.#update(req.body))
-        return { item: this.#writtenItem(req) }
+    async #put(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
+        if (!options.sync) {
+            await collection.updateOne(this.#keys(req), this.#update(req.body))
+            return { item: this.#writtenItem(req) }
+        }
+        const updated_at = Date.now()
+        const update = this.#update(req.body) ?? {}
+        // A tombstone stays deleted: an update racing a delete must not bring it back.
+        await collection.updateOne({ ...this.#keys(req), ...LIVE }, { ...update, $set: { ...update.$set, updated_at } })
+        return { item: { ...this.#writtenItem(req), updated_at } }
     }
 
-    async #patch(req: LivequeryRequest, collection: Collection<any>) {
-        await collection.updateOne(this.#keys(req), this.#update(req.body))
-        return { item: this.#writtenItem(req) }
-    }
-
-    async #del(req: LivequeryRequest, collection: Collection<any>) {
-        await collection.deleteOne(this.#keys(req))
-        return { item: this.#writtenItem(req) }
+    async #del(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
+        if (!options.sync) {
+            await collection.deleteOne(this.#keys(req))
+            return { item: this.#writtenItem(req) }
+        }
+        const now = Date.now()
+        await collection.updateOne({ ...this.#keys(req), ...LIVE }, { $set: { deleted_at: now, updated_at: now } })
+        return { item: { ...this.#writtenItem(req), deleted_at: now, updated_at: now } }
     }
 
     // Build the standard Livequery `{ id, ...data }` shape for a write response from the
