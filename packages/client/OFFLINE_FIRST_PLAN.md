@@ -255,9 +255,10 @@ Ghi lại lúc implement (2026-09-23), để người review không phải tự 
    (cập nhật item đang có, bỏ item không còn, giữ doc chỉ có trên máy). Local-first refetch là một
    lần đọc hết các trang (không mở thêm realtime), kèm xoá khỏi storage các doc server không còn trả;
    đọc lỗi thì không xoá gì.
-5. **Test strict-schema của Increment 1 dùng server Hono + Map in-process**
-   (`tests/helpers/memoryServer.ts`) thay vì sửa `tests/helpers/servers.ts` / `client-suite.ts`:
-   hai file đó cần MongoDB trên LAN, không chạy được ở đây. Cùng server đó dùng cho e2e offline.
+5. **Test strict-schema của Increment 1 có hai lớp.** Server Hono + Map in-process
+   (`tests/helpers/memoryServer.ts`, không cần Mongo; dùng luôn cho e2e offline), và — đúng như kế
+   hoạch — `buildHonoMongoApp` trong `tests/helpers/servers.ts` nhận `schema` để bọc POST/PATCH bằng
+   `validator()`; suite fullstack Hono giờ chạy sau `z.strictObject`.
 6. **Conformance suite nhận `{ name, create, dispose?, describe, test, expect }`** thay vì chỉ
    `factory`, để chạy được với bun:test, vitest lẫn jest.
 7. **`LivequeryStorage.shared?`** (optional) được thêm để chọn tên `navigator.locks` cho outbox;
@@ -272,6 +273,19 @@ Bug tìm thêm trong lúc làm, đã sửa kèm:
 - Collection xoá nhầm item bên cạnh khi một batch có hai lần `removed` cùng id.
 - Delete replay nhận 404 giờ tính là xong thay vì `_deleting_error`.
 
-`todo.md` gốc chưa cập nhật trên nhánh này (bản trong checkout chính đang có sửa đổi chưa commit).
-Plan này đóng: write-path mục 1, 2, 3, 5 và "Realtime drops updates across a reconnect, and the
-client never refetches" — phần phía client; phần server (replay event rơi trong grace window) vẫn mở.
+## Tiến độ kiểm chứng (2026-09-23)
+
+| Hạng mục Verify | Kết quả |
+| --- | --- |
+| 1. `bun run build` toàn workspace (kèm typecheck examples) | ✅ |
+| 2. `bun run test` — mọi package + examples | ✅ (client 127 test, tổng các package xanh) |
+| 3. E2e offline: ghi lúc server tắt, drain khi bật lại (cả qua reload với IndexedDB) | ✅ `tests/client-offline.e2e.test.ts` |
+| 4. `realtime-leak.test.ts` + `ws-reconnect.e2e.test.ts` | ✅ |
+| Toàn bộ e2e gốc `tests/` với replica set LAN (`192.168.2.4:27018`) | ✅ 111/111, gồm hai suite fullstack client (Hono, NestJS) |
+
+`todo.md` gốc đã cập nhật trong checkout chính (chưa commit, cùng các sửa đổi khác của bạn): mục
+write-path 1, 2, 3, 5 đánh dấu đã sửa; mục "Realtime drops updates across a reconnect" ghi phần
+client đã xong, phần server (replay event rơi trong grace window) vẫn mở. Mục 4 và 6 vẫn mở.
+
+Còn lại trước khi merge: review, merge nhánh `worktree-offline-first`, xoá bản plan chưa track trong
+checkout chính (nhánh đã commit file này) để git không từ chối merge.
