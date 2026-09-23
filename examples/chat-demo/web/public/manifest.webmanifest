@@ -1,0 +1,13 @@
+{
+    "name": "Livequery Chat",
+    "short_name": "LQ Chat",
+    "description": "Local-first chat demo: works offline, syncs when back online.",
+    "start_url": "/accounts",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#f3f4f6",
+    "theme_color": "#2563eb",
+    "icons": [
+        { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    ]
+}

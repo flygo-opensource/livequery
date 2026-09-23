@@ -26,7 +26,7 @@ export async function seed(db: Db) {
         { name: 'alice', color: '#db2777' },
     ].map((p, i) => ({ ...p, id: uuidv7At(start + i) }))
     await accounts.insertMany(people.map(p => ({
-        _id: new UUID(p.id), name: p.name, name_key: p.name, color: p.color, created_at: start,
+        _id: new UUID(p.id), name: p.name, name_key: p.name, color: p.color, created_at: start, updated_at: start,
     })))
     const [mike, bob, alice] = people as [typeof people[0], typeof people[0], typeof people[0]]
 
@@ -41,7 +41,7 @@ export async function seed(db: Db) {
             const created = from + i * step
             const sender = members[i % members.length]!
             last = { text: `${LINES[i % LINES.length]} (#${i + 1})`, sender_id: sender.id, created_at: created }
-            messages.push({ _id: new UUID(uuidv7At(created)), chat_id: id, ...last })
+            messages.push({ _id: new UUID(uuidv7At(created)), chat_id: id, ...last, updated_at: created })
         }
         const updated_at = last?.created_at ?? created_at
         chats.push({
@@ -53,6 +53,7 @@ export async function seed(db: Db) {
             // Everyone has read everything seeded.
             read_at: Object.fromEntries(member_ids.map(m => [m, updated_at])),
             unread: Object.fromEntries(member_ids.map(m => [m, 0])),
+            active_at: updated_at,
             updated_at,
             created_at,
         })

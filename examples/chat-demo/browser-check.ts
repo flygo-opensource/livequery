@@ -2,7 +2,11 @@
  * A real Chrome (headless, throwaway profile) against a running chat demo:
  *   tab A — mike, and tab B — bob, in the same profile: one SharedWorker, one storage;
  *   device C — bob in a separate browser context: its own worker and storage, like another
- *   computer, so what reaches it went through the server.
+ *   computer, so what reaches it went through the server;
+ *   device D — alice, as an installed PWA losing its network for real: its browser goes through a
+ *   local proxy that, switched off, drops every connection and refuses new ones — the page, its
+ *   SharedWorker and its service worker all lose the network, as with Wi-Fi off. It reloads, reads,
+ *   writes, reloads again and reconnects.
  *
  *   bun examples/chat-demo/browser-check.ts https://livequery-chat.global.flygo.vn
  *
@@ -15,6 +19,47 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const URL = process.argv[2] ?? 'http://localhost:8091'
+
+// An HTTP CONNECT proxy with an off switch: the network of device D.
+type Tunnel = { client: Bun.Socket<any>, upstream?: Bun.Socket<any>, pending: Uint8Array[] }
+let network_up = true
+const tunnels = new Set<Tunnel>()
+const proxy = Bun.listen<Tunnel>({
+    hostname: '127.0.0.1',
+    port: 0,
+    socket: {
+        open(client) { client.data = { client, pending: [] } },
+        async data(client, chunk) {
+            const tunnel = client.data
+            if (tunnel.upstream) return void tunnel.upstream.write(chunk)
+            const head = Buffer.from(chunk).toString('latin1')
+            const match = /^CONNECT ([^:\s]+):(\d+)/.exec(head)
+            if (!match || !network_up) return void client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+            tunnels.add(tunnel)
+            tunnel.upstream = await Bun.connect({
+                hostname: match[1]!, port: Number(match[2]),
+                socket: {
+                    data(_upstream, data) { client.write(data) },
+                    close() { client.end(); tunnels.delete(tunnel) },
+                    error() { client.end(); tunnels.delete(tunnel) },
+                },
+            }).catch(() => undefined)
+            if (!tunnel.upstream) return void client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')
+            client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+        },
+        close(client) { client.data.upstream?.end(); tunnels.delete(client.data) },
+        error(client) { client.data.upstream?.end(); tunnels.delete(client.data) },
+    },
+})
+const setNetwork = (up: boolean) => {
+    network_up = up
+    if (up) return
+    for (const tunnel of tunnels) {
+        tunnel.upstream?.terminate()
+        tunnel.client.terminate()
+    }
+    tunnels.clear()
+}
 const API = `${URL}/livequery`
 const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -25,7 +70,7 @@ const browser = await puppeteer.launch({
 })
 
 const check = (label: string, ok: boolean, detail = '') => {
-    console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`)
+    console.log(new Date().toISOString().slice(14, 23), `${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`)
     if (!ok) process.exitCode = 1
 }
 const waitUntil = async (fn: () => Promise<boolean>, ms = 10000) => {
@@ -84,7 +129,7 @@ try {
     const mike_id = a.url().split('/accounts/')[1]!
     const total_chats = (await api(`accounts/${mike_id}/chats?:limit=1`)).count.total as number
     await a.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
-    check('infinite scroll loads every page of the chat list (20 per page)', await waitUntil(async () => (await a.$$('.chat-row')).length === total_chats), `${(await a.$$('.chat-row')).length}/${total_chats}`)
+    check('scrolling shows every chat (30 per page, from the device)', await waitUntil(async () => (await a.$$('.chat-row')).length === total_chats), `${(await a.$$('.chat-row')).length}/${total_chats}`)
 
     // ── mike opens the chat with bob; older messages on scroll ─────────────────────────────
     await a.evaluate(() => window.scrollTo(0, 0))
@@ -96,18 +141,23 @@ try {
     check('scrolling up loads older messages', await waitUntil(async () => (await a.$$('.bubble-row')).length > first_messages), `${first_messages} → ${(await a.$$('.bubble-row')).length}`)
 
     const chat_id = chat_url.split('/chats/')[1]!
-    const bob_id = (await api('accounts')).items.find((x: any) => x.name === 'bob').id as string
+    const bob_id = (await api('accounts?:limit=100')).items.find((x: any) => x.name === 'bob').id as string
 
     // ── bob: tab B (same browser) and device C (another browser), on the same chat ──────────
     for (const page of [b, c]) {
         await front(page)
         await page.goto(`${URL}/accounts`, { waitUntil: 'domcontentloaded' })
         await waitUntil(async () => (await clickText(page, '.account', 'bob')))
-        await waitUntil(async () => (await page.$$('.chat-row')).length > 0)
-        await clickText(page, '.chat-row', 'mike')
+        // The direct chat titled "mike" — not a group whose last message mentions him.
+        await waitUntil(async () => await page.$$eval('.chat-row', rows => {
+            const row = rows.find(r => r.querySelector('.chat-title')?.textContent === 'mike') as HTMLElement | undefined
+            row?.click()
+            return !!row
+        }))
     }
     check('bob opens the chat with mike in tab B and on device C', await waitUntil(async () =>
-        (await b.$$('.bubble-row')).length >= 30 && (await c.$$('.bubble-row')).length >= 30))
+        b.url().endsWith(chat_id) && c.url().endsWith(chat_id)
+        && (await b.$$('.bubble-row')).length >= 30 && (await c.$$('.bubble-row')).length >= 30), `${b.url().split('/').pop()} ${c.url().split('/').pop()}`)
 
     // ── realtime across devices, sent → seen ────────────────────────────────────────────────
     await front(a)
@@ -163,11 +213,16 @@ try {
     await a.goto(`${URL}/accounts/${mike_id}`, { waitUntil: 'domcontentloaded' })
     await waitUntil(async () => (await a.$$('.chat-row')).length > 0)
     const bob_row_unread = async () => c.$$eval('.chat-row', rows => rows.find(r => r.querySelector('.chat-title')?.textContent === 'mike')?.querySelector('.unread-badge')?.textContent ?? '0')
+    // Bob must not have the chat open anywhere, or he reads it at once.
+    await b.goto(`${URL}/accounts`, { waitUntil: 'domcontentloaded' })
     const note = `unread-${Date.now()}`
     await a.goto(chat_url, { waitUntil: 'domcontentloaded' })
     await waitUntil(async () => (await a.$$('.bubble-row')).length > 0)
     await send(a, note)
-    check('a message bob has not read shows as unread in his chat list', await waitUntil(async () => Number(await bob_row_unread()) >= 1), await bob_row_unread())
+    await waitUntil(async () => ((await bubble(a, note))?.delivery ?? '').includes('✓'))
+    await front(c)
+    const bob_row = () => c.$$eval('.chat-row', rows => rows.find(r => r.querySelector('.chat-title')?.textContent === 'mike')?.textContent ?? 'no row')
+    check('a message bob has not read shows as unread in his chat list', await waitUntil(async () => Number(await bob_row_unread()) >= 1), `${await bob_row_unread()} — ${await bob_row()} — ${c.url()}`)
 
     // ── join with a new name: the account is created on the server ─────────────────────────
     const tester = `tester${Date.now() % 100000}`
@@ -178,10 +233,78 @@ try {
     await waitUntil(async () => (await a.$$('.account')).length >= 3)
     await a.type('.join input', tester)
     await a.keyboard.press('Enter')
-    check('joining by name creates the account on the server', await waitUntil(async () => (await api('accounts')).items.some((x: any) => x.name === tester)))
+    check('joining by name creates the account on the server', await waitUntil(async () => (await api('accounts?:limit=100')).items.some((x: any) => x.name === tester)))
     check('…and opens its chat list', await waitUntil(async () => a.url().includes('/accounts/') && !a.url().endsWith('/accounts')))
+
+    // ── device D: alice as a PWA, losing the network for real ──────────────────────────────
+    const pwa = await browser.createBrowserContext({ proxyServer: `http://127.0.0.1:${proxy.port}` })
+    const d = await pwa.newPage()
+    d.on('pageerror', e => errors.push(String(e)))
+    await front(d)
+    await d.goto(`${URL}/accounts`, { waitUntil: 'domcontentloaded' })
+    await waitUntil(async () => (await clickText(d, '.account', 'alice')))
+    check('alice\'s chat list loads (online, first visit)', await waitUntil(async () => (await d.$$('.chat-row')).length > 0))
+    const alice_id = d.url().split('/accounts/')[1]!
+    const alice_chats = (await api(`accounts/${alice_id}/chats?:limit=100&active_at:sort=desc`)).items as any[]
+    const unopened = alice_chats.find(x => x.title === 'Team livequery')
+    // Reloaded once so the service worker controls the page.
+    check('the service worker installs', await waitUntil(async () => await d.evaluate(async () => !!(await navigator.serviceWorker.ready).active), 15000))
+    await d.reload({ waitUntil: 'domcontentloaded' })
+    check('…and controls the page', await waitUntil(async () => await d.evaluate(() => !!navigator.serviceWorker.controller)))
+    check('the manifest is linked (installable)', await d.evaluate(async () => {
+        const href = document.querySelector('link[rel=manifest]')?.getAttribute('href')
+        return !!href && (await fetch(href)).ok
+    }))
+    // The chat list declares each chat's newest messages: give the background sync a moment.
+    const synced = async () => d.evaluate(() => new Promise<number>(resolve => {
+        const open = indexedDB.open('livequery-chat-demo')
+        open.onsuccess = () => {
+            const db = open.result
+            const stores = [...db.objectStoreNames]
+            if (stores.length === 0) return resolve(0)
+            const tx = db.transaction(stores, 'readonly')
+            let count = 0
+            let pending = stores.length
+            for (const name of stores) {
+                const req = tx.objectStore(name).count()
+                req.onsuccess = () => { count += req.result; if (--pending === 0) resolve(count) }
+                req.onerror = () => { if (--pending === 0) resolve(count) }
+            }
+        }
+        open.onerror = () => resolve(0)
+    }))
+    await waitUntil(async () => (await synced()) > alice_chats.length + 20, 20000)
+
+    setNetwork(false)
+    check('network cut: the API is unreachable from device D', await d.evaluate(async url => fetch(url).then(() => false, () => true), `${URL}/health?probe=${Date.now()}`))
+    await d.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined)
+    check('offline reload: the app opens from the service worker', await waitUntil(async () => (await d.$$('.chat-row')).length > 0, 15000))
+    check('…and shows every chat from the device', await waitUntil(async () => (await d.$$('.chat-row')).length === alice_chats.length), `${(await d.$$('.chat-row')).length}/${alice_chats.length}`)
+    check('the status document says Offline', await waitUntil(async () => (await d.$eval('.network-label', e => e.textContent)) === 'Offline'))
+    await clickText(d, '.chat-row', 'Team livequery')
+    check('a chat never opened on this device opens offline, with its messages', await waitUntil(async () => (await d.$$('.bubble-row')).length >= 10), `${(await d.$$('.bubble-row')).length} messages`)
+    const queued = `pwa-offline-${Date.now()}`
+    await send(d, queued)
+    check('a message sent offline waits (🕓 Chờ gửi)', await waitUntil(async () => ((await bubble(d, queued))?.delivery ?? '').includes('Chờ gửi')), (await bubble(d, queued))?.delivery)
+    check('…and the status counts it as pending', await waitUntil(async () => ((await d.$eval('.network', e => e.textContent ?? '')).includes('1 chờ gửi'))))
+    await d.reload({ waitUntil: 'domcontentloaded' }).catch(() => undefined)
+    check('after another offline reload it is still there, still waiting', await waitUntil(async () => ((await bubble(d, queued))?.delivery ?? '').includes('Chờ gửi'), 15000), (await bubble(d, queued))?.delivery)
+    check('the server does not have it', !((await api(`chats/${unopened.id}/messages?:limit=5&created_at:sort=desc`)).items ?? []).some((m: any) => m.text === queued))
+
+    setNetwork(true)
+    check('network back: it is sent on its own', await waitUntil(async () => {
+        const delivery = (await bubble(d, queued))?.delivery ?? ''
+        return delivery.includes('✓') && !delivery.includes('Chờ')
+    }, 30000), (await bubble(d, queued))?.delivery)
+    check('…the server has it', await waitUntil(async () => ((await api(`chats/${unopened.id}/messages?:limit=5&created_at:sort=desc`)).items ?? []).some((m: any) => m.text === queued)))
+    await front(a)
+    await a.goto(`${URL}/accounts/${mike_id}/chats/${unopened.id}`, { waitUntil: 'domcontentloaded' })
+    check('…and mike sees it', await waitUntil(async () => !!(await bubble(a, queued))))
+    check('the status is Online again', await waitUntil(async () => (await d.$eval('.network-label', e => e.textContent)) === 'Online'))
+
     check('no page errors', errors.length === 0, errors.join(' | '))
-    console.log(JSON.stringify({ cleanup: { chat_id, messages: [hello, offline, note], account: tester } }))
+    console.log(JSON.stringify({ cleanup: { chat_id, messages: [hello, offline, note, queued], account: tester } }))
 } finally {
     await browser.close()
+    proxy.stop(true)
 }

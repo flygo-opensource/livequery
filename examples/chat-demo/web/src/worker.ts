@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { SharedWorkerChannel, WorkerManager } from '@livequery/rpc'
-import { ChatService } from './ChatService'
+import { createClient } from './createClient'
 
-// One ChatService for every tab — and every signed-in account — of this browser.
-new WorkerManager(new SharedWorkerChannel()).exposeService('chat', new ChatService(self.location.origin))
+// Every tab of this browser uses this one client: one WebSocket, one outbox, one IndexedDB.
+new WorkerManager(new SharedWorkerChannel()).exposeService('livequery', createClient(self.location.origin))
