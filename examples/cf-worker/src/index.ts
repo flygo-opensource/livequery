@@ -5,7 +5,7 @@ import { LIVEQUERY_REALTIME_PATH } from '@livequery/core/workers'
 import { errorHandler, livequery, realtime, validator } from '@livequery/honojs'
 import { d1 } from '@livequery/d1'
 import { createRealtime } from './createRealtime.js'
-import { requireAuth } from './requireAuth.js'
+import { requireAuth, requireOwnedTask, requireSelf } from './requireAuth.js'
 import type { AppEnv } from './types.js'
 
 // The Durable Object class must be a named export of the Worker module.
@@ -59,16 +59,28 @@ const shards = {
 //
 // validator → livequery → d1 → realtime: validate the input, parse the Livequery request, run the
 // D1 operation, then subscribe or publish. `d1()` reads the table from the collection ref.
+//
+// Authorization is the guard in front of that chain. Two patterns, both in requireAuth.ts:
+//
+//   requireSelf('owner')  — the owner is a path segment, so it becomes WHERE owner = ? on reads
+//                           and is written into the row on insert. Works for collections.
+//   requireOwnedTask()    — the owner is not in the path, so the rule reads the row first.
+//                           Documents only, and costs one extra read.
+//
+// `owner` is deliberately absent from `Task`: it is authorized from the path, and a client that
+// could also send it in the body would be choosing its own owner.
 
-app.get('/livequery/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
-app.post('/livequery/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
-app.get('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
-app.put('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
-app.patch('/livequery/tasks/:id', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
-app.delete('/livequery/tasks/:id', livequery(), d1({ fields: Object.keys(Task.shape) }), realtime(shards))
+app.get('/livequery/users/:owner/tasks', requireSelf('owner'), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.post('/livequery/users/:owner/tasks', requireSelf('owner'), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
 
-// Tasks filtered by status — the :status route key becomes WHERE status = ?
-app.get('/livequery/status/:status/tasks', validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+// Same scope, one more filter: :status becomes a second WHERE clause.
+app.get('/livequery/users/:owner/status/:status/tasks', requireSelf('owner'), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+
+// Flat document routes carry no owner, so the guard has to look it up.
+app.get('/livequery/tasks/:id', requireOwnedTask(), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.put('/livequery/tasks/:id', requireOwnedTask(), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.patch('/livequery/tasks/:id', requireOwnedTask(), validator(Task, { patch: TaskPatch }), livequery(), d1(), realtime(shards))
+app.delete('/livequery/tasks/:id', requireOwnedTask(), livequery(), d1({ fields: Object.keys(Task.shape) }), realtime(shards))
 
 // ─── Errors ─────────────────────────────────────────────────────────────────
 //

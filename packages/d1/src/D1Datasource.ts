@@ -118,6 +118,10 @@ export class D1Datasource implements CoreLivequeryDatasource<D1RouteOptions> {
         const client_id = options.clientIds === false ? undefined : resolveClientId(body)
         const { id: _clientId, ...rest } = body
         const keys = req.keys ?? {}
+        // The body wins over a route key of the same name, deliberately. `rest` is the validated
+        // body, so it can only carry columns the route's schema declares — a schema that declares
+        // the route key's column is saying the client may set it. Deciding that here too would
+        // make the datasource a second answer to "which columns may the client write".
         const data = { ...keys, ...rest, id: client_id ?? crypto.randomUUID() }
         // Route keys are set by the route definition, so they are writable even when absent from `fields`.
         const fields = options.fields && [...options.fields, ...Object.keys(keys)]

@@ -180,4 +180,24 @@ describe('D1Datasource fields allowlist', () => {
             { table: 'products', fields: ['name'] },
         )).rejects.toMatchObject({ status: 400, code: 'FIELD_NOT_ALLOWED' })
     })
+
+    test('the body overrides a route key the schema declares', async () => {
+        const db = createMockD1()
+        const datasource = new D1Datasource({ databases: { default: db } })
+
+        // `fields` is the route's validator schema, so a body can only reach here carrying a
+        // column that schema declares. Declaring the route key's column means the client may set
+        // it; keep it out of the schema to make the path the only source of that value.
+        const { item } = await datasource.query(
+            baseRequest({
+                method: 'POST',
+                keys: { tenant_id: 't1' },
+                body: { name: 'phone', tenant_id: 't2' },
+            }) as any,
+            { table: 'products', fields: ['name', 'tenant_id'] },
+        ) as { item: Record<string, unknown> }
+
+        expect(db.last().values[0]).toBe('t2')
+        expect(item.tenant_id).toBe('t2')
+    })
 })
