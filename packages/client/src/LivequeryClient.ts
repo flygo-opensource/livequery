@@ -114,6 +114,11 @@ const toAddPayload = (doc: Record<string, any>) => ({
     ...typeof doc.id === 'string' && !doc.id.startsWith('local:') ? { id: doc.id } : {},
 })
 
+/** Local-first writes recorded but not yet in the outbox (see `#intend`). */
+export const LIVEQUERY_INTENT_REF = '__livequery_intents'
+
+type Intent = { id: string, collection_ref: string, op: OutboxOperation, doc_ids: string[], context?: Record<string, any> }
+
 const isIdAlreadyExists = (e: DocError) => e.code === 'ID_ALREADY_EXISTS'
 const isVersionConflict = (e: DocError) => e.code === 'VERSION_CONFLICT'
 // A document written to that often while this device pushes: back off to the outbox's retry.
@@ -204,8 +209,11 @@ export class LivequeryClient {
         this.#watchConnections()
         this.#watchStatus()
         if (Object.keys(config.transporters).length > 0) {
-            // Resumes writes a previous session (a reload, a killed service worker) left queued.
-            this.outbox.start()
+            // Resumes writes a previous session (a reload, a killed service worker) left queued —
+            // after queueing those it recorded but crashed before queueing.
+            this.#recover()
+                .catch(e => console.warn('livequery: recovering unqueued writes failed', e))
+                .finally(() => this.outbox.start())
             // Resumes the `keep: 'always'` scopes before any collection asks for them.
             this.sync.start().catch(e => console.warn('livequery sync: start failed', e))
         }
@@ -397,6 +405,7 @@ export class LivequeryClient {
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
         if (collection_ref === LIVEQUERY_OUTBOX_REF) throw new Error(`"${LIVEQUERY_OUTBOX_REF}" is reserved for the outbox`)
         if (collection_ref === LIVEQUERY_SYNC_REF) throw new Error(`"${LIVEQUERY_SYNC_REF}" is reserved for the sync`)
+        if (collection_ref === LIVEQUERY_INTENT_REF) throw new Error(`"${LIVEQUERY_INTENT_REF}" is reserved for the outbox`)
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         collections.add(collection_id)
         this.#refs.set(collection_ref, collections)
@@ -594,12 +603,14 @@ export class LivequeryClient {
                 return data
             })
         }
-        const docs = await Promise.all(documents.map(doc =>
+        // The final id, chosen here: the server keeps it, so nothing is renamed later and other
+        // documents can point at this one while offline.
+        const ids = documents.map(doc => doc.id ?? uuidv7())
+        const intent = mode === 'local-only' ? undefined : await this.#intend(collection_ref, 'add', ids, context)
+        const docs = await Promise.all(documents.map((doc, index) =>
             this.config.storage.add<T>(collection_ref, {
                 ...doc,
-                // The final id, chosen here: the server keeps it, so nothing is renamed later and
-                // other documents can point at this one while offline.
-                id: doc.id ?? uuidv7(),
+                id: ids[index],
                 _adding: true,
                 ...mode === 'local-only' ? { _local_only: true } : {}
             } as DocState<T>) as Promise<DocState<T>>
@@ -617,7 +628,7 @@ export class LivequeryClient {
             }
         )
         if (mode === 'local-only') return docs
-        return await this.#enqueue<T>(collection_ref, 'add', docs, context)
+        return await this.#enqueue<T>(collection_ref, 'add', docs, context, intent)
     }
 
     async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
@@ -635,6 +646,7 @@ export class LivequeryClient {
                 return data
             })
         }
+        const intent = mode === 'local-only' ? undefined : await this.#intend(collection_ref, 'update', documents.map(doc => doc.id), context)
         const merged = (await Promise.all(documents.map(async doc => {
             const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
             if (!old) return
@@ -658,8 +670,10 @@ export class LivequeryClient {
                 } as DataChangeEvent))
             }
         )
-        if (mode === 'local-only') return merged
-        return await this.#enqueue<T>(collection_ref, 'update', merged, context)
+        if (mode === 'local-only') {
+            return merged
+        }
+        return await this.#enqueue<T>(collection_ref, 'update', merged, context, intent)
     }
 
     async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode, context?: Record<string, any>) {
@@ -672,6 +686,7 @@ export class LivequeryClient {
             })
         }
         const soft = Object.keys(this.#transporters).length > 0
+        const intent = mode === 'local-only' ? undefined : await this.#intend(collection_ref, 'delete', ids, context)
         const merged = (await Promise.all(ids.map(async id => {
             // Never reached the server (its add is still queued or in flight): no soft delete.
             const current = await this.config.storage.get<DocState<T>>(collection_ref, id)
@@ -881,12 +896,16 @@ export class LivequeryClient {
 
     // local-first: the outbox sends the write. Resolve with the server's answer, or with the local
     // document when the write is stuck behind a network failure.
-    async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string, _adding?: boolean }>, context?: Record<string, any>) {
-        const results = await Promise.all(docs.flatMap(doc =>
+    async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string, _adding?: boolean }>, context?: Record<string, any>, intent?: string) {
+        const recorded: Array<Promise<void>> = []
+        const results = Promise.all(docs.flatMap(doc =>
             Object.keys(this.#transporters).map(async transporter_id => {
                 const entry = { transporter_id, collection_ref, op, doc_id: doc.id, context }
                 const unsynced = op !== 'add' && (doc.id.startsWith('local:') || !!doc._adding)
-                const settlement = await this.outbox.enqueue({ ...entry, unsynced }).catch(async (e): Promise<OutboxSettlement> => {
+                let signal!: () => void
+                recorded.push(new Promise<void>(resolve => { signal = resolve }))
+                const settlement = await this.outbox.enqueue({ ...entry, unsynced }, signal).catch(async (e): Promise<OutboxSettlement> => {
+                    signal()
                     // The queue itself could not be written (storage quota, a closed database):
                     // the write is not durable, so say so on the document instead of dropping it.
                     const error: DocError = {
@@ -901,7 +920,50 @@ export class LivequeryClient {
                 if (settlement.status === 'queued') return await this.config.storage.get<T>(collection_ref, doc.id) ?? doc
             })
         ))
-        return results.filter(Boolean) as DocState<T>[]
+        // Every write is in the queue now: the intent recorded before touching the documents
+        // has nothing left to recover.
+        if (intent) Promise.all(recorded).then(() => this.config.storage.delete(LIVEQUERY_INTENT_REF, intent)).catch(() => undefined)
+        return (await results).filter(Boolean) as DocState<T>[]
+    }
+
+    // Written before a local-first write touches its documents, deleted once the write is queued:
+    // a crash in between leaves it behind, and the next start queues what is still pending.
+    async #intend(collection_ref: string, op: OutboxOperation, doc_ids: string[], context?: Record<string, any>) {
+        const intent: Intent = { id: uuidv7(), collection_ref, op, doc_ids, ...context ? { context } : {} }
+        await this.config.storage.add(LIVEQUERY_INTENT_REF, intent as unknown as Doc)
+        return intent.id
+    }
+
+    // Writes a previous session recorded but crashed before queueing: queue those still pending.
+    async #recover() {
+        const storage = this.config.storage
+        const { documents: intents } = await storage.query<Intent & Doc>(LIVEQUERY_INTENT_REF)
+        if (intents.length === 0) return
+        const queued = await this.outbox.pending()
+        for (const intent of intents) {
+            for (const doc_id of intent.doc_ids) {
+                const doc = await storage.get<DocState<Doc>>(intent.collection_ref, doc_id) as Record<string, any> | null
+                const waiting = intent.op === 'add' ? doc?._adding : intent.op === 'update' ? doc?._prev : doc?._deleting
+                if (!doc || !waiting || doc._local_only) continue
+                for (const transporter_id of Object.keys(this.#transporters)) {
+                    const covered = queued.some(e => e.transporter_id === transporter_id
+                        && e.collection_ref === intent.collection_ref && e.doc_id === doc_id
+                        && (e.op === intent.op || (intent.op === 'update' && e.op === 'add')))
+                    if (covered) continue
+                    await new Promise<void>(resolve => {
+                        this.outbox.enqueue({
+                            transporter_id,
+                            collection_ref: intent.collection_ref,
+                            op: intent.op,
+                            doc_id,
+                            context: intent.context,
+                            unsynced: intent.op !== 'add' && !!doc._adding,
+                        }, resolve).catch(() => resolve())
+                    })
+                }
+            }
+            await storage.delete(LIVEQUERY_INTENT_REF, intent.id)
+        }
     }
 
     async #execute(entry: OutboxEntry): Promise<OutboxExecution> {

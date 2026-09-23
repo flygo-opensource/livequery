@@ -137,9 +137,9 @@ export class LivequeryOutbox {
     /**
      * Queue a write and resolve when it is confirmed, fails for good, or gets stuck behind a
      * retryable failure (`queued`). Writes to a document that already has an unsent entry are
-     * folded into it.
+     * folded into it. `onRecorded` runs once the write is durably in the queue (or folded).
      */
-    async enqueue(input: Input): Promise<OutboxSettlement> {
+    async enqueue(input: Input, onRecorded?: () => void): Promise<OutboxSettlement> {
         // The waiter is registered inside the serialized step, before a confirmation can run.
         const decision = await this.#serialize(async () => {
             const result = await this.#coalesce(input)
@@ -148,6 +148,7 @@ export class LivequeryOutbox {
                 : new Promise<OutboxSettlement>(resolve => this.#wait(result.entry_id, resolve))
             return { ...result, settlement }
         })
+        onRecorded?.()
         this.#publish()
         if (decision.settled) return decision.settled
         if (this.#stalled) {
