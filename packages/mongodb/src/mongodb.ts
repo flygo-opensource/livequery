@@ -68,6 +68,24 @@ function assertFields(query: Record<string, unknown>, fields: readonly string[])
 }
 
 /**
+ * A body from a client is data, never MongoDB syntax: a top-level `$` key would run as an update
+ * operator (`$unset`, `$rename`… on any field) and a dotted key would write into a nested field
+ * past the allowlist. Operator bodies stay available to server code calling the datasource.
+ * With an allowlist, every key must be on it (route keys and `id` aside).
+ */
+function assertBody(body: unknown, fields: readonly string[] | undefined, keys: Record<string, unknown>): void {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return
+    for (const key of Object.keys(body)) {
+        if (key.startsWith('$') || key.includes('.')) {
+            throw toLivequeryError({ status: 400, code: 'INVALID_BODY', message: `"${key}" is not a field name` })
+        }
+        if (fields && key !== 'id' && !(key in keys) && !fields.includes(key)) {
+            throw toLivequeryError({ status: 400, code: 'FIELD_NOT_ALLOWED', message: `Field "${key}" is not writable on this route` })
+        }
+    }
+}
+
+/**
  * Run the request against MongoDB and hand the result to the middlewares after it.
  *
  *   app.post('/livequery/todos', validator(Todo), livequery(), mongodb({ connection: db }))
@@ -96,6 +114,7 @@ export function mongodb(options: MongodbMiddlewareOptions) {
         if (fields) assertFields(req.query ?? {}, options.sync ? [...fields, 'updated_at', 'deleted_at'] : fields)
         else warnOnce(String(collection), `livequery: mongodb() on "${String(collection)}" has no field allowlist; `
             + 'add validator(Schema) or mongodb({ fields }) so clients cannot query other fields')
+        assertBody(req.body, fields, req.keys ?? {})
 
         const route: RouteOptions = {
             collection,
