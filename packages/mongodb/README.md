@@ -767,7 +767,8 @@ gives it what it needs:
 - A delete keeps the document as a **tombstone**: `deleted_at` and `updated_at` are set, the rest stays.
   An update never touches a tombstone, so a late edit cannot bring a deleted document back.
 - Reads hide tombstones — lists and `GET /:id` alike — unless the query has `:tombstones=1`, which
-  a delta sends together with `updated_at:gt=<version>&updated_at:sort=asc`.
+  a delta sends together with `updated_at:gte=<version>&updated_at:sort=asc` (the client starts a
+  few seconds before its newest version, so writes committed late are not skipped).
 - Realtime sends a delete as a `modified` change carrying `deleted_at`; clients treat any change with
   `deleted_at` as a removal.
 - With a field allowlist (`validator(Schema)` or `fields`), `updated_at` and `deleted_at` stay queryable.

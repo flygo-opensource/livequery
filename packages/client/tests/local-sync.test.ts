@@ -24,7 +24,7 @@ async function waitUntil(check: () => boolean | Promise<boolean>, ms = 3000) {
     }
 }
 
-/** A versioned server: pages by cursor, answers deltas (`updated_at:gt`), keeps tombstones. */
+/** A versioned server: pages by cursor, answers deltas (`updated_at:gte`), keeps tombstones. */
 function makeServer() {
     const data = new Map<string, Map<string, Record<string, any>>>()
     const realtime = new Map<string, Subject<DataChangeEvent>>()
@@ -42,6 +42,7 @@ function makeServer() {
         let docs = [...collection(ref).values()]
         if (!f[':tombstones']) docs = docs.filter(d => d.deleted_at == null)
         if (f['updated_at:gt'] != null) docs = docs.filter(d => d.updated_at > f['updated_at:gt'])
+        if (f['updated_at:gte'] != null) docs = docs.filter(d => d.updated_at >= f['updated_at:gte'])
         const sort = Object.entries(f).find(([k]) => k.endsWith(':sort'))
         const [field, direction] = sort ? [sort[0].slice(0, -5), sort[1]] : ['id', 'desc']
         docs.sort((a, b) => {
@@ -103,6 +104,10 @@ function makeServer() {
         quietly(ref: string, doc: Record<string, any>) {
             collection(ref).set(doc.id, { ...collection(ref).get(doc.id), ...doc, updated_at: ++state.clock })
         },
+        /** A write whose version is older than what was already read: stamped, then committed late. */
+        quietlyAt(ref: string, doc: Record<string, any>, version: number) {
+            collection(ref).set(doc.id, { ...collection(ref).get(doc.id), ...doc, updated_at: version })
+        },
         quietlyRemove(ref: string, id: string) {
             const doc = collection(ref).get(id)!
             collection(ref).set(id, { ...doc, deleted_at: ++state.clock, updated_at: state.clock })
@@ -117,8 +122,9 @@ function seedMessages(server: Server, ref: string, count: number) {
     for (let i = 1; i <= count; i++) server.put(ref, { id: `m${String(i).padStart(3, '0')}`, text: `#${i}`, created_at: i })
 }
 
-function makeClient(server: Server, storage: LivequeryStorage = new LivequeryMemoryStorage()) {
-    return new LivequeryClient({ storage, transporters: { rest: server.transporter } })
+// No overlap by default: the fake clock ticks by 1, so any overlap would re-read everything.
+function makeClient(server: Server, storage: LivequeryStorage = new LivequeryMemoryStorage(), syncOverlap = 0) {
+    return new LivequeryClient({ storage, transporters: { rest: server.transporter }, syncOverlap })
 }
 
 function open(client: LivequeryClient, ref: string, mode: any, limit = 20) {
@@ -240,7 +246,7 @@ describe('staying in sync', () => {
         const second = makeClient(server, storage)
         const b = open(second, 'chats/c1/messages', { scope: 'full' })
         await waitUntil(() => texts(b.col)[0] === 'new' && texts(b.col).includes('edited') && !texts(b.col).includes('#59'))
-        const delta = server.reads.slice(reads_before).find(r => r.filters['updated_at:gt'] != null)
+        const delta = server.reads.slice(reads_before).find(r => r.filters['updated_at:gte'] != null)
         expect(delta?.filters[':tombstones']).toBe(1)
         expect(await storage.get('chats/c1/messages', 'm059')).toBeNull()
         second.destroy()
@@ -264,6 +270,30 @@ describe('staying in sync', () => {
         await waitUntil(() => texts(col)[0] === 'new' && texts(col).includes('edited'))
         client.destroy()
     })
+
+    for (const [overlap, caught] of [[5, true], [0, false]] as const) {
+        test(`a write committed after the read that passed its version: ${caught ? 'caught by the overlap' : 'missed without one'}`, async () => {
+            const server = makeServer()
+            seedMessages(server, 'chats/c1/messages', 5)
+            const storage = new LivequeryMemoryStorage()
+            const first = makeClient(server, storage, overlap)
+            const a = open(first, 'chats/c1/messages', { scope: 'full', keep: 0 })
+            await waitUntil(() => a.col.completeness.value === 'complete')
+            a.close()
+            first.destroy()
+
+            // Stamped a moment before the newest version the device read, committed after it.
+            const newest = Math.max(...[...server.collection('chats/c1/messages').values()].map(d => d.updated_at))
+            server.quietlyAt('chats/c1/messages', { id: 'm003', text: 'late' }, newest - 2)
+
+            const second = makeClient(server, storage, overlap)
+            const b = open(second, 'chats/c1/messages', { scope: 'full' })
+            await waitUntil(() => b.col.completeness.value === 'complete')
+            await tick(100)
+            expect(texts(b.col).includes('late')).toBe(caught)
+            second.destroy()
+        })
+    }
 
     test("keep: realtime stays for `keep` after the last collection closes, then stops", async () => {
         const server = makeServer()

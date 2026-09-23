@@ -87,6 +87,27 @@ describe('livequery/status document', () => {
         client.destroy()
     })
 
+    test('local-first sync does not reach the server either while the switch is on', async () => {
+        const server = makeServer()
+        server.docs.set('1', { id: '1', title: 'one' })
+        const reads = { count: 0 }
+        server.transporter.read = async () => {
+            reads.count++
+            return { changes: [...server.docs.values()].map(data => ({ collection_ref: 'todos', id: data.id, type: 'added' as const, data })), paging: { total: 1, current: 1 }, source: 'query' as const }
+        }
+        const client = new LivequeryClient({ storage: new LivequeryMemoryStorage(), transporters: { t: server.transporter } })
+        client.setOffline(true)
+        const todos = new LivequeryCollection<Todo>(client, { ssr: false, mode: { scope: 'full' } })
+        todos.initialize('todos')
+        await tick(150)
+        expect(reads.count + server.stats.reads).toBe(0)
+        expect(todos.items.value).toHaveLength(0)
+
+        client.setOffline(false)
+        await waitUntil(() => todos.items.value.length === 1)
+        client.destroy()
+    })
+
     test('reads fail as offline while the switch is on', async () => {
         const server = makeServer()
         server.docs.set('1', { id: '1', title: 'one' })

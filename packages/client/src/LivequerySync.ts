@@ -11,6 +11,7 @@ const PAGE = 100
 const DEFAULT_WINDOW = 200
 const DEFAULT_KEEP = 10 * 60_000
 const DEFAULT_EVICT = 30 * 86_400_000
+const DEFAULT_OVERLAP = 10_000
 const CONCURRENT_READS = 4
 
 export type SyncIngestOptions = {
@@ -26,6 +27,8 @@ export type LivequerySyncOptions = {
     ingest: (transporter_id: string, collection_ref: string, changes: DataChangeEvent[], options: SyncIngestOptions) => Promise<DataChangeEvent[]>
     /** A complete re-read, for servers without versions: collections reconcile with it. */
     refetched: (collection_ref: string, changes: DataChangeEvent[]) => Promise<void>
+    /** How far back (ms) a delta reaches before `synced_at`. Default 10 000. */
+    overlap?: number
 }
 
 export type ScopeStatus = {
@@ -353,12 +356,15 @@ export class LivequerySync {
 
     // Only what changed since the last sync, tombstones included.
     async #delta(scope: Scope) {
-        // Fixed for every page of this delta, which pages by cursor.
-        const since = scope.meta.synced_at
+        // From a little before the newest version held, fixed for every page of this delta. A
+        // write can carry a version at or just below it and still be committed after the read
+        // that set it — or come from a server whose clock is slightly behind. The overlap is read
+        // again; the ingest ignores what is not newer than the copy on the device.
+        const since = scope.meta.synced_at! - (this.#options.overlap ?? DEFAULT_OVERLAP)
         let cursor: string | undefined
         do {
             const page = await this.#read(scope, {
-                'updated_at:gt': since,
+                'updated_at:gte': since,
                 'updated_at:sort': 'asc',
                 ':limit': PAGE,
                 ':tombstones': 1,

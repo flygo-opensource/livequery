@@ -51,6 +51,12 @@ export type LivequeryClientConfig = {
      * confirmed, and every other field takes the remote value.
      */
     conflictResolver?: ConflictResolverFunction
+    /**
+     * How far back (ms) a local-first delta reaches before the newest version the device holds.
+     * Covers a write stamped just before a read but committed after it, and servers whose clocks
+     * differ a little; re-reading those few changes costs nothing. Default 10 000.
+     */
+    syncOverlap?: number
 }
 
 export type ActionMode = 'server-first' | 'local-first' | 'local-only'
@@ -185,7 +191,9 @@ export class LivequeryClient {
         })
         this.sync = new LivequerySync({
             storage: config.storage,
-            transporters: config.transporters,
+            // Through the offline switch, like every other read.
+            transporters: this.#transporters,
+            ...config.syncOverlap !== undefined ? { overlap: config.syncOverlap } : {},
             ingest: (transporter_id, collection_ref, changes, options) => this.#ingestAndBroadcast(transporter_id, collection_ref, changes, options),
             refetched: (collection_ref, changes) => this.#broadcast(collection_ref, 'query', { changes, refetch: true }),
         })
