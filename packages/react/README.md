@@ -55,7 +55,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 }
 ```
 
-Use collection methods from effects or event handlers, not during render. Use `useObservable()` to subscribe to reactive fields before rendering their values.
+Use collection methods from effects or event handlers, not during render. `useCollection()` and `useDocument()` re-render the component whenever what they return changes, so render reads `collection.items.value`, `collection.loading.value`, … directly.
 
 ## `LivequeryClientProvider`
 
@@ -140,7 +140,7 @@ const orders = useCollection<Order>('orders', { lazy: false, context: { account_
 Use it when a component needs the full collection API: reactive state plus methods such as querying or mutations.
 
 ```tsx
-import { useCollection, useObservable } from '@livequery/react'
+import { useCollection } from '@livequery/react'
 
 type Todo = {
   _id: string
@@ -151,17 +151,14 @@ type Todo = {
 export function TodoList() {
   // lazy: false — collection queries automatically on initialization
   const collection = useCollection<Todo>('todos', { lazy: false })
-  const items = useObservable(collection.items, [])
-  const loading = useObservable(collection.loading, false)
-  const error = useObservable(collection.error)
 
-  if (loading) return <p>Loading...</p>
-  if (error) return <p>Could not load todos.</p>
+  if (collection.loading.value) return <p>Loading...</p>
+  if (collection.error.value) return <p>Could not load todos.</p>
 
   return (
     <ul>
-      {items.map((todo) => (
-        <li key={todo._id}>{todo.title}</li>
+      {collection.items.value.map((todo) => (
+        <li key={todo.value.id}>{todo.value.title}</li>
       ))}
     </ul>
   )
@@ -175,14 +172,14 @@ Behavior notes:
 - `ref` may be `undefined`, `null`, `false`, or an empty string. Falsy refs skip initialization.
 - The same hook call keeps one collection instance for the lifetime of the component.
 - `options` are used when that collection instance is first created. Pass stable options, or remount the hook if options need to change.
-- Subscribe to fields such as `collection.items`, `collection.loading`, and `collection.error` with `useObservable()`.
+- The component re-renders when the items, any document's value, `loading`, `error`, `paging`, `summary`, `filters`, `selected` or `completeness` change. A burst of changes (a page arriving) is one render. `useObservable()` still works but is no longer needed.
 - Do not call `query()`, `add()`, `update()`, or `delete()` directly during render.
 
 ## `useDocument`
 
 `useDocument<T>(ref, options)` is a document-focused convenience wrapper over `useCollection()`.
 
-It initializes a collection for a document ref, subscribes to collection items, loading state, and error state, then returns `[items[0], loading, error]`.
+It initializes a collection for a document ref and returns `[items[0], loading, error]`, re-rendering when the document, loading state or error changes.
 
 Use it when a component only needs one document, a loading flag, and basic error handling.
 
@@ -894,3 +891,34 @@ Repository-specific coding-agent guidance lives in `AGENTS.md`, `AGENT_API_GUIDE
 - `README.md` is end-user documentation.
 - `AGENTS.md` is the implementation-focused entry point for coding agents.
 - `AGENT_API_GUIDE.md` explains how agents should choose and use each public API when generating code or modifying this package.
+
+## Status and offline
+
+Every client serves a `livequery/status` document without a server:
+
+```tsx
+const [status] = useDocument<LivequeryStatus>('livequery/status')
+status?.value // { connected, offline, online, pending }
+status?.update({ offline: true }) // behave as if the network were gone, until set back to false
+```
+
+`pending` counts local-first writes not yet confirmed by the server; they are sent when the client is back online.
+
+## One client for every tab (SharedWorker)
+
+Run the real client in a SharedWorker and give each tab a remote client — the hooks work the same:
+
+```ts
+// worker.ts
+import { SharedWorkerChannel, WorkerManager } from '@livequery/rpc'
+new WorkerManager(new SharedWorkerChannel()).exposeService('livequery', new LivequeryClient({ ... }))
+
+// tab
+import { ServiceLinker, SharedWorkerChannel } from '@livequery/rpc'
+import { createRemoteLivequeryClient } from '@livequery/client'
+const worker = new SharedWorker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+const client = createRemoteLivequeryClient(new ServiceLinker(new SharedWorkerChannel(worker)).linkService('livequery'))
+// <LivequeryClientProvider core={client}>
+```
+
+Where `SharedWorker` is missing (Chrome on Android), create the `LivequeryClient` in the tab instead.

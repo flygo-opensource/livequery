@@ -1,4 +1,4 @@
-import { catchError, EMPTY, finalize, fromEvent, mergeMap, takeUntil, tap } from "rxjs"
+import { catchError, EMPTY, finalize, fromEvent, merge, mergeMap, takeUntil, tap } from "rxjs"
 import { RpcChannel, type RpcMessage } from "./RpcChannel.js";
 
 
@@ -28,7 +28,9 @@ export class SharedWorkerChannel extends RpcChannel {
                 port.start()
                 const connection_id = `c${this.#connection_seq++}`
                 return fromEvent<MessageEvent<RpcMessage>>(port, 'message').pipe(
-                    takeUntil(fromEvent(port, 'messageerror')),
+                    // `close` fires when the tab goes away (Chrome 122+): its streams are released
+                    // instead of staying open in the worker for the worker's lifetime.
+                    takeUntil(merge(fromEvent(port, 'messageerror'), fromEvent(port, 'close'))),
                     tap(msg => {
                         const respond = (response: RpcMessage['response']) => {
                             port.postMessage({
