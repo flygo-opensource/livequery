@@ -4,7 +4,7 @@ import { MongoDatasource, type MongoConnection, type RouteOptions } from './Mong
 /** Minimal Hono context, declared structurally so this package needs no Hono dependency. */
 type MongoContext = {
     res: Response
-    req: { method: string }
+    req: { method: string, header(name: string): string | undefined }
     get(key: string): unknown
     set(key: string, value: unknown): void
     json(body: unknown, status?: number): Response
@@ -105,9 +105,13 @@ export function mongodb(options: MongodbMiddlewareOptions) {
             ...options.sync ? { sync: true } : {},
         }
 
+        // `If-Match: <version>` — the version the client's edit was based on.
+        const if_match = Number(c.req.header('if-match')?.replace(/^W\//, '').replace(/"/g, ''))
+        const request = Number.isFinite(if_match) && c.req.header('if-match') ? { ...req, if_version: if_match } : req
+
         let result: unknown
         try {
-            result = await datasource.query(req, route)
+            result = await datasource.query(request, route)
         } catch (e) {
             // The datasource throws plain `{ status, code, message }` objects, which a framework
             // error handler never sees; hand it a real Error carrying the same fields.

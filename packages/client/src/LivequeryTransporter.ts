@@ -21,10 +21,18 @@ export type LivequeryQueryResult = {
 
 
 
+export type LivequeryWriteOptions = {
+    /**
+     * The server version (`updated_at`) the edit was based on. A server that versions documents
+     * refuses the write with 409 `VERSION_CONFLICT` when the document has moved on since.
+     */
+    if_version?: number
+}
+
 export type LivequeryTransporter = {
     query<T extends Doc>(query: LivequeryQueryParams<T>): Observable<Partial<LivequeryQueryResult>>
     add<T extends Doc>(ref: string, doc: Omit<T, 'id'>, context?: Record<string, any>): Promise<T>
-    update<T extends Doc>(ref: string, id: string, doc: Partial<T>, context?: Record<string, any>): Promise<T>
+    update<T extends Doc>(ref: string, id: string, doc: Partial<T>, context?: Record<string, any>, options?: LivequeryWriteOptions): Promise<T>
     delete<T extends Doc>(ref: string, id: string, context?: Record<string, any>): Promise<T>
     trigger<T>(action: LivequeryAction): Promise<T>
     /**

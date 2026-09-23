@@ -28,6 +28,9 @@ export type LivequeryRequest<T = any> = {
     schema?: string
     document_id?: string
     query?: Record<string, any>
+    // The version a write was based on (`If-Match`): a datasource that versions documents
+    // refuses the write with 409 VERSION_CONFLICT when the stored version differs.
+    if_version?: number
     // Custom action verb parsed from a `~verb` suffix in the path (undefined when absent).
     action?: string
     // Set during request normalization by datasource adapters.

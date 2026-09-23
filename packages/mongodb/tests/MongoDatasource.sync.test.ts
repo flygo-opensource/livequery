@@ -44,6 +44,22 @@ describe('MongoDatasource sync routes', () => {
         expect(updated.item).toMatchObject({ id, text: 'hey', updated_at: messages.dbNow })
     })
 
+    test('If-Match: the write only matches the version it was based on; another one is a 409', async () => {
+        const { messages, datasource } = setup()
+        await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'a' }, if_version: 7 }) as any, { collection: 'messages', sync: true })
+        expect(messages.findOneAndUpdateCalls[0]!.filter).toMatchObject({ deleted_at: null, updated_at: 7 })
+
+        // Someone else wrote version 8 in between.
+        messages.stored = { _id: id, updated_at: 8 }
+        const error = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'b' }, if_version: 7 }) as any, { collection: 'messages', sync: true }).then(() => null, e => e)
+        expect(error).toMatchObject({ status: 409, code: 'VERSION_CONFLICT' })
+
+        // Without If-Match: no condition, as before.
+        messages.stored = null
+        await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'c' } }) as any, { collection: 'messages', sync: true })
+        expect(messages.findOneAndUpdateCalls.at(-1)!.filter).not.toHaveProperty('updated_at')
+    })
+
     test('an operator body is stamped by the server instead', async () => {
         const { messages, datasource } = setup()
         const before = Date.now()

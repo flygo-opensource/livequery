@@ -42,6 +42,9 @@ export type RouteOptions = {
     sync?: boolean
 }
 
+/** A write based on a version the document no longer has (`If-Match`). */
+export const VERSION_CONFLICT = 'VERSION_CONFLICT'
+
 // Hidden unless a read asks for them.
 const LIVE = { deleted_at: null }
 
@@ -271,13 +274,15 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             await collection.updateOne(this.#keys(req), this.#update(req.body))
             return { item: this.#writtenItem(req) }
         }
-        // A tombstone stays deleted: an update racing a delete must not bring it back.
-        const filter = { ...this.#keys(req), ...LIVE }
+        // A tombstone stays deleted: an update racing a delete must not bring it back. With
+        // `If-Match`, only the version the edit was based on may be overwritten.
+        const filter = { ...this.#keys(req), ...LIVE, ...req.if_version !== undefined ? { updated_at: req.if_version } : {} }
         if (!isPlainBody(req.body)) {
             // Operators ($inc, $push…) cannot run in a pipeline: this one is stamped by the server.
             const updated_at = Date.now()
             const update = this.#update(req.body) ?? {}
-            await collection.updateOne(filter, { ...update, $set: { ...update.$set, updated_at } })
+            const result = await collection.updateOne(filter, { ...update, $set: { ...update.$set, updated_at } })
+            if (result.matchedCount === 0) await this.#assertNoConflict(req, collection)
             return { item: { ...this.#writtenItem(req), updated_at } }
         }
         const { id: _id, _id: _raw_id, ...fields } = req.body
@@ -286,7 +291,20 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             [{ $set: { ...literals(fields), updated_at: DB_NOW } }],
             { returnDocument: 'after', projection: { updated_at: 1 } },
         )
+        if (!stored) await this.#assertNoConflict(req, collection)
         return { item: { ...this.#writtenItem(req), ...stored ? { updated_at: stored.updated_at } : {} } }
+    }
+
+    // A conditional write matched nothing: when the document is there, another write got in first.
+    async #assertNoConflict(req: LivequeryRequest, collection: Collection<any>) {
+        if (req.if_version === undefined) return
+        const current = await collection.findOne({ ...this.#keys(req), ...LIVE }, { projection: { updated_at: 1 } })
+        if (!current) return
+        throw {
+            status: 409,
+            code: VERSION_CONFLICT,
+            message: `The document changed since version ${req.if_version} (now ${current.updated_at})`,
+        }
     }
 
     async #del(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {

@@ -1,4 +1,4 @@
-import { BehaviorSubject, combineLatest, concatMap, distinctUntilChanged, EMPTY, filter, finalize, from, fromEvent, map, merge, mergeMap, Observable, of, scan, shareReplay, startWith, Subject, Subscription, switchMap, takeUntil, tap } from "rxjs"
+import { BehaviorSubject, combineLatest, concatMap, distinctUntilChanged, EMPTY, filter, finalize, firstValueFrom, from, fromEvent, map, merge, mergeMap, Observable, of, scan, shareReplay, startWith, Subject, Subscription, switchMap, takeUntil, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState, LivequeryMode, LocalFirstConfig } from "./types.js"
@@ -115,6 +115,9 @@ const toAddPayload = (doc: Record<string, any>) => ({
 })
 
 const isIdAlreadyExists = (e: DocError) => e.code === 'ID_ALREADY_EXISTS'
+const isVersionConflict = (e: DocError) => e.code === 'VERSION_CONFLICT'
+// A document written to that often while this device pushes: back off to the outbox's retry.
+const CONFLICT_ATTEMPTS = 3
 
 /** `'local-first'` and `{ ... }` are local-first; the object also says how much to keep in sync. */
 export function normalizeMode(mode: LivequeryMode | undefined): { mode: CollectionMetadata['mode'], sync?: LocalFirstConfig } {
@@ -930,13 +933,30 @@ export class LivequeryClient {
         }
 
         if (entry.op === 'update') {
-            const fields = pick(doc, Object.keys(doc?._prev ?? {}))
-            // An earlier write already carried these fields.
-            if (Object.keys(fields).length === 0) return { status: 'done' }
-            const [e, data] = await tryCatch(() => transporter.update(collection_ref, id, fields, context), tid)
-            if (e) return await this.#failed(entry, e)
-            await this.#confirmUpdate(collection_ref, id, fields)
-            return { status: 'done', data }
+            let current = doc
+            for (let attempt = 0; ; attempt++) {
+                const fields = pick(current, Object.keys(current?._prev ?? {}))
+                // An earlier write already carried these fields.
+                if (Object.keys(fields).length === 0) return { status: 'done' }
+                // The server version this edit was based on: the server refuses it if another write
+                // got in first, instead of silently overwriting that write.
+                const version = (current as Record<string, any> | null)?.[VERSION_FIELD]
+                const options = typeof version === 'number' ? { if_version: version } : undefined
+                const [e, data] = await tryCatch(() => transporter.update(collection_ref, id, fields, context, options), tid)
+                if (e && isVersionConflict(e) && attempt < CONFLICT_ATTEMPTS) {
+                    // Take the server's copy through the conflict rebase (and `conflictResolver`),
+                    // then send what the device still wants to change, based on that copy.
+                    const [read_error] = await tryCatch(() => this.#pullDocument(tid, collection_ref, id), tid)
+                    if (read_error) return await this.#failed(entry, read_error)
+                    current = await this.config.storage.get<DocState<Doc>>(collection_ref, id)
+                    continue
+                }
+                if (e) return await this.#failed(entry, e)
+                // REST answers `{ item }`; other transporters may return the document itself.
+                const written = (data as Record<string, any> | undefined)?.item ?? data
+                await this.#confirmUpdate(collection_ref, id, fields, (written as Record<string, any> | undefined)?.[VERSION_FIELD])
+                return { status: 'done', data }
+            }
         }
 
         const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id, context), tid)
@@ -944,6 +964,18 @@ export class LivequeryClient {
         if (e && !isNotFound(e)) return await this.#failed(entry, e)
         await this.#confirmDelete(collection_ref, id)
         return { status: 'done', data }
+    }
+
+    // The server's current copy of one document, through the single ingest path.
+    async #pullDocument(transporter_id: string, collection_ref: string, id: string) {
+        const transporter = this.#transporters[transporter_id]!
+        const params = { ref: `${collection_ref}/${id}`, filters: {} }
+        const result = transporter.read
+            ? await transporter.read(params)
+            : await firstValueFrom(transporter.query(params))
+        if (result.error) throw result.error
+        const changes = (result.changes ?? []).map(change => ({ ...change, type: 'modified' as const }))
+        await this.#ingestAndBroadcast(transporter_id, collection_ref, changes, { source: 'query' })
     }
 
     async #failed(entry: OutboxEntry, e: DocError): Promise<OutboxExecution> {
@@ -977,10 +1009,12 @@ export class LivequeryClient {
         })
     }
 
-    async #confirmUpdate(collection_ref: string, id: string, sent: Record<string, any>) {
+    async #confirmUpdate(collection_ref: string, id: string, sent: Record<string, any>, version?: unknown) {
         const local = await this.config.storage.get<DocState<Doc>>(collection_ref, id)
         const unsent = unsentFields(local, sent)
         await this.#patchLocal(collection_ref, id, {
+            // The version the server gave this write: the next edit is based on it.
+            ...typeof version === 'number' ? { [VERSION_FIELD]: version } : {},
             _prev: unsent.length > 0 ? pick(local?._prev, unsent) : undefined,
             _updating: unsent.length > 0 ? true : undefined,
             _updating_error: undefined,

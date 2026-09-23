@@ -150,6 +150,22 @@ describe("RestTransporter", () => {
         expect(sent).toEqual({ title: "Updated" });
     });
 
+    test("update sends the version it was based on as If-Match, and nothing without one", async () => {
+        const calls: Array<{ init?: RequestInit }> = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            calls.push({ init });
+            return new Response(JSON.stringify({ data: { item: { id: "todo-1" } } }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({ api: "https://api.example.com" });
+        await transporter.update("todos", "todo-1", { title: "A" }, undefined, { if_version: 1790000000123 });
+        await transporter.update("todos", "todo-1", { title: "B" });
+
+        expect(new Headers(calls[0].init?.headers).get("if-match")).toBe("1790000000123");
+        expect(new Headers(calls[1].init?.headers).get("if-match")).toBeNull();
+        expect(JSON.parse(calls[0].init?.body as string)).toEqual({ title: "A" });
+    });
+
     test("add sends the client id but never a legacy local: one; update never sends id", async () => {
         const calls: Array<{ init?: RequestInit }> = [];
         globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {

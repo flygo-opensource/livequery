@@ -18,7 +18,7 @@ export function withOfflineSwitch(transporter: LivequeryTransporter, offline$: B
             switchMap(offline => offline ? of(failed) : defer(() => transporter.query(params))),
         ),
         add: (ref, doc, context) => guard(() => transporter.add(ref, doc, context)),
-        update: (ref, id, doc, context) => guard(() => transporter.update(ref, id, doc, context)),
+        update: (ref, id, doc, context, options) => guard(() => transporter.update(ref, id, doc, context, options)),
         delete: (ref, id, context) => guard(() => transporter.delete(ref, id, context)),
         trigger: action => guard(() => transporter.trigger(action)),
         status$: combineLatest([transporter.status$ ?? of({ connected: true }), offline$]).pipe(

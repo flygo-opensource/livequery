@@ -2,7 +2,7 @@ import { of, firstValueFrom, EMPTY, from, type Observable } from 'rxjs';
 import { catchError, delay, distinctUntilChanged, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
-import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/client'
+import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters, LivequeryWriteOptions } from '@livequery/client'
 import { parseJson } from './helpers/parseJson.js';
 
 
@@ -376,8 +376,10 @@ export class RestTransporter implements LivequeryTransporter {
         throw { code: 'InvalidResponse', message: 'The server did not return a valid response containing the created document.' }
     }
 
-    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>, context?: Record<string, any>) {
-        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: this.#stripPrivateFields(data), query: {}, context })
+    update<T extends Doc>(collection_ref: string, id: string, data: Partial<T>, context?: Record<string, any>, options?: LivequeryWriteOptions) {
+        // `If-Match`: only overwrite the version the edit was based on.
+        const headers = options?.if_version !== undefined ? { 'if-match': String(options.if_version) } : undefined
+        return this.#call<T>({ method: 'PATCH', ref: collection_ref + '/' + id, body: this.#stripPrivateFields(data), query: {}, context, ...headers ? { headers } : {} })
     }
 
     delete<T extends Doc>(collection_ref: string, id: string, context?: Record<string, any>) {
