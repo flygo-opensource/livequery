@@ -1,6 +1,7 @@
 export * from "./LivequeryCollection.js"
 export * from "./LivequeryClient.js"
 export * from "./LivequeryMemoryStorage.js"
+export * from "./LivequeryIndexedDBStorage.js"
 export * from "./LivequeryStorage.js"
 export * from "./LivequeryStorge.js"
 export * from "./LivequeryTransporter.js"

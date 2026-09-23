@@ -56,6 +56,16 @@
       "import": "./dist/helpers/filterDocs.js",
       "default": "./dist/helpers/filterDocs.js"
     },
+    "./LivequeryIndexedDBStorage": {
+      "types": "./dist/LivequeryIndexedDBStorage.d.ts",
+      "import": "./dist/LivequeryIndexedDBStorage.js",
+      "default": "./dist/LivequeryIndexedDBStorage.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -86,6 +96,12 @@
       ],
       "helpers/filterDocs": [
         "./dist/helpers/filterDocs.d.ts"
+      ],
+      "LivequeryIndexedDBStorage": [
+        "./dist/LivequeryIndexedDBStorage.d.ts"
+      ],
+      "testing": [
+        "./dist/testing/index.d.ts"
       ]
     }
   },
@@ -105,6 +121,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/chrome": "^0.1.38",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "^5"
   },
   "dependencies": {

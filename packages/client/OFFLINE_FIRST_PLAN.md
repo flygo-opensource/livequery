@@ -4,7 +4,7 @@ Trạng thái: **đã duyệt 2026-09-23, chưa implement**. Làm theo từng in
 build + test xanh độc lập rồi mới sang cái kế. Cập nhật checkbox ở đây khi xong.
 
 - [x] Increment 1 — Sửa write-path (tiên quyết)
-- [ ] Increment 2 — `LivequeryIndexedDBStorage` + conformance suite
+- [x] Increment 2 — `LivequeryIndexedDBStorage` + conformance suite
 - [ ] Increment 3 — Outbox bền vững + drain
 - [ ] Increment 4 — Conflict rebase
 - [ ] Increment 5 — Refetch khi reconnect
