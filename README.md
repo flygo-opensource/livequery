@@ -14,6 +14,7 @@ trong một package, `@livequery/core`, chia theo entry point cho từng runtime
 | [`@livequery/client`](packages/client/README.md), [`@livequery/rest`](packages/rest/README.md) | Client phía trình duyệt: collection, cache, transport REST + WebSocket |
 | [`@livequery/react`](packages/react/README.md) | Hook React trên `@livequery/client` |
 | [`@livequery/rpc`](packages/rpc/README.md) | RPC giữa các worker/service |
+| [`@livequery/discovery`](packages/discovery/README.md) | Node/Bun: gateway tự nhận biết service qua UDP (`@simple-discovery/udp`) |
 
 ## Cấu trúc repo
 

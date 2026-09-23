@@ -1,0 +1,46 @@
+{
+  "name": "@livequery/discovery",
+  "version": "3.0.0",
+  "description": "Service discovery for a Livequery API gateway on Node and Bun (UDP by default, via @simple-discovery)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "bun run clean && bunx tsc -p tsconfig.build.json",
+    "test": "bun test tests/",
+    "prepublishOnly": "bun run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@livequery/core": "^3.0.0",
+    "@simple-discovery/udp": "^3.0.1",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  },
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/discovery"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/discovery#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
+  }
+}

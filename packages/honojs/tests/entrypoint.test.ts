@@ -31,6 +31,6 @@ describe('entrypoints', () => {
 
     test('the /bun entry never loads ws or UDP', () => {
         const specifiers = collectSpecifiers(resolve(import.meta.dir, '../src/bun.ts'))
-        expect([...specifiers].filter(s => /^(ws|@ohayo\/udp|@livequery\/core\/(node|udp))$/.test(s))).toEqual([])
+        expect([...specifiers].filter(s => /^(ws|@simple-discovery\/.+|@livequery\/discovery|@livequery\/core\/(node|udp))$/.test(s))).toEqual([])
     })
 })

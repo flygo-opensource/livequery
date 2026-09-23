@@ -23,6 +23,7 @@
   "dependencies": {
     "@livequery/core": "workspace:*",
     "@livequery/d1": "workspace:*",
+    "@livequery/discovery": "workspace:*",
     "@livequery/honojs": "workspace:*",
     "@livequery/mongodb": "workspace:*",
     "hono": "^4.13.5",

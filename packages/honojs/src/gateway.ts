@@ -13,8 +13,12 @@ import type { LivequeryRealtimeTarget } from './realtimeMiddleware.js'
 type Fetcher = { fetch(request: Request): Promise<Response> }
 
 export type LivequeryGatewayOptions<E extends Env = any> = {
-    /** Which service owns which path prefix, and how to reach each one. */
-    routing: ServiceRouting
+    /**
+     * Which service owns which path prefix, and how to reach each one. A function is asked on every
+     * request — for routing that changes while the gateway runs, such as `discoverServices()` from
+     * `@livequery/discovery`, which learns services over UDP on Node and Bun.
+     */
+    routing: ServiceRouting | (() => ServiceRouting)
     /** Where realtime work goes; omit for a gateway that only proxies. */
     realtime?: LivequeryRealtimeTarget<E>
     /** Identity of the caller, passed to `register` so a socket cannot be subscribed by others. */
@@ -72,7 +76,7 @@ export function gateway<E extends Env = any>(options: LivequeryGatewayOptions<E>
     const { routing, realtime, principal } = options
 
     return async (c, next) => {
-        const service = matchService(routing, c.req.path)
+        const service = matchService(typeof routing === 'function' ? routing() : routing, c.req.path)
         if (!service) return next()
 
         const response = await resolve(c, service).fetch(c.req.raw)

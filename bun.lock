@@ -10,6 +10,7 @@
       "dependencies": {
         "@livequery/core": "workspace:*",
         "@livequery/d1": "workspace:*",
+        "@livequery/discovery": "workspace:*",
         "@livequery/honojs": "workspace:*",
         "@livequery/mongodb": "workspace:*",
         "hono": "^4.13.5",
@@ -159,6 +160,19 @@
       "peerDependencies": {
         "@cloudflare/workers-types": "^4",
         "@livequery/core": "^3.0.0",
+      },
+    },
+    "packages/discovery": {
+      "name": "@livequery/discovery",
+      "version": "3.0.0",
+      "dependencies": {
+        "@livequery/core": "^3.0.0",
+        "@simple-discovery/udp": "^3.0.1",
+        "rxjs": "^7.8.2",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5",
       },
     },
     "packages/honojs": {
@@ -472,6 +486,8 @@
 
     "@livequery/d1": ["@livequery/d1@workspace:packages/d1"],
 
+    "@livequery/discovery": ["@livequery/discovery@workspace:packages/discovery"],
+
     "@livequery/examples": ["@livequery/examples@workspace:examples"],
 
     "@livequery/honojs": ["@livequery/honojs@workspace:packages/honojs"],
@@ -577,6 +593,8 @@
     "@rollup/rollup-win32-x64-gnu": ["@rollup/rollup-win32-x64-gnu@4.63.4", "", { "os": "win32", "cpu": "x64" }, "sha512-blj9z5qx/Pv4WU0W1NMFDB97e0JH5ed+aZGywW8WCvp/NhWX/4PFAq5uu6Q0AebNn+Vo6KzUYDT++JzTT5ojlQ=="],
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.63.4", "", { "os": "win32", "cpu": "x64" }, "sha512-Erx822VRBwLa124shbj+wNXe//BOgMEctDV0m1aqTQdNO1S69DgNUCFKC1RCeZfixs1J31l6igk1ziyXErbigQ=="],
+
+    "@simple-discovery/udp": ["@simple-discovery/udp@3.0.1", "", { "dependencies": { "msgpackr": "^1.12.1", "rxjs": "^7.8.2" } }, "sha512-kYS7WGCJfi/XT4zTaSASRcYkbjVPK/zqW9FyJMEJHLTjAEJeXFc1g1QN5/mKUhhN11bWwnL1DeFu8Z+678T5/w=="],
 
     "@sindresorhus/is": ["@sindresorhus/is@7.2.0", "", {}, "sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw=="],
 
