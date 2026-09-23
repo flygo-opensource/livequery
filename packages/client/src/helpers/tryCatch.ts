@@ -9,7 +9,8 @@ export const tryCatch = async <T>(fn: () => Promise<T>, transporter_id: string =
         return [{
             code: e?.code || e?.name || 'UNKNOWN_ERROR',
             message: e?.message || 'An error occurred',
-            transporter_id
+            transporter_id,
+            ...typeof e?.status === 'number' ? { status: e.status } : {}
         }, undefined]
     }
 }

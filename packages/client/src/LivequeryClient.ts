@@ -5,7 +5,7 @@ import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocSt
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
-import { useDispose } from "./helpers/useDispose.js"
+import { AddLock } from "./helpers/AddLock.js"
 import { uuidv7 } from 'uuidv7'
 
 export type LivequeryClientOptions = {
@@ -57,6 +57,9 @@ export type CollectionMetadata = {
 
 type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
 
+// Fields a user edit can change: not the id, not client metadata.
+const isEditableField = (key: string) => key !== 'id' && !key.startsWith('_')
+
 
 
 export class LivequeryClient {
@@ -65,7 +68,7 @@ export class LivequeryClient {
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<Query>()
     #localSyncingStop$ = new Subject<void>()
-    #adding = new Map<string, Subject<void>>()
+    #addLock = new AddLock()
     #running = new Subscription()
 
     constructor(private readonly config: LivequeryClientConfig) {
@@ -97,9 +100,7 @@ export class LivequeryClient {
                         const changes = result.changes || []
 
                         if (changes.length === 0) return EMPTY
-                        const lock$ = this.#adding.get(e.collection.collection_ref)
-
-                        if (!lock$) {
+                        if (!this.#addLock.locked(e.collection.collection_ref)) {
                             return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes })).pipe(
                                 switchMap(() => EMPTY)
                             )
@@ -109,7 +110,7 @@ export class LivequeryClient {
                         const delay_changes = changes.filter(c => c.type == 'added')
 
                         return from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: ok_changes })).pipe(
-                            switchMap(() => lock$.pipe(
+                            switchMap(() => this.#addLock.pending(e.collection.collection_ref).pipe(
                                 mergeMap(() => from(this.#broadcast(e.collection.collection_ref, 'realtime', { changes: delay_changes }))),
                                 switchMap(() => EMPTY)
                             ))
@@ -385,14 +386,7 @@ export class LivequeryClient {
                 Object.entries(this.config.transporters).map(async ([tid, transporter]) => {
                     const id = doc.id
                     if (String(id).startsWith('local:')) {
-                        // lock by collection_ref
-                        const o = new Subject<void>()
-                        this.#adding.set(collection_ref, o)
-                        using $ = useDispose(() => {
-                            o.next()
-                            o.complete()
-                            this.#adding.delete(collection_ref)
-                        })
+                        using _lock = this.#addLock.acquire(collection_ref)
                         const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T, context), tid)
                         if (e && server_first) throw e
                         // unlock
@@ -505,13 +499,18 @@ export class LivequeryClient {
 
     async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
-            const list = documents.map(doc => ({ ...doc, _prev: doc }))
+            // `_prev` holds the values from BEFORE the edit (only its keys drive the payload).
+            const list = await Promise.all(documents.map(async doc => {
+                const old = await this.config.storage.get<T>(collection_ref, doc.id) as Record<string, any> | null
+                const _prev = Object.fromEntries(Object.keys(doc).filter(isEditableField).map(k => [k, old?.[k]]))
+                return { ...doc, _prev }
+            }))
             return await this.#push<T>(collection_ref, list, true, context)
         }
         const merged = (await Promise.all(documents.map(async doc => {
             const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
             if (!old) return
-            const _prev = Object.keys(doc).reduce((acc, key) => {
+            const _prev = Object.keys(doc).filter(isEditableField).reduce((acc, key) => {
                 if (key in (old._prev || {})) return acc
                 return { ...acc, [key]: (old as any)[key] }
             }, old._prev || {})

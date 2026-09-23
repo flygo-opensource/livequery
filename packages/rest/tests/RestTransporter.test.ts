@@ -150,6 +150,34 @@ describe("RestTransporter", () => {
         expect(sent).toEqual({ title: "Updated" });
     });
 
+    test("add and update never send id in the body", async () => {
+        const calls: Array<{ init?: RequestInit }> = [];
+        globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+            calls.push({ init });
+            return new Response(JSON.stringify({ data: { id: "todo-1", title: "x" } }));
+        }) as typeof fetch;
+
+        const transporter = new RestTransporter({ api: "https://api.example.com" });
+        await transporter.add("todos", { id: "local:abc", title: "x", _adding: true } as any);
+        await transporter.update("todos", "todo-1", { id: "todo-1", title: "y" } as any);
+
+        expect(JSON.parse(calls[0].init?.body as string)).toEqual({ title: "x" });
+        expect(JSON.parse(calls[1].init?.body as string)).toEqual({ title: "y" });
+    });
+
+    test("non-2xx errors carry the HTTP status", async () => {
+        globalThis.fetch = (async () => new Response(JSON.stringify({
+            error: { code: "INTERNAL", message: "boom" }
+        }), { status: 503 })) as typeof fetch;
+
+        const transporter = new RestTransporter({ api: "https://api.example.com" });
+
+        await expect(transporter.delete("todos", "todo-1")).rejects.toMatchObject({
+            code: "INTERNAL",
+            status: 503
+        });
+    });
+
     test("throws InvalidJsonResponse for invalid JSON responses", async () => {
         globalThis.fetch = (async () => new Response("not json")) as typeof fetch;
 

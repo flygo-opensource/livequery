@@ -2,7 +2,7 @@ export type Doc<T = {}> = T & {
     id: string
 }
 
-export type DocError = { code: string, message: string, transporter_id: string }
+export type DocError = { code: string, message: string, transporter_id: string, status?: number }
 
 export type DocMetadata = {
     _deleting?: boolean | undefined
@@ -12,6 +12,7 @@ export type DocMetadata = {
     _updating_error?: DocError | undefined
     _adding?: boolean | undefined
     _adding_error?: DocError | undefined
+    _queued?: boolean | undefined
     _remotes?: Record<string, string | number> | undefined
     _prev?: Record<string, any> | undefined
     _selected?: boolean | undefined
@@ -123,5 +124,5 @@ export type LivequeryAction = Omit<LivequeryQueryParams<Doc>, 'query_id' | 'filt
 
 export type LivequeryResult<T> = {
     data: T
-    error?: { code: string, message: string }
+    error?: { code: string, message: string, status?: number }
 }

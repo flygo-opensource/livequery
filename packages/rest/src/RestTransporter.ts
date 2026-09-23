@@ -182,7 +182,8 @@ export class RestTransporter implements LivequeryTransporter {
                     return {
                         error: {
                             code: parsed?.error?.code || `HTTP_${result.status}`,
-                            message: parsed?.error?.message || 'REQUEST_FAILED'
+                            message: parsed?.error?.message || 'REQUEST_FAILED',
+                            status: result.status
                         }
                     }
                 }
@@ -323,13 +324,11 @@ export class RestTransporter implements LivequeryTransporter {
         )
     }
 
-    // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) before sending
-    // a write to the server. Applied consistently across add/update.
+    // Drop client-private fields (leading underscore, e.g. `_id`, `_local`) and `id` before
+    // sending a write to the server. The server owns the id (it is in the URL for PATCH and
+    // assigned on POST); a `local:` id in the body makes strict schemas answer 400.
     #stripPrivateFields(data: Record<string, any>) {
-        return Object.entries(data).reduce((acc, [k, v]) => {
-            if (k.startsWith('_')) return acc
-            return { ...acc, [k]: v }
-        }, {} as Record<string, any>)
+        return Object.fromEntries(Object.entries(data).filter(([k]) => !k.startsWith('_') && k !== 'id'))
     }
 
     async add<T extends Doc>(ref: string, data: Partial<Omit<T, 'id'>>, context?: Record<string, any>) {
