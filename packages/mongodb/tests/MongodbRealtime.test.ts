@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events'
 import { describe, expect, test } from 'bun:test'
 import { firstValueFrom, take, toArray } from 'rxjs'
-import { MongodbRealtime } from '../src/MongodbRealtime.js'
+import { MongodbRealtime, type MongoRealtimeFailure } from '../src/MongodbRealtime.js'
 
-function createWatchableCollection(name: string) {
+function createWatchableCollection(name: string, commandError?: Error) {
     const stream = Object.assign(new EventEmitter(), {
         closed: false,
         close() {
@@ -17,6 +17,7 @@ function createWatchableCollection(name: string) {
             commandCalls: [] as any[],
             async command(command: any) {
                 this.commandCalls.push(command)
+                if (commandError) throw commandError
             },
         },
         watch(pipeline: any[], options: any) {
@@ -57,6 +58,16 @@ async function waitFor(check: () => boolean) {
     }
     throw new Error('Timed out waiting for condition')
 }
+
+/** Let every already-scheduled macrotask run, so "nothing happened" is a real assertion. */
+async function settle() {
+    for (let i = 0; i < 20; i++) await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+const unauthorized = Object.assign(
+    new Error('not authorized on main to execute command { collMod: "products" }'),
+    { code: 13 }
+)
 
 describe('MongodbRealtime', () => {
     test('watches realtime collection routes and emits formatted insert changes', async () => {
@@ -372,7 +383,7 @@ describe('MongodbRealtime', () => {
     test('retries after stream errors', async () => {
         const products = createWatchableCollection('products')
         const db = createDb({ products })
-        const realtime = new MongodbRealtime({ enablePreAndPostImages: false })
+        const realtime = new MongodbRealtime({ enablePreAndPostImages: false, reconnectDelayMs: 1 })
 
         const sub = realtime.watch(
             { connections: { default: db as any } },
@@ -385,5 +396,73 @@ describe('MongodbRealtime', () => {
         sub.unsubscribe()
 
         expect(products.stream.closed).toBe(true)
+    })
+
+    test('waits out the backoff before resubscribing a dropped stream', async () => {
+        const products = createWatchableCollection('products')
+        const db = createDb({ products })
+        const failures: MongoRealtimeFailure[] = []
+        const realtime = new MongodbRealtime({
+            enablePreAndPostImages: false,
+            reconnectDelayMs: 10_000,
+            onError: (_error, failure) => failures.push(failure),
+        })
+
+        const sub = realtime.watch(
+            { connections: { default: db as any } },
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
+        ).subscribe()
+
+        await waitFor(() => products.watchCalls.length > 0)
+        products.stream.emit('error', new Error('transient stream failure'))
+        await settle()
+        sub.unsubscribe()
+
+        // A bare retry() resubscribed immediately, which is how a permanent failure became a
+        // busy loop against mongod. The resubscribe must still be pending here.
+        expect(products.watchCalls.length).toBe(1)
+        expect(failures).toEqual([{ stage: 'watch', attempt: 1 }])
+    })
+
+    test('starts the watcher when collMod is not permitted', async () => {
+        const products = createWatchableCollection('products', unauthorized)
+        const db = createDb({ products })
+        const failures: Array<[unknown, MongoRealtimeFailure]> = []
+        const realtime = new MongodbRealtime({ onError: (error, failure) => failures.push([error, failure]) })
+
+        const result = firstValueFrom(realtime.watch(
+            { connections: { default: db as any } },
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
+        ))
+
+        await waitFor(() => products.watchCalls.length > 0)
+        products.stream.emit('change', {
+            operationType: 'delete',
+            ns: { db: 'main', coll: 'products' },
+            documentKey: { _id: 'p1' },
+        })
+
+        // Without pre-images a delete carries no before-image, so old_data falls back to the
+        // document key — degraded, but still a usable `removed` event.
+        expect(await result).toEqual({ ref: 'products', type: 'removed', data: { id: 'p1' } })
+        expect(failures).toEqual([[unauthorized, { stage: 'collMod', collection: 'products' }]])
+    })
+
+    test('does not re-issue collMod once it has been refused', async () => {
+        const products = createWatchableCollection('products', unauthorized)
+        const db = createDb({ products })
+        const realtime = new MongodbRealtime({ reconnectDelayMs: 1, onError: () => { } })
+
+        const sub = realtime.watch(
+            { connections: { default: db as any } },
+            [{ schema: 'products', options: { collection: 'products', realtime: true } }]
+        ).subscribe()
+
+        await waitFor(() => products.watchCalls.length > 0)
+        products.stream.emit('error', new Error('transient stream failure'))
+        await waitFor(() => products.watchCalls.length > 1)
+        sub.unsubscribe()
+
+        expect(products.db.commandCalls.length).toBe(1)
     })
 })

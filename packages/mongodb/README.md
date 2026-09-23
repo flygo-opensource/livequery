@@ -368,6 +368,39 @@ Disable the `collMod` call when your deployment manages pre/post images separate
 new MongodbRealtime({ enablePreAndPostImages: false })
 ```
 
+#### The `collMod` privilege
+
+`collMod` is **not** granted by `readWrite`. Without it the watcher still runs — a delete then
+carries only the document id instead of the full before-image — but the attempt is logged once per
+collection. Grant the privilege to get pre-images:
+
+```js
+db.getSiblingDB('admin').createRole({
+  role: 'collModOnly',
+  privileges: [{ resource: { db: '<db>', collection: '' }, actions: ['collMod'] }],
+  roles: []
+})
+db.getSiblingDB('admin').grantRolesToUser('<app-user>', [{ role: 'collModOnly', db: 'admin' }])
+```
+
+#### Reconnect and failure reporting
+
+A dropped change stream is resubscribed with exponential backoff, starting at `reconnectDelayMs`
+and capped at `maxReconnectDelayMs`. Every failure the watcher absorbs is reported — pass
+`onError` to route it into your logger, otherwise it goes to `console.error`:
+
+```ts
+new MongodbRealtime({
+  reconnectDelayMs: 1000,      // default
+  maxReconnectDelayMs: 30000,  // default
+  onError: (error, { stage, collection, attempt }) => logger.warn({ error, stage, collection, attempt }),
+})
+```
+
+Do not silence `onError`. Before 3.0.0 these failures were swallowed and retried with no delay, so
+a missing `collMod` privilege turned into roughly 200 rejected commands per second per process —
+visible only as CPU and as `Unauthorized` lines in the `mongod` log, never in the service log.
+
 For nested collection refs, name the route param after the document field that holds the parent value:
 
 ```ts

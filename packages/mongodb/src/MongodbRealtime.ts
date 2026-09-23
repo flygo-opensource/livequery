@@ -1,13 +1,30 @@
 import type { ChangeStream, Collection, Db, MongoClient } from 'mongodb'
-import { EMPTY, Observable, from, map, mergeAll, mergeMap, retry } from 'rxjs'
+import { EMPTY, Observable, from, map, mergeAll, mergeMap, retry, timer } from 'rxjs'
 import type { UpdatedData } from '@livequery/core'
 import type { MongoDatasourceConfig, RouteOptions } from './MongoDatasource.js'
 import { fromMongoId } from './helpers/index.js'
 
 export type MongoRealtimeChangeType = 'added' | 'modified' | 'removed'
 
+export type MongoRealtimeFailure = {
+    // 'collMod': enabling pre/post images failed; the watcher still starts, but deletes carry
+    // only the document id. 'watch': the change stream dropped and is being resubscribed.
+    stage: 'collMod' | 'watch'
+    collection?: string
+    // Consecutive resubscribe attempts, for 'watch' only.
+    attempt?: number
+}
+
 export type MongoRealtimeOptions = {
     enablePreAndPostImages?: boolean
+    // Base backoff before resubscribing after the change stream drops (default 1000ms). The
+    // delay grows exponentially per consecutive failure, capped at maxReconnectDelayMs.
+    reconnectDelayMs?: number
+    // Upper bound for the resubscribe backoff (default 30000ms).
+    maxReconnectDelayMs?: number
+    // Called on every failure the watcher absorbs. Without it, failures are logged to the
+    // console — they must not be silent, because the only other symptom is CPU.
+    onError?: (error: unknown, failure: MongoRealtimeFailure) => void
 }
 
 export type MongoRealtimeRoute = {
@@ -57,6 +74,19 @@ const changeTypes: Record<string, MongoRealtimeChangeType | undefined> = {
 
 export class MongodbRealtime {
     constructor(private options: MongoRealtimeOptions = {}) { }
+
+    // Collections whose collMod failed. The cause is a missing privilege, which does not change
+    // while the process runs, so retrying it on every resubscribe only costs a doomed command.
+    #preImagesUnavailable = new Set<string>()
+
+    #report(error: unknown, failure: MongoRealtimeFailure): void {
+        if (this.options.onError) return this.options.onError(error, failure)
+        console.error(JSON.stringify({
+            event: 'livequery_mongodb_realtime_error',
+            ...failure,
+            message: error instanceof Error ? error.message : String(error),
+        }))
+    }
 
     #reformatId(obj: Record<string, any> | undefined): Record<string, any> | undefined {
         if (!obj) return undefined
@@ -115,11 +145,21 @@ export class MongodbRealtime {
         return from(sources).pipe(
             mergeMap(async source => {
                 const collection = this.#collection(source)
-                if (this.options.enablePreAndPostImages !== false) {
-                    await collection.db.command({
-                        collMod: source.collection,
-                        changeStreamPreAndPostImages: { enabled: true },
-                    })
+                const key = `${source.dbName || ''}|${source.collection}`
+                if (this.options.enablePreAndPostImages !== false && !this.#preImagesUnavailable.has(key)) {
+                    try {
+                        await collection.db.command({
+                            collMod: source.collection,
+                            changeStreamPreAndPostImages: { enabled: true },
+                        })
+                    } catch (error) {
+                        // collMod needs a privilege `readWrite` does not grant, and it is only an
+                        // optimisation: without pre-images `old_data` falls back to documentKey.
+                        // Letting it throw used to tear down the whole pipe, and the retry below
+                        // re-issued the same doomed command as fast as the driver allowed.
+                        this.#preImagesUnavailable.add(key)
+                        this.#report(error, { stage: 'collMod', collection: source.collection })
+                    }
                 }
                 return new Observable<DatabaseEvent>(observer => {
                     const stream = collection.watch([], {
@@ -156,8 +196,7 @@ export class MongodbRealtime {
                     }
                 })
             }),
-            mergeMap(stream => stream),
-            retry()
+            mergeMap(stream => stream)
         )
     }
 
@@ -268,7 +307,21 @@ export class MongodbRealtime {
     watch(config: MongoDatasourceConfig, routes: MongoRealtimeRoute[]): Observable<UpdatedData<any>> {
         const paths = this.#paths(routes)
         if (paths.size === 0) return EMPTY
+        const base = this.options.reconnectDelayMs ?? 1000
+        const cap = this.options.maxReconnectDelayMs ?? 30000
         return this.#listenRawChanges(config, routes).pipe(
+            // Resubscribe on a dropped change stream with exponential backoff. A bare retry()
+            // here resubscribed with no delay and no ceiling, which turns any persistent failure
+            // into a busy loop against mongod.
+            retry({
+                delay: (error, count) => {
+                    this.#report(error, { stage: 'watch', attempt: count })
+                    return timer(Math.min(cap, base * 2 ** (count - 1)))
+                },
+                // A stream that delivered again starts the backoff over: a drop after hours of
+                // uptime is not retried at the cap.
+                resetOnSuccess: true,
+            }),
             map(event => this.#format(paths, event)),
             mergeAll()
         )
