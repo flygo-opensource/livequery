@@ -2,7 +2,7 @@
 
 Livequery phát hành một package lõi, `@livequery/core`, chia theo entry point.
 Mỗi entry chỉ kéo phần runtime của nó: import root hoặc `/workers` không đụng tới
-Node built-in, `ws` hay UDP.
+Node built-in hay `ws`.
 
 | Entry | Chạy trên | Nội dung |
 | --- | --- | --- |
@@ -44,7 +44,6 @@ Các symbol khác:
 - `LivequeryRealtimeEvent`, `RealtimeSubscription`, `LIVEQUERY_REALTIME_PATH`: WebSocket wire contracts.
 - `QueryOption`, `FilterConditions`: type-safe query/filter types.
 - `hidePrivateFields`, `hidePrivateFieldsInItem`: bỏ field private trước khi trả response.
-- `Discovery<T>`, `DiscoveryMessage<T>`, `isDiscoveryOfflineData`, `hasDiscoveryEnvelope`, `containsAllTags`: contract discovery.
 - `RealtimeEventPublisher`, `RealtimeEventConsumer`, `LivequeryChangeEvent`: contract broker (NATS/Redis/Kafka).
 - `decodeMsgpack`, `decodeRealtimeFrame`: giải mã frame realtime, không dependency.
 - `SocketLike`: WebSocket tối thiểu mà adapter phải bọc.

@@ -101,9 +101,9 @@ Realtime: a client that sends `x-lcid`/`x-lgid` headers on a GET is subscribed o
 | `LivequeryDatasourceInterceptors` | Resolves route metadata and drives `datasource.handle(ctx)` |
 | `LivequeryItemMapper` | Per-item response mapping helper |
 | `@LivequeryRequest()` | Param decorator exposing the parsed `LivequeryRequest` |
-| `ApiGateway`, `ApiServiceLinker`, `listPaths` | Gateway/multi-node utilities |
-| `WebsocketGateway`, `UdpDiscovery`, … | Re-exported from `@livequery/core` |
-| `LivequeryDatasource`, `UpdatedData`, `QueryOption`, `FilterConditions`, `Paging`, … | Type surface re-exported from `@livequery/core` |
+| `listPaths` | Lists a controller's routes, to register them with a datasource |
+| `WebsocketGateway`, `RealtimeSubscription` | Re-exported from `@livequery/core/node` |
+| `LivequeryDatasource`, `UpdatedData`, `QueryOption`, `FilterConditions`, `Paging`, … | Type surface re-exported from `@livequery/core/node` |
 
 ## Datasource & watcher contracts
 
@@ -141,4 +141,4 @@ type LivequeryDatasourceWatcher<Config, RouteOptions> = {
 - The interceptor drives datasources through `handle(ctx)` (engine entry point) instead of calling `query(req, options)` directly; route options are resolved from the datasource's own route table built at `init()`.
 - Watcher route `method` is now the verb string (`'GET'`) instead of NestJS's `RequestMethod` enum number.
 - Client-side types (`Transporter`, `Response`, `QueryStream`, `DocumentResponse`) are no longer re-exported — import them from the client packages if you need them.
-- Removed `LivequeryWebsocketSync` (an empty placeholder class) and `SimpleApiGateway` (a thin `@Injectable` wrapper) — use `ApiGatewayHandler` from `@livequery/core` or `ApiGateway` from this package instead.
+- Removed `LivequeryWebsocketSync` (an empty placeholder class), `SimpleApiGateway` (a thin `@Injectable` wrapper), and — in 3.0 — `ApiGateway` and `ApiServiceLinker` along with the discovery-driven gateway they belonged to. A gateway is now a Hono app that routes by path prefix; see `@livequery/honojs`.

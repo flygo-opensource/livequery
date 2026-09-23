@@ -82,8 +82,7 @@ override `handle(ctx)`, `fetch(request)`, option `onRequest` của thư viện.
   subclass bắt đầu bằng `_`.
 - Field metadata phía client không gửi lên server bắt đầu bằng `_`:
   `_adding`, `_prev`, `_selected`. Server strip mọi field bắt đầu bằng `_`.
-- Type guard bắt đầu bằng `is` hoặc `has`: `isDiscoveryOfflineData`,
-  `hasDiscoveryEnvelope`.
+- Type guard bắt đầu bằng `is` hoặc `has`: `isPingFrame`, `isObservableLike`, `hasPipe`.
 - Factory trả về object bắt đầu bằng `create`: `createNode`, `createRoutes`.
 - Tham số không dùng bắt đầu bằng `_`: `(_ref, id) => ...`.
 
@@ -93,7 +92,7 @@ override `handle(ctx)`, `fetch(request)`, option `onRequest` của thư viện.
 `export type` không giới hạn. Hàm và class phụ dùng riêng trong file thì không
 export.
 
-- Tên file trùng tên export đó: `HttpDiscovery.ts` export `HttpDiscovery`,
+- Tên file trùng tên export đó: `MongodbRealtime.ts` export `MongodbRealtime`,
   `hidePrivateFields.ts` export `hidePrivateFields`.
 - Type đi kèm một class hoặc hàm (options, result, event) đặt cùng file với nó.
   Type dùng chung cho nhiều file trong package đặt ở `types.ts`, file này chỉ
@@ -116,10 +115,10 @@ export.
 
 ```text
 src/
-├── index.ts                 # export * from './HttpDiscovery.js' ...
+├── index.ts                 # export * from './WebsocketGatewayBase.js' ...
 ├── types.ts                 # chỉ export type
 ├── const.ts
-├── HttpDiscovery.ts         # export class HttpDiscovery + type HttpDiscoveryOptions
+├── WebsocketGatewayBase.ts  # export class WebsocketGatewayBase + type WebsocketGatewayOptions
 ├── LivequeryRequestParser.ts
 └── helpers/
     ├── index.ts             # export * from './hidePrivateFields.js' ...
@@ -127,8 +126,8 @@ src/
     └── parseJson.ts         # export function parseJson
 ```
 
-Code hiện tại có file nhiều hàm (`filterDocs.ts`, `Discovery.ts`) và thiếu
-`helpers/index.ts`. Tách dần khi chạm vào file đó, không tách hàng loạt.
+Code hiện tại còn file nhiều hàm (`filterDocs.ts`) và thiếu `helpers/index.ts`.
+Tách dần khi chạm vào file đó, không tách hàng loạt.
 
 ## 4. Kiểu dữ liệu
 
@@ -186,14 +185,14 @@ export type LivequeryStorage = {
   BehaviorSubject, không expose setter.
 
 ```ts
-export class HttpDiscovery<T> extends Observable<DiscoveryEvent<T>> implements Discovery<T> {
-    readonly #events = new Subject<DiscoveryEvent<T>>()
-    readonly #status$ = new BehaviorSubject<HttpDiscoveryStatus>('not_ready')
+export class ChangeFeed<T> extends Observable<ChangeEvent<T>> {
+    readonly #events = new Subject<ChangeEvent<T>>()
+    readonly #status$ = new BehaviorSubject<ChangeFeedStatus>('not_ready')
     readonly status$ = this.#status$.asObservable()
 
     #closed = false
 
-    constructor(options: HttpDiscoveryOptions) {
+    constructor(options: ChangeFeedOptions) {
         super(subscriber => this.#events.subscribe(subscriber))
         ...
     }

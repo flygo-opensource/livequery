@@ -1,18 +1,18 @@
-# TODO
+# TODO — `@livequery/core`
 
-## Bugs
+The repo-wide list is in [`../../todo.md`](../../todo.md); this file holds only what lives in this
+package.
 
-- [ ] **Service metadata không có TTL**: Service crash im lặng vẫn còn trong routing tree mãi mãi — chỉ bị deregister khi forwarded request fail (502). Cần thêm heartbeat timeout hoặc TTL-based expiration
-- [ ] **WebsocketGateway unsubscribe race condition**: Xóa ref map trước khi remote nodes acknowledge → client reconnect ngay lập tức có thể subscribe 2 lần
+## Open
 
-## Missing features
+- **The buffer of missed changes lives in memory.** Changes for a client inside its grace window
+  are kept and sent on reconnect (`_missed`), but a gateway restart — or an evicted Durable Object —
+  loses them; the client's reconnect read covers it.
+- **`unsubscribe` races the detach.** The ref map is cleared before remote nodes acknowledge, so a
+  client that reconnects immediately can end up subscribed twice.
+- **No rate limit on WebSocket subscriptions.** Subscription count per socket is unbounded.
 
-- [ ] Không có async middleware pipeline — `handle(ctx)` là synchronous, khó compose auth/logging/rate-limiting mà không có side effects
-- [ ] Không có rate limiting cho UDP discovery và WebSocket subscriptions — unbounded, dễ bị DoS
-- [ ] `ApiGatewayHandler` chỉ có round-robin — không có weighted, least-connections, sticky sessions
+## Tests worth adding
 
-## Tests
-
-- [ ] Service metadata expiration: test stale service bị cleanup sau timeout
-- [ ] WebSocket subscribe/unsubscribe rapid cycling: test không bị duplicate subscription
-- [ ] `hidePrivateFields` với nested objects: test shallow copy không leak mutated state
+- Rapid subscribe/unsubscribe cycling does not leave a duplicate subscription.
+- `hidePrivateFields` on nested objects: the shallow copy must not leak mutated state.

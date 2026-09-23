@@ -1,10 +1,11 @@
 # AGENTS.md — @livequery/honojs
 
-Hono framework adapter for the `@livequery` ecosystem. Protocol contracts come
-from `@livequery/core`; Bun discovery, gateway, and realtime runtime code comes
-from `@livequery/core/bun` via the `/bun` and `/node` entries; the root entry is runtime-neutral. Provides middleware,
-route registration helpers, a route registry, response utilities, an API gateway,
-plus a prefix-routing gateway, for building Livequery REST APIs.
+Hono framework adapter for the `@livequery` ecosystem. Protocol contracts come from
+`@livequery/core`; the realtime gateway that holds client sockets comes from
+`@livequery/core/node` or `@livequery/core/bun` via the `/node` and `/bun` entries. The root entry
+is runtime-neutral and safe on Workers. Provides the request middlewares (`validator`, `livequery`,
+`realtime`), a prefix-routing `gateway()`, an error handler, route registration helpers, a route
+registry and response utilities, for building Livequery REST APIs.
 
 ---
 

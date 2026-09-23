@@ -111,4 +111,4 @@ need to declare it.
 The package imports only the runtime-neutral root of `@livequery/core`, so a Worker
 bundle that uses it needs no `nodejs_compat` flag. In a Worker, import from
 `@livequery/core` or `@livequery/core/workers`, never from `@livequery/core/node` or
-`@livequery/core/bun`, which load `ws`, `http` and UDP discovery.
+`@livequery/core/bun`, which load `ws` and `http`.

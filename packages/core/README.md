@@ -22,9 +22,7 @@ This package handles the core infrastructure around that model:
 - Parse raw framework requests into normalized `LivequeryRequest` objects.
 - Pass request state through a shared `LivequeryContext`.
 - Define a handler interface for parser, middleware, datasource, and realtime handlers.
-- Discover gateway and service nodes over Ohayo HTTP discovery by default.
-- Route HTTP requests through an API gateway to online service nodes.
-- Publish service metadata from service nodes.
+- Match a request path to the service that owns its prefix, for a gateway to forward to.
 - Manage realtime WebSocket subscriptions and update forwarding.
 - Sanitize response objects by hiding private fields.
 
@@ -50,8 +48,8 @@ bunx tsc -p tests/tsconfig.json --noEmit
 
 ## Public Entry Points
 
-The root entry is runtime-neutral: it imports no Node built-ins, no `ws` and no UDP
-transport, so it works in Workers, browsers, Bun and Node.
+The root entry is runtime-neutral: it imports no Node built-ins and no `ws`, so it works
+in Workers, browsers, Bun and Node.
 
 ```ts
 import { LivequeryRequestParser, WebsocketGatewayBase, hidePrivateFields } from '@livequery/core'
@@ -603,13 +601,11 @@ bunx tsc -p tests/tsconfig.json --noEmit
 
 The test suite covers:
 
-- Public entrypoint exports.
+- Public entrypoint exports, and that the root entry stays free of Node built-ins and `ws`.
 - Request parsing, including nested params, realtime suffixes, and query strings containing `~`.
-- API gateway routing, metadata updates, header/body forwarding, error responses, and round-robin.
-- Service metadata publishing with `ApiServiceLinker`.
-- HTTP discovery registration, auth, namespace/tag filtering, and TTL expiration.
-- UDP discovery signatures, TTL, status, and close behavior.
+- Prefix routing: deepest `$service` wins, `:name` matches any segment, `$auth` inherits.
 - WebSocket gateway lifecycle, subscriptions, observable links, and gateway-to-gateway forwarding.
-- Hono integration and multi-process gateway/service discovery flows.
+- `BunWebsocketGateway`, and the Cloudflare hibernating gateway and publisher.
+- JSON and msgpack realtime frame decoding.
 - Response field sanitization.
 - Node/Web HTTP helper conversion.

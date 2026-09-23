@@ -674,102 +674,70 @@ Rules:
 - Disconnecting a client removes that client's subscriptions.
 - Disconnecting a gateway removes subscriptions routed through that gateway.
 
-## API Gateway And Discovery
+## API Gateway
 
-Livequery can run services behind an API gateway. Service and gateway nodes discover each other through UDP metadata packets and then route HTTP and realtime traffic directly.
+Livequery can run services behind a gateway. The gateway routes **by path prefix**, from a routing
+tree declared up front. There is no runtime discovery: nothing is broadcast, nothing is registered,
+and the gateway learns no routes while running.
 
-### Discovery Metadata
-
-Base discovery node:
-
-```ts
-type UdpDiscoveryNode = {
-  node_id: string
-  namespace: string
-  version: number
-  host?: string
-}
-```
-
-API gateway/service metadata:
-
-```ts
-type ServiceApiMetadata = UdpDiscoveryNode & {
-  role: 'service' | 'gateway'
-  name: string
-  port: number
-  paths: Array<{ method: string; path: string }>
-  linked: string[]
-  target?: string
-  ws?: {
-    path: string
-    auth: string
-  }
-}
-```
-
-Discovery packet rules:
-
-- Packets are msgpack encoded.
-- Packets are signed with HMAC SHA-256 using the configured discovery key.
-- Packets older than 30 seconds are ignored.
-- Packets with invalid signatures are ignored.
-- Duplicate valid packets may be emitted. Consumers perform deduplication.
-- Nodes from all namespaces may be emitted by discovery. Consumers filter by namespace.
-
-Gateway metadata handling rules:
-
-- API gateways consume only metadata with `role === 'service'`.
-- API gateways consume only metadata in the configured API gateway namespace.
-- Metadata from the same node id with an older or equal `version` is ignored.
-- Newer metadata with the same service definition updates metadata and host.
-- Newer metadata with a changed service definition removes old routes and registers the new routes.
-- Service linkers publish metadata with `role: 'service'`.
-- Service linkers include configured HTTP paths.
-- Service linkers include websocket metadata when a WebSocket gateway is configured.
-- When a service linker sees a gateway in the same namespace, it bumps its metadata version and broadcasts again.
-
-### Gateway Route Matching
-
-Gateway route matching uses the service metadata `paths` array.
-
-Rules:
-
-- HTTP methods are matched case-insensitively by normalizing to uppercase.
-- Static path segments match exactly.
-- A segment equal to `:` is a wildcard parameter segment.
-- A segment containing a prefix before `:`, such as `post:`, matches actual segments beginning with that prefix.
-- If a route exists but all known hosts for it are offline, the gateway returns an offline error.
-- When multiple hosts are online for the same route, the gateway selects hosts with round-robin routing.
-
-### Gateway Forwarding
-
-Forwarding rules:
-
-- The gateway forwards the original pathname and query string to the selected service.
-- `content-length` and `host` headers are removed before forwarding.
-- Request bodies are not forwarded for `GET` and `HEAD`.
-- Other request methods may forward the original request body.
-- When realtime is enabled and a client id is present, the gateway forwards `x-lcid` and `x-lgid` so the service-side WebSocket gateway can register subscriptions.
-
-Gateway error responses use the standard error envelope:
-
-| HTTP status | Code | Meaning |
-| --- | --- | --- |
-| `404` | `API_NOT_FOUND` | No route matched the request. |
-| `503` | `API_OFFLINE` | A route matched, but no service host is currently online. |
-| `502` | `SERVICE_API_OFFLINE` | Forwarding to the selected service failed. |
-
-Example:
+### Routing Tree
 
 ```json
 {
-  "error": {
-    "message": "API not found",
-    "code": "API_NOT_FOUND"
+  "services": {
+    "tasks": { "binding": "TASKS_SERVICE", "url": "http://tasks:8081" }
+  },
+  "routes": {
+    "livequery": {
+      "tasks": { "$service": "tasks" },
+      "customers": { ":customer_id": { "orders": { "$service": "orders" } } }
+    }
   }
 }
 ```
+
+Rules:
+
+- A key prefixed with `$` is metadata; every other key is one path segment.
+- A `:name` key matches any single segment.
+- `$service` and `$auth` are inherited by everything below them.
+- The **deepest** `$service` wins.
+- A service target carries both `binding` (a Cloudflare Service Binding) and `url`. Each runtime
+  uses whichever it has.
+- A service owns every path under its prefix, so adding a route inside a service needs no gateway
+  deploy. Only adding a service does, because that needs a new binding.
+
+Because the gateway does not know a service's individual routes, `404` and `405` are produced by
+the service, not by the gateway. A path that no service owns is not the gateway's to answer: it
+falls through to the next handler.
+
+### Gateway Forwarding
+
+- The gateway forwards the original pathname and query string to the matched service.
+- When realtime is enabled and a client id is present, the gateway forwards `x-lcid` and `x-lgid`
+  so subscriptions can be attributed to the right socket and gateway.
+- Realtime is best effort. If the subscribe or publish step fails, the service has already done the
+  work, so the response is still returned.
+
+### Realtime Over Response Headers
+
+A service does not hold client sockets and does not know where they are. It reports what realtime
+should do through two response headers, which the gateway acts on and then **strips** before
+answering the client:
+
+| Header | Set after | Gateway action |
+| --- | --- | --- |
+| `x-livequery-ref` | an authorized read | Subscribe the calling client to that ref. |
+| `x-livequery-change` | a write | Publish the change to everyone subscribed to that ref. |
+
+This is what keeps a subscription impossible to forge: it is created server-side, only as the
+result of a read the caller was already allowed to perform. A `subscribe` frame sent by a client is
+ignored unless the gateway is explicitly configured to accept one.
+
+A service with a real change feed — a MongoDB change stream, Postgres `LISTEN/NOTIFY` — skips the
+header mechanism and pushes straight into its in-process realtime gateway, which also covers writes
+that never went through the API. A datasource without one (D1) emits realtime only from writes that
+did go through the API.
 
 ## Private Field Sanitization
 
