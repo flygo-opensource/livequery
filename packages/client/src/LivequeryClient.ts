@@ -623,6 +623,32 @@ export class LivequeryClient {
         return await this.#enqueue<T>(collection_ref, 'delete', merged, context)
     }
 
+    /**
+     * Send again a local-first add or delete the server refused (`_adding_error` /
+     * `_deleting_error`) — after the user fixed the cause, or for a "retry" button. The add keeps
+     * its id, so a retry can never duplicate. A refused update cannot be retried: its `_prev` was
+     * dropped with the failure; edit the document again instead.
+     */
+    async retry<T extends Doc>(collection_ref: string, ids: string[], context?: Record<string, any>) {
+        const adds: DocState<T>[] = []
+        const deletes: DocState<T>[] = []
+        for (const id of ids) {
+            const doc = await this.config.storage.get<DocState<T>>(collection_ref, id)
+            if (doc?._adding_error) {
+                await this.#patchLocal(collection_ref, id, { _adding_error: undefined, _adding: true })
+                adds.push({ ...doc, _adding: true })
+            } else if (doc?._deleting_error) {
+                await this.#patchLocal(collection_ref, id, { _deleting_error: undefined, _deleting: true })
+                deletes.push({ ...doc, _deleting: true })
+            }
+        }
+        const results = await Promise.all([
+            adds.length > 0 ? this.#enqueue<T>(collection_ref, 'add', adds, context) : [],
+            deletes.length > 0 ? this.#enqueue<T>(collection_ref, 'delete', deletes, context) : [],
+        ])
+        return results.flat()
+    }
+
     trigger<Response>(action: LivequeryAction) {
         return from(Object.entries(this.config.transporters)).pipe(
             filter(([id]) => action.transporter_id ? id === action.transporter_id : true),

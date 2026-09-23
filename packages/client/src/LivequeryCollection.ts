@@ -431,6 +431,12 @@ export class LivequeryCollection<T extends Doc> {
         return (Array.isArray(payload) ? responses : responses[0]) as any
     }
 
+    /** Send again an add or delete the server refused. See `LivequeryClient.retry`. */
+    async retry(id: string | string[]) {
+        if (!this.collection_ref) return []
+        return await this.client.retry<T>(this.collection_ref, Array.isArray(id) ? id : [id], this.options.context)
+    }
+
     async delete<Input extends (string | string[])>(id: Input, mode: ActionMode = this.#defaultMode()): Promise<Input extends Array<infer U> ? DocState<T>[] : DocState<T>> {
         if (!this.collection_ref) return null as any
         const ids: string[] = Array.isArray(id) ? id : [id]
