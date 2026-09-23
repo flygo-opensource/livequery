@@ -1,4 +1,4 @@
-import { concatMap, EMPTY, filter, finalize, from, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, tap } from "rxjs"
+import { BehaviorSubject, combineLatest, concatMap, distinctUntilChanged, EMPTY, filter, finalize, from, fromEvent, map, merge, mergeMap, Observable, of, scan, shareReplay, startWith, Subject, Subscription, switchMap, takeUntil, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState, LivequeryMode, LocalFirstConfig } from "./types.js"
@@ -11,6 +11,7 @@ import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
 import { AddLock } from "./helpers/AddLock.js"
 import { isRetryableError } from "./helpers/isRetryableError.js"
+import { withOfflineSwitch } from "./helpers/withOfflineSwitch.js"
 import { uuidv7 } from 'uuidv7'
 
 export type LivequeryClientOptions = {
@@ -70,6 +71,8 @@ export type CollectionMetadata = {
     last_query?: LivequeryQueryParams<any> & { collection_id: string }
 }
 
+type WatchEvent = Partial<LivequeryQueryResult> & { from: RealtimeChangeSource }
+
 type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata, refetch?: boolean }
 
 const isFirstPageQuery = (filters?: Record<string, any>) => !filters?.[':after'] && !filters?.[':before'] && !filters?.[':around']
@@ -125,6 +128,25 @@ const isOlder = (incoming: Record<string, any>, stored: Record<string, any> | nu
     return typeof a === 'number' && typeof b === 'number' && a < b
 }
 
+/**
+ * A document every client serves without a server: `useDocument('livequery/status')`. Updating it
+ * with `{ offline: true }` makes the client behave as if the network were gone.
+ */
+export const LIVEQUERY_STATUS_REF = 'livequery/status'
+const STATUS_COLLECTION = 'livequery'
+
+export type LivequeryStatus = {
+    id: 'status'
+    /** Every transporter with a connection is connected (and the switch is off). */
+    connected: boolean
+    /** The offline switch: every transporter call fails as if there were no network. */
+    offline: boolean
+    /** Connected, switch off, and the browser says it is online. */
+    online: boolean
+    /** Local-first writes not yet confirmed by the server. */
+    pending: number
+}
+
 const isNotFound = (e: DocError) => e.status === 404 || e.code === 'NOT_FOUND' || e.code === 'HTTP_404'
 
 
@@ -136,6 +158,14 @@ export class LivequeryClient {
     /** Keeps the local copy of local-first collections in sync, as each one declares. */
     readonly sync: LivequerySync
 
+    /** Connection, offline switch and pending writes — also served as the `livequery/status` document. */
+    readonly status$: Observable<LivequeryStatus>
+
+    readonly #offline$ = new BehaviorSubject(false)
+    readonly #status$ = new BehaviorSubject<LivequeryStatus>({ id: 'status', connected: true, offline: false, online: true, pending: 0 })
+    // Every transporter call goes through the offline switch.
+    readonly #transporters: Record<string, LivequeryTransporter>
+
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
     #queries$ = new Subject<Query>()
@@ -144,6 +174,9 @@ export class LivequeryClient {
     #subscriptions = new Subscription()
 
     constructor(private readonly config: LivequeryClientConfig) {
+        this.#transporters = Object.fromEntries(Object.entries(config.transporters)
+            .map(([id, transporter]) => [id, withOfflineSwitch(transporter, this.#offline$)]))
+        this.status$ = this.#status$.asObservable()
         this.outbox = new LivequeryOutbox({
             storage: config.storage,
             execute: entry => this.#execute(entry),
@@ -158,6 +191,7 @@ export class LivequeryClient {
         })
         this.#start()
         this.#watchConnections()
+        this.#watchStatus()
         if (Object.keys(config.transporters).length > 0) {
             // Resumes writes a previous session (a reload, a killed service worker) left queued.
             this.outbox.start()
@@ -174,7 +208,7 @@ export class LivequeryClient {
         const clear = () => {
             deduplicate_key && this.#cache.get(deduplicate_key) === $ && this.#cache.delete(deduplicate_key)
         }
-        const $: Observable<Partial<LivequeryQueryResult>> = from(Object.entries(this.config.transporters)).pipe(
+        const $: Observable<Partial<LivequeryQueryResult>> = from(Object.entries(this.#transporters)).pipe(
             mergeMap(([transporter_id, transporter]) => (
                 transporter.query(e).pipe(
                     // concatMap: storage writes of one emission finish before the next starts, so
@@ -263,7 +297,7 @@ export class LivequeryClient {
     // backoff. Coming back after a drop also refetches live queries: realtime events sent while
     // the connection was down are gone for good.
     #watchConnections() {
-        for (const transporter of Object.values(this.config.transporters)) {
+        for (const transporter of Object.values(this.#transporters)) {
             if (!transporter.status$) continue
             this.#subscriptions.add(transporter.status$.pipe(
                 scan((state, { connected }) => ({
@@ -296,6 +330,46 @@ export class LivequeryClient {
         this.sync.reconnected()
     }
 
+    /** Turn the offline switch on or off (also: update `livequery/status` with `{ offline }`). */
+    setOffline(offline: boolean) {
+        if (offline === this.#offline$.value) return
+        this.#offline$.next(offline)
+    }
+
+    #watchStatus() {
+        const connections = Object.values(this.#transporters).map(t => t.status$!)
+        const browser$ = typeof globalThis.addEventListener === 'function' && globalThis.navigator && 'onLine' in globalThis.navigator
+            ? merge(fromEvent(globalThis, 'online'), fromEvent(globalThis, 'offline')).pipe(
+                map(() => globalThis.navigator.onLine),
+                startWith(globalThis.navigator.onLine),
+            )
+            : of(true)
+        this.#subscriptions.add(combineLatest([
+            connections.length > 0 ? combineLatest(connections).pipe(map(list => list.every(s => s.connected))) : of(true),
+            this.#offline$,
+            this.outbox.pending$,
+            browser$,
+        ]).subscribe(([connected, offline, pending, browser_online]) => this.#status$.next({
+            id: 'status',
+            connected,
+            offline,
+            online: connected && !offline && browser_online,
+            pending: pending.length,
+        })))
+    }
+
+    // `livequery/status` (or the `livequery` collection holding it): served from memory.
+    #watchStatusDocument(): Observable<WatchEvent> {
+        return this.#status$.pipe(
+            distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+            map((data, index) => ({
+                from: 'realtime' as RealtimeChangeSource,
+                loading: null,
+                changes: [{ collection_ref: STATUS_COLLECTION, id: 'status', type: index === 0 ? 'added' : 'modified', data }] as DataChangeEvent[],
+            })),
+        )
+    }
+
     /**
      * Forget what the local-first scopes hold, so each reloads from the server on next use.
      * Call on logout / account switch.
@@ -304,7 +378,8 @@ export class LivequeryClient {
         this.sync.cleared()
     }
 
-    watch(ref: string, collection_id: string, requested: LivequeryMode, context?: Record<string, any>) {
+    watch(ref: string, collection_id: string, requested: LivequeryMode, context?: Record<string, any>): Observable<WatchEvent> {
+        if (ref === STATUS_COLLECTION || ref === LIVEQUERY_STATUS_REF) return this.#watchStatusDocument()
         const { mode, sync } = normalizeMode(requested)
         const refs = ref.split('/')
         const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
@@ -325,7 +400,7 @@ export class LivequeryClient {
             filters: {},
             parsedFilters: []
         })
-        const handle: SyncHandle | undefined = sync && Object.keys(this.config.transporters).length > 0
+        const handle: SyncHandle | undefined = sync && Object.keys(this.#transporters).length > 0
             ? this.sync.acquire(collection_ref, sync, collection_id, context)
             : undefined
         // The first load shows as loading; completeness tells the UI whether more exists.
@@ -354,6 +429,9 @@ export class LivequeryClient {
     }
 
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
+        if (req.ref === STATUS_COLLECTION || req.ref === LIVEQUERY_STATUS_REF) {
+            return { documents: [this.#status$.value as unknown as T], paging: { total: 1, current: 1 } }
+        }
         const collection = this.#collections.get(req.collection_id)
         if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
         if (isFirstPageQuery(req.filters)) collection.last_query = req
@@ -532,6 +610,11 @@ export class LivequeryClient {
     }
 
     async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
+        if (collection_ref === STATUS_COLLECTION) {
+            const change = documents.find(doc => doc.id === 'status') as Record<string, any> | undefined
+            if (change && typeof change.offline === 'boolean') this.setOffline(change.offline)
+            return [this.#status$.value as unknown as DocState<T>]
+        }
         if (mode == 'server-first') {
             return await this.#sendNow<T>(documents, async ([tid, transporter], doc) => {
                 const fields = toWritePayload(doc)
@@ -577,7 +660,7 @@ export class LivequeryClient {
                 return data
             })
         }
-        const soft = Object.keys(this.config.transporters).length > 0
+        const soft = Object.keys(this.#transporters).length > 0
         const merged = (await Promise.all(ids.map(async id => {
             // Never reached the server (its add is still queued or in flight): no soft delete.
             const current = await this.config.storage.get<DocState<T>>(collection_ref, id)
@@ -651,7 +734,7 @@ export class LivequeryClient {
     }
 
     trigger<Response>(action: LivequeryAction) {
-        return from(Object.entries(this.config.transporters)).pipe(
+        return from(Object.entries(this.#transporters)).pipe(
             filter(([id]) => action.transporter_id ? id === action.transporter_id : true),
             mergeMap(([id, transporter]) => transporter.trigger<Response>(action))
         )
@@ -780,7 +863,7 @@ export class LivequeryClient {
         send: (transporter: [string, LivequeryTransporter], doc: Record<string, any> & { id: string }) => Promise<unknown>,
     ): Promise<DocState<T>[]> {
         const results = await Promise.all(docs.flatMap(doc =>
-            Object.entries(this.config.transporters).map(entry => send(entry, doc as Record<string, any> & { id: string }))
+            Object.entries(this.#transporters).map(entry => send(entry, doc as Record<string, any> & { id: string }))
         ))
         return results.filter(Boolean) as DocState<T>[]
     }
@@ -789,7 +872,7 @@ export class LivequeryClient {
     // document when the write is stuck behind a network failure.
     async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string, _adding?: boolean }>, context?: Record<string, any>) {
         const results = await Promise.all(docs.flatMap(doc =>
-            Object.keys(this.config.transporters).map(async transporter_id => {
+            Object.keys(this.#transporters).map(async transporter_id => {
                 const entry = { transporter_id, collection_ref, op, doc_id: doc.id, context }
                 const unsynced = op !== 'add' && (doc.id.startsWith('local:') || !!doc._adding)
                 const settlement = await this.outbox.enqueue({ ...entry, unsynced }).catch(async (e): Promise<OutboxSettlement> => {
@@ -812,7 +895,7 @@ export class LivequeryClient {
 
     async #execute(entry: OutboxEntry): Promise<OutboxExecution> {
         const { transporter_id: tid, collection_ref, doc_id: id, context } = entry
-        const transporter = this.config.transporters[tid]
+        const transporter = this.#transporters[tid]
         if (!transporter) {
             return { status: 'failed', error: { code: 'TRANSPORTER_NOT_FOUND', message: `No transporter "${tid}"`, transporter_id: tid } }
         }
