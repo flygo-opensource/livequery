@@ -13,7 +13,7 @@ import { ExpressAdapter } from '@nestjs/platform-express'
 import { WebsocketGateway, WEBSOCKET_PATH } from '../../packages/core/build/src/node.js'
 import { nodeRequestToWebRequest } from '../../packages/core/build/src/helpers/nodeRequestToWebRequest.js'
 import { writeWebResponse } from '../../packages/core/build/src/helpers/writeWebResponse.js'
-import { createLivequery, createDatasourceMapper, getLivequeryRequest, livequeryJson, mapLivequeryResponse } from '../../packages/honojs/src/index.js'
+import { createLivequery, createDatasourceMapper, getLivequeryRequest, livequeryJson, mapLivequeryResponse, validator, type LivequerySchema } from '../../packages/honojs/src/index.js'
 import { LivequeryInterceptor, UseLivequeryInterceptor } from '../../packages/nestjs/src/LivequeryInterceptor.js'
 import { MongoDatasource, MongodbRealtime, type RouteOptions } from '../../packages/mongodb/src/index.js'
 import type { MongoClient, Db, Collection } from 'mongodb'
@@ -43,6 +43,11 @@ export type BuildAppOptions = {
     realtime?: boolean
     /** Wrap responses in the `{ data }` envelope expected by RestTransporter. Default true. */
     wrapData?: boolean
+    /**
+     * Hono only: guard POST/PATCH with `validator(schema)`, as the shipped examples do. With a
+     * `z.strictObject` any unknown key in a write body (a client `id`, say) answers 400.
+     */
+    schema?: LivequerySchema
 }
 
 function applyMethodDecorator(decorator: MethodDecorator, target: object, key: string) {
@@ -122,8 +127,9 @@ export async function buildHonoMongoApp(options: BuildAppOptions): Promise<AppHa
 
     lq.get(`/livequery/${ref}`, handler(routeOptions))
     lq.get(`/livequery/${ref}/:id`, handler(routeOptions))
-    lq.post(`/livequery/${ref}`, handler(routeOptions))
-    lq.patch(`/livequery/${ref}/:id`, handler(routeOptions))
+    const guard = options.schema ? [validator(options.schema)] : []
+    lq.post(`/livequery/${ref}`, ...guard, handler(routeOptions))
+    lq.patch(`/livequery/${ref}/:id`, ...guard, handler(routeOptions))
     lq.delete(`/livequery/${ref}/:id`, handler(routeOptions))
 
     // Bridge node http → hono fetch (gateway keeps the WS upgrade path on the same server)
