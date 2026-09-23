@@ -494,6 +494,43 @@ describe('WebsocketGateway', () => {
         await closeServer(server)
     })
 
+    test('events sent while a client was away are delivered when it reconnects in the grace window', async () => {
+        const { server, gateway, port } = await startGateway({ disconnectGraceMs: 5000 })
+        const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(ws, 'client-1')
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
+        await sleep(10)
+        const closed = once(ws, 'close')
+        ws.close()
+        await closed
+        await sleep(10)
+
+        // Written while nobody was connected for client-1.
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1' } } as any)
+        gateway.next({ ref: 'posts', type: 'modified', data: { id: 'p1', title: 'edited' } } as any)
+        await sleep(10)
+
+        const replacement = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        const messages: any[] = []
+        replacement.on('message', (raw: Buffer) => messages.push(JSON.parse(raw.toString())))
+        await once(replacement, 'open')
+        replacement.send(JSON.stringify({ event: 'start', data: { id: 'client-1', auth: '' } }))
+        await sleep(100)
+        const changes = messages.filter(m => m.event === 'sync').flatMap(m => m.data.changes)
+        expect(changes.map((c: any) => [c.type, c.data.id])).toEqual([['added', 'p1'], ['modified', 'p1']])
+        expect(messages[0].event).toBe('hello')
+
+        // Delivered once: a later reconnect does not get them again.
+        replacement.close()
+        await sleep(20)
+        const third = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(third, 'client-1')
+        await expectNoMessage(third)
+        third.close()
+        gateway.close()
+        await closeServer(server)
+    })
+
     test('subscriptions are removed after the grace window elapses with no reconnect', async () => {
         const { server, gateway, port } = await startGateway({ disconnectGraceMs: 50 })
         const ws = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)

@@ -101,6 +101,9 @@ function randomId(): string {
 }
 
 
+// Changes kept per dropped client for its reconnect (see `_missed`).
+const MISSED_LIMIT = 1000
+
 // ─── Gateway protocol ─────────────────────────────────────────────────────────
 
 export class WebsocketGatewayBase extends Subject<UpdatedData> implements LivequeryHandler {
@@ -110,6 +113,9 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     protected readonly _subscriptions = new Map<Ref, Map<ClientId, SubscriptionMeta>>()
     protected readonly _pipes = new Map<Ref, { o: Observable<any>; s: Subscription }>()
     protected readonly _pendingDisconnects = new Map<ClientId, ReturnType<typeof setTimeout>>()
+    // Changes for clients whose socket dropped, kept for their grace window and delivered when they
+    // reconnect. Past MISSED_LIMIT the oldest go: the client's reconnect read covers the rest.
+    protected readonly _missed = new Map<ClientId, Array<UpdatedData & { id?: string }>>()
     protected readonly _updatesSubscription: Subscription
     protected readonly _disconnectGraceMs: number
     protected _closed = false
@@ -139,10 +145,13 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
                         : gateway_id
                     const prev = targets.get(conn_id)
                     const socket = prev?.socket ?? this._connections.get(conn_id)
-                    if (!socket) continue
-                    // Skip sockets the adapter reports as no longer open (e.g. a client
-                    // that dropped but is still inside its disconnect grace window).
-                    if (socket.isAlive && !socket.isAlive()) continue
+                    const direct = conn_id === client_id
+                    if (!socket || (socket.isAlive && !socket.isAlive())) {
+                        // A client of this gateway that dropped and is inside its grace window: keep
+                        // the change for its reconnect instead of losing it.
+                        if (direct) this._keepMissed(client_id, { ref, data, type, id: data?.id } as UpdatedData & { id?: string })
+                        continue
+                    }
                     if (prev) {
                         prev.cids.push(client_id)
                     } else {
@@ -236,6 +245,14 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
 
         const hello: LivequeryHelloEvent = { event: 'hello', gid: this.id, binary: this._binary }
         socket.send(JSON.stringify(hello))
+
+        // What happened while it was away, in order, once.
+        const missed = this._missed.get(id)
+        this._missed.delete(id)
+        if (missed?.length) {
+            const event: LivequerySyncEvent = { event: 'sync', cids: [id], data: { changes: missed } }
+            try { socket.send(JSON.stringify(event)) } catch { /* dropped again */ }
+        }
     }
 
     protected _onDisconnect(socket: SocketLike): void {
@@ -285,10 +302,20 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
      * Adapters whose instance can be evicted (a hibernating Durable Object) override this with
      * a mechanism that survives eviction, such as a Durable Object alarm.
      */
+    protected _keepMissed(client_id: string, change: UpdatedData & { id?: string }) {
+        // Only while the subscription is kept for a reconnect.
+        if (!this._pendingDisconnects.has(client_id) && !this._connections.has(client_id)) return
+        const missed = this._missed.get(client_id) ?? []
+        missed.push(change)
+        if (missed.length > MISSED_LIMIT) missed.splice(0, missed.length - MISSED_LIMIT)
+        this._missed.set(client_id, missed)
+    }
+
     protected _scheduleDetach(client_id: string, refs: string[]): void {
         const timer = setTimeout(() => {
             this._pendingDisconnects.delete(client_id)
             if (this._connections.has(client_id)) return // reconnected in time — keep subs
+            this._missed.delete(client_id)
             this.detach(client_id, refs)
         }, this._disconnectGraceMs)
         ;(timer as { unref?: () => void }).unref?.()
