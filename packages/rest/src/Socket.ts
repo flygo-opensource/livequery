@@ -23,13 +23,19 @@ export type LivequerySocketMetadata = {
     session: number
 }
 
+type Frame = { data: object, event: string }
+
 export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
 
     public readonly client_id: string
     public readonly $gateway = new ReplaySubject<string>(1)
 
     #topics = new Map<string, { stream: Subject<DataChangeEvent>, listen_count: number }>()
-    #$input = new ReplaySubject<{ data: object, event: string }>(1000)
+    // Frames for the open connection; the ones made while it is down wait in #queue and go out
+    // once, on the next open — never replayed on later connections.
+    #$input = new Subject<Frame>()
+    #queue: Frame[] = []
+    #open = false
 
     #running: Subscription | undefined
     #stop$ = new Subject<void>()
@@ -69,6 +75,8 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                             session: this.value.session + 1
                         })
                         this.#send(ws, { event: 'start', data: { id: this.client_id } })
+                        for (const frame of this.#queue.splice(0)) !this.#isStale(frame) && this.#send(ws, frame)
+                        this.#open = true
                     }),
                     mergeMap(() => this.#$input),
                     tap(data => this.#send(ws, data))
@@ -81,7 +89,10 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                     })
                 )
             ).pipe(
-                finalize(() => ws.close())
+                finalize(() => {
+                    this.#open = false
+                    ws.close()
+                })
             )),
             catchError(e => {
                 this.next({
@@ -147,7 +158,18 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
 
 
     subscribeWith(realtime_token: string) {
-        this.#$input.next({ event: 'subscribe', data: { realtime_token } })
+        this.#emit({ event: 'subscribe', data: { realtime_token } })
+    }
+
+    #emit(frame: Frame) {
+        if (this.#open) this.#$input.next(frame)
+        else this.#queue.push(frame)
+    }
+
+    // An unsubscribe for a ref that is listened to again: sending it would cut that ref off.
+    #isStale(frame: Frame) {
+        const ref = (frame.data as { ref?: string } | undefined)?.ref
+        return frame.event === 'unsubscribe' && !!ref && (this.#topics.get(ref)?.listen_count ?? 0) > 0
     }
 
 
@@ -164,7 +186,7 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 topic.listen_count--
                 setTimeout(() => {
                     if (topic.listen_count == 0) {
-                        this.#$input.next({ event: 'unsubscribe', data: { ref } })
+                        this.#emit({ event: 'unsubscribe', data: { ref } })
                         this.#topics.delete(ref)
                     }
                 }, 2000)

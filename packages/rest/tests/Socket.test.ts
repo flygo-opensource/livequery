@@ -146,4 +146,43 @@ describe("Socket", () => {
         }
         socket.stop();
     }, 15000);
+
+    test("a reconnect does not replay frames sent on an earlier connection", async () => {
+        const socket = new Socket("ws://example.test/realtime");
+        await tick();
+        const first = FakeWebSocket.instances[0]!;
+        first.open();
+        // Leave a ref: its unsubscribe goes out 2s after the last listener leaves.
+        const listening = socket.listen("chats/c1/messages").subscribe();
+        listening.unsubscribe();
+        await new Promise(resolve => setTimeout(resolve, 2100));
+        socket.subscribeWith("token-1");
+        const sent_first = first.sent.map(frame => String(frame));
+        expect(sent_first.some(frame => frame.includes("unsubscribe"))).toBe(true);
+
+        // Back in the chat, then the connection drops and comes back.
+        socket.listen("chats/c1/messages").subscribe();
+        first.drop();
+        while (FakeWebSocket.instances.length === 1) await new Promise(resolve => setTimeout(resolve, 50));
+        const second = FakeWebSocket.instances[1]!;
+        second.open();
+        await tick();
+        const sent_second = second.sent.map(frame => typeof frame === "string" ? frame : JSON.stringify(decode(frame as Uint8Array)));
+        // Only the new session's start: no stale unsubscribe that would cut the ref being read.
+        expect(sent_second.filter(frame => !frame.includes('"start"'))).toEqual([]);
+        socket.stop();
+    }, 10000);
+
+    test("frames sent while disconnected go out once the connection opens; stale unsubscribes do not", async () => {
+        const socket = new Socket("ws://example.test/realtime");
+        await tick();
+        socket.subscribeWith("token-offline");
+        const ws = FakeWebSocket.instances[0]!;
+        ws.open();
+        await tick();
+        const sent = ws.sent.map(frame => String(frame));
+        expect(sent[0]).toContain('"start"');
+        expect(sent.some(frame => frame.includes("token-offline"))).toBe(true);
+        socket.stop();
+    });
 });
