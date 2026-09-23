@@ -861,8 +861,14 @@ Options:
 - `name`: database name, default `livequery`. Two storages with the same name share their data.
 - `persist`: call `navigator.storage.persist()` to ask the browser not to evict the origin. Recommended for offline-first apps.
 - `indexedDB`: an `IDBFactory` to use instead of the global one (tests, embedded runtimes).
+- `keyRange`: the `IDBKeyRange` that goes with it, when it is not the global one.
+- `indexAfter`: a collection at least this large (default 500) gets an index on the field it is sorted by.
 
-One object store holds every collection under the key `[collection, id]` — IndexedDB can only create stores during a version upgrade, and collection refs are only known at runtime. `query()` loads the collection and filters it with `filterDocs()`, exactly like the memory storage; that is fine up to roughly 10k documents per collection. An id change (a server that assigned its own id to a new document) is read, re-keyed and written in one transaction. Where `indexedDB` does not exist (SSR, Node, Bun) it falls back to memory. `close()` closes the connection.
+One object store holds every collection under the key `[collection, id]` — IndexedDB can only create stores during a version upgrade, and collection refs are only known at runtime.
+
+`query()` answers a plain page — `:limit`, `:after` or `:before`, one `field:sort` (or none: newest id first), nothing else — from an index and reads only that page: 0.6ms instead of 84ms for a page of 30 out of 20,000 messages in Chrome. The index is created the first time a collection that large is paged by that field (a version upgrade; other tabs reconnect on their own). Every other query loads the collection and runs `queryDocs()`, exactly like the memory storage. Both put documents in the same order; a document without the sort field comes first in `asc`, last in `desc`. Strings compare by code unit, as on the server; a field holding numbers in some documents and strings in others orders numbers first.
+
+Counts of a page read from an index: `total` is exact (each collection's count is kept on every write), whether a next / previous page exists is exact, and `next.count` / `prev.count` follow from the position each cursor carries — off only if documents were added or removed before the page between two reads. Each index costs a little on every write. An id change (a server that assigned its own id to a new document) is read, re-keyed and written in one transaction. Where `indexedDB` does not exist (SSR, Node, Bun) it falls back to memory. `close()` closes the connection.
 
 ## `LivequeryTransporter`
 

@@ -4,13 +4,22 @@ import { compareDocs, type Sorter } from './sortDocs.js'
 
 type Page<T> = { documents: T[], paging: LivequeryPaging }
 
-// A cursor is the position of one document in the order: its sort values and id.
-export function encodeCursor(doc: Record<string, any>, sorters: Sorter[]): string {
-    const position = Object.fromEntries([...sorters.map(([path]) => [path, getByPath(doc, path)]), ['id', doc.id]])
+/** Where a cursor carries the document's index in the order, when known (for page counts). */
+export const CURSOR_INDEX = '#'
+
+// A cursor is the position of one document in the order: its sort values and id — and, from a
+// storage, its index, so the next page can tell how many come before it without counting.
+export function encodeCursor(doc: Record<string, any>, sorters: Sorter[], index?: number): string {
+    const position = Object.fromEntries([
+        ...sorters.map(([path]) => [path, getByPath(doc, path)]),
+        ['id', doc.id],
+        ...index === undefined ? [] : [[CURSOR_INDEX, index]],
+    ])
     return btoa(unescape(encodeURIComponent(JSON.stringify(position))))
 }
 
-function decode(cursor: string): Record<string, any> | null {
+/** A cursor back into a document-shaped object: its sort values (at their dot paths) and id. */
+export function decodeCursor(cursor: string): Record<string, any> | null {
     try {
         const position = JSON.parse(decodeURIComponent(escape(atob(cursor))))
         if (!position || typeof position !== 'object') return null
@@ -43,8 +52,8 @@ export function paginateDocs<T extends { id: string }>(sorted: T[], sorters: Sor
         return { documents: sorted, paging: { total, current: total } }
     }
     const compare = compareDocs(sorters)
-    const after = typeof filters[':after'] === 'string' ? decode(filters[':after']) : null
-    const before = typeof filters[':before'] === 'string' ? decode(filters[':before']) : null
+    const after = typeof filters[':after'] === 'string' ? decodeCursor(filters[':after']) : null
+    const before = typeof filters[':before'] === 'string' ? decodeCursor(filters[':before']) : null
 
     let start = 0
     let end = total
@@ -73,8 +82,8 @@ export function paginateDocs<T extends { id: string }>(sorted: T[], sorters: Sor
         paging: {
             total,
             current: documents.length,
-            ...last && next_count > 0 ? { next: { count: next_count, cursor: encodeCursor(last, sorters) } } : {},
-            ...first && prev_count > 0 ? { prev: { count: prev_count, cursor: encodeCursor(first, sorters) } } : {},
+            ...last && next_count > 0 ? { next: { count: next_count, cursor: encodeCursor(last, sorters, last_index) } } : {},
+            ...first && prev_count > 0 ? { prev: { count: prev_count, cursor: encodeCursor(first, sorters, first_index) } } : {},
         },
     }
 }
