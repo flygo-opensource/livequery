@@ -102,10 +102,6 @@ Reads only subscribe when the client sent `x-lcid`, and pagination requests (`:a
 
 `gateway()` proxies to the service that owns a path prefix, and runs realtime on its behalf.
 
-`routing` is either declared (below) or a function asked on every request. On Node and Bun,
-`discoverServices()` from [`@livequery/discovery`](../discovery/README.md) provides one: services
-announce themselves over UDP and the gateway follows them — `gateway({ routing: directory.routing })`.
-
 ```ts
 import { gateway, errorHandler } from '@livequery/honojs'
 import routing from './routing.json'

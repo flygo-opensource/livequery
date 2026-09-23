@@ -24,20 +24,11 @@ const tick = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 // ─── scenarios ─────────────────────────────────────────────────────────────────
 
 describe('API gateway + service example', () => {
-    for (const discovery of [false, true]) for (const gateway_runtime of ['node', 'bun'] as const) {
+    for (const gateway_runtime of ['node', 'bun'] as const) {
         for (const service_runtime of ['node', 'bun'] as const) {
-            test(`${gateway_runtime} gateway + ${service_runtime} service${discovery ? ' found over UDP' : ''} — CRUD and realtime through the gateway`,
+            test(`${gateway_runtime} gateway + ${service_runtime} service — CRUD and realtime through the gateway`,
                 async () => {
-                    const ports = {
-                        ...makePorts(),
-                        // The service announces itself; the gateway never reads SERVICE_URL. A key
-                        // and port of its own keep the test off any real discovery on the network.
-                        ...discovery ? {
-                            DISCOVERY: 'udp',
-                            SIMPLE_DISCOVERY_KEY: `e2e-${crypto.randomUUID()}`,
-                            SIMPLE_DISCOVERY_PORT: String(30_000 + Math.floor(Math.random() * 20_000)),
-                        } : {},
-                    }
+                    const ports = makePorts()
                     const gateway = start(gateway_runtime, 'gateway.ts', ports)
                     await waitForLine(gateway, '"kind":"gateway"')
                     const service = start(service_runtime, 'service.ts', ports)

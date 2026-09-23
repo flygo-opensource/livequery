@@ -11,8 +11,7 @@
 import { Hono } from 'hono'
 import * as z from 'zod/mini'
 import { errorHandler, livequery, realtime, serve, validator } from '@livequery/honojs'
-import { announceService } from '@livequery/discovery'
-import { DISCOVERY, SERVICE_PORT } from './shared/config.ts'
+import { SERVICE_PORT } from './shared/config.ts'
 import { memory } from './shared/memory.ts'
 import { TaskStore } from './shared/TaskStore.ts'
 
@@ -36,15 +35,6 @@ app.get('/livequery/tasks/:id', check, livequery(), source, realtime())
 app.put('/livequery/tasks/:id', check, livequery(), source, realtime())
 app.patch('/livequery/tasks/:id', check, livequery(), source, realtime())
 app.delete('/livequery/tasks/:id', livequery(), source, realtime())
-
-if (DISCOVERY) {
-    // Tell gateways it is here and which prefixes it owns (its /livequery routes), once. Gateways
-    // then keep a connection to it: when this process ends — even killed — they drop it.
-    const announced = await announceService({ name: 'tasks', port: SERVICE_PORT, app })
-    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-        process.once(signal, () => void announced.close().finally(() => process.exit(0)))
-    }
-}
 
 console.log(JSON.stringify({ event: 'ready', kind: 'service', port: SERVICE_PORT }))
 export default serve(app, { port: SERVICE_PORT })

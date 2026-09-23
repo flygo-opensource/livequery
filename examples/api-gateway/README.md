@@ -42,23 +42,6 @@ Muốn chuyển sang Cloudflare thì `service.ts` giữ nguyên, chỉ đổi `m
 Gateway chỉ biết **tiền tố** `/livequery/tasks` thuộc service nào. Thêm `/livequery/tasks/:id/comments`
 hay một action `~complete` vào `service.ts` là dùng được ngay, không cần khởi động lại gateway.
 
-## Gateway tự nhận biết service (UDP)
-
-Trên Node/Bun (Linux), đặt `DISCOVERY=udp` và cùng một `SIMPLE_DISCOVERY_KEY` cho cả hai process:
-service tự thông báo tên, cổng và các route `/livequery/*` của nó qua
-[`@livequery/discovery`](../../packages/discovery/README.md), gateway học từ đó thay vì đọc
-`routing.json`. Thêm service, hay chạy thêm instance, không phải sửa gateway; các instance cùng tên
-chia tải lần lượt. Không có heartbeat: service thông báo một lần, gateway tự mở một kết nối TCP tới
-nó và giữ kết nối đó — service dừng, crash hay bị kill thì kết nối đóng và gateway gỡ ngay; mất kết
-nối mà service vẫn sống thì gateway tự nối lại.
-
-```bash
-DISCOVERY=udp SIMPLE_DISCOVERY_KEY=bi-mat node api-gateway/service.ts
-DISCOVERY=udp SIMPLE_DISCOVERY_KEY=bi-mat bun  api-gateway/gateway.ts
-```
-
-Cloudflare giữ routing khai báo (Service Binding), không dùng discovery.
-
 ## Biến môi trường
 
 | Tên | Mặc định | Ý nghĩa |
@@ -66,8 +49,6 @@ Cloudflare giữ routing khai báo (Service Binding), không dùng discovery.
 | `GATEWAY_PORT` | `8080` | Port của gateway |
 | `SERVICE_PORT` | `8081` | Port của service |
 | `SERVICE_URL` | `http://127.0.0.1:8081` | Địa chỉ gateway dùng để gọi service, ghi đè giá trị trong `routing.json` |
-| `DISCOVERY` | – | `udp`: service tự thông báo, gateway tự nhận biết (bỏ qua `routing.json`, `SERVICE_URL`) |
-| `SIMPLE_DISCOVERY_KEY` | – | Khoá ký gói discovery, giống nhau ở gateway và service. Luôn đặt khi dùng `DISCOVERY` |
 
 ## Test
 
@@ -75,7 +56,7 @@ Cloudflare giữ routing khai báo (Service Binding), không dùng discovery.
 bun test api-gateway/e2e.test.ts
 ```
 
-Chạy đủ bốn tổ hợp gateway/service trên Node và Bun, mỗi tổ hợp hai lần: routing khai báo và `DISCOVERY=udp` (khoá, cổng UDP riêng cho mỗi lần chạy). Mỗi lần kiểm tra: CRUD qua gateway,
+Chạy đủ bốn tổ hợp gateway/service trên Node và Bun. Mỗi tổ hợp kiểm tra: CRUD qua gateway,
 realtime `added`/`modified`/`removed` tới client, giá trị mặc định của schema, từ chối field lạ và
 dữ liệu sai, 404 cho path không service nào sở hữu, header nội bộ bị xóa, và CORS preflight.
 

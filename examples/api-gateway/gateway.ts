@@ -12,20 +12,17 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { LIVEQUERY_REALTIME_PATH, type ServiceRouting } from '@livequery/core'
 import { errorHandler, gateway, realtimeGateway, serve } from '@livequery/honojs'
-import { discoverServices } from '@livequery/discovery'
-import { DISCOVERY, GATEWAY_PORT, SERVICE_URL } from './shared/config.ts'
+import { GATEWAY_PORT, SERVICE_URL } from './shared/config.ts'
 import declared from './shared/routing.json' with { type: 'json' }
 
 const realtime = await realtimeGateway()
 
 // Prefix routing: the service owns everything under /livequery/tasks, so it can add routes
-// without a gateway restart. Either declared (routing.json, the address from the environment), or
-// learned from the services' own announcements over UDP — then adding a service, or a second
-// instance of one, needs no gateway change at all.
-const directory = DISCOVERY ? discoverServices() : undefined
-const routing: ServiceRouting | (() => ServiceRouting) = directory
-    ? directory.routing
-    : { ...declared, services: { ...declared.services, tasks: { ...declared.services.tasks, url: SERVICE_URL } } }
+// without a gateway restart. Only the address comes from the environment.
+const routing: ServiceRouting = {
+    ...declared,
+    services: { ...declared.services, tasks: { ...declared.services.tasks, url: SERVICE_URL } },
+}
 
 const app = new Hono()
 app.onError(errorHandler())
@@ -39,8 +36,7 @@ app.use('*', cors({
 
 app.get('/health', c => c.json({ ok: true, kind: 'gateway', gateway_id: realtime.id }))
 app.get(LIVEQUERY_REALTIME_PATH, c => c.text('Expected WebSocket', 426))
-// With discovery, a failed request takes that instance out until its connection is checked again.
-app.use('*', gateway({ routing, realtime, onServiceError: directory?.unreachable }))
+app.use('*', gateway({ routing, realtime }))
 app.notFound(c => c.json({ error: { code: 'NOT_FOUND', message: 'Route not found' } }, 404))
 
 console.log(JSON.stringify({ event: 'ready', kind: 'gateway', port: GATEWAY_PORT }))
