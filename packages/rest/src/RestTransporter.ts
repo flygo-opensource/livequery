@@ -1,5 +1,5 @@
-import { of, firstValueFrom, EMPTY, from } from 'rxjs';
-import { catchError, delay, filter, first, map, mergeMap, take } from 'rxjs/operators';
+import { of, firstValueFrom, EMPTY, from, type Observable } from 'rxjs';
+import { catchError, delay, distinctUntilChanged, filter, first, map, mergeMap, take } from 'rxjs/operators';
 import { merge } from 'rxjs'
 import { Socket } from './Socket.js';
 import type { Doc, LivequeryTransporter, LivequeryResult, LivequeryQueryResult, LivequeryAction, LivequeryFilters } from '@livequery/client'
@@ -86,12 +86,19 @@ export class RestTransporter implements LivequeryTransporter {
 
     private socket: Socket | undefined
 
+    /** Socket connection state; only defined when `ws` is configured. */
+    readonly status$: Observable<{ connected: boolean }> | undefined
+
     constructor(
         private config: RestTransporterConfig
     ) {
         if (config.ws) {
             this.socket = new Socket(config.ws!)
         }
+        this.status$ = this.socket?.pipe(
+            map(s => ({ connected: s.connected })),
+            distinctUntilChanged((a, b) => a.connected === b.connected)
+        )
     }
 
     #buildUrl(req: { ref: string, action?: string, query?: Record<string, any> }) {

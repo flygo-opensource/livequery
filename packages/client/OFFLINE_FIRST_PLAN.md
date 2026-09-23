@@ -5,7 +5,7 @@ build + test xanh độc lập rồi mới sang cái kế. Cập nhật checkbox
 
 - [x] Increment 1 — Sửa write-path (tiên quyết)
 - [x] Increment 2 — `LivequeryIndexedDBStorage` + conformance suite
-- [ ] Increment 3 — Outbox bền vững + drain
+- [x] Increment 3 — Outbox bền vững + drain
 - [ ] Increment 4 — Conflict rebase
 - [ ] Increment 5 — Refetch khi reconnect
 - [ ] Increment 6 — Test & docs chốt sổ

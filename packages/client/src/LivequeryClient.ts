@@ -1,11 +1,13 @@
 import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
-import type { DataChangeEvent, LivequeryAction, Doc, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
+import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
+import { LIVEQUERY_OUTBOX_REF, LivequeryOutbox, type OutboxEntry, type OutboxExecution, type OutboxOperation } from "./LivequeryOutbox.js"
 import { tryCatch } from "./helpers/tryCatch.js"
 import { whenCompleted } from "./helpers/whenCompleted.js"
 import { matchesParsedFilters, parseFilters, type ParsedFilter } from "./helpers/filterDocs.js"
 import { AddLock } from "./helpers/AddLock.js"
+import { isRetryableError } from "./helpers/isRetryableError.js"
 import { uuidv7 } from 'uuidv7'
 
 export type LivequeryClientOptions = {
@@ -60,9 +62,25 @@ type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
 // Fields a user edit can change: not the id, not client metadata.
 const isEditableField = (key: string) => key !== 'id' && !key.startsWith('_')
 
+// What a transporter receives for an add: the document without its id and client metadata.
+const toWritePayload = (doc: Record<string, any>) => Object.fromEntries(Object.entries(doc).filter(([k]) => isEditableField(k)))
+
+const pick = (source: Record<string, any> | null | undefined, keys: string[]) => Object.fromEntries(keys.map(k => [k, source?.[k]]))
+
+const isSameValue = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b)
+
+// `_prev` fields whose current value is not the one just sent: edited again while the write was out.
+const unsentFields = (local: Record<string, any> | null, sent: Record<string, any>) => Object.keys(local?._prev ?? {})
+    .filter(k => !(k in sent) || !isSameValue(local?.[k], sent[k]))
+
+const isNotFound = (e: DocError) => e.status === 404 || e.code === 'NOT_FOUND' || e.code === 'HTTP_404'
+
 
 
 export class LivequeryClient {
+
+    /** Local-first writes waiting for, or on their way to, the transporters. */
+    readonly outbox: LivequeryOutbox
 
     #collections = new Map<CollectionId, CollectionMetadata>()
     #refs = new Map<Ref, Set<CollectionId>>()
@@ -70,9 +88,19 @@ export class LivequeryClient {
     #localSyncingStop$ = new Subject<void>()
     #addLock = new AddLock()
     #running = new Subscription()
+    #subscriptions = new Subscription()
 
     constructor(private readonly config: LivequeryClientConfig) {
+        this.outbox = new LivequeryOutbox({
+            storage: config.storage,
+            execute: entry => this.#execute(entry),
+            onQueued: entries => this.#markQueued(entries),
+            lock: config.storage.shared ? `livequery-outbox:${config.storage.shared}` : undefined,
+        })
         this.#start()
+        this.#watchConnections()
+        // Resumes writes a previous session (a reload, a killed service worker) left queued.
+        Object.keys(config.transporters).length > 0 && this.outbox.start()
     }
 
     #cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
@@ -127,7 +155,6 @@ export class LivequeryClient {
 
     #start() {
 
-        // const collection_errors = new Map<string, { code: string, message: string }>()
         this.#running = merge(
 
             // Server queries
@@ -184,14 +211,7 @@ export class LivequeryClient {
                                             filters: { ':after': next.cursor }
                                         })
                                     }),
-                                    mergeMap((result, index) => {
-                                        // if (index == 0) {
-                                        //     if (result.error) {
-                                        //         collection_errors.set(e.collection.collection_ref, result.error)
-                                        //     } else {
-                                        //         collection_errors.delete(e.collection.collection_ref)
-                                        //     }
-                                        // }
+                                    mergeMap(result => {
                                         return from(this.#broadcast(e.collection.collection_ref, 'query', result)).pipe(
                                             map(() => result)
                                         )
@@ -214,6 +234,17 @@ export class LivequeryClient {
         ).subscribe()
     }
 
+    // A transporter coming (back) online retries the queued writes right away instead of waiting
+    // out the backoff.
+    #watchConnections() {
+        for (const transporter of Object.values(this.config.transporters)) {
+            if (!transporter.status$) continue
+            this.#subscriptions.add(transporter.status$.pipe(
+                filter(s => s.connected)
+            ).subscribe(() => this.outbox.trigger()))
+        }
+    }
+
     /**
      * Đóng mọi local-first sync đang chạy. Lần query kế tiếp của mỗi collection_ref
      * sẽ được fetch lại từ đầu thay vì bị dedup. Gọi khi logout / đổi account.
@@ -226,6 +257,7 @@ export class LivequeryClient {
         const refs = ref.split('/')
         const document_id = refs.length % 2 == 0 ? refs[refs.length - 1] : undefined
         const collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
+        if (collection_ref === LIVEQUERY_OUTBOX_REF) throw new Error(`"${LIVEQUERY_OUTBOX_REF}" is reserved for the outbox`)
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         collections.add(collection_id)
         this.#refs.set(collection_ref, collections)
@@ -258,7 +290,7 @@ export class LivequeryClient {
         const collection = this.#collections.get(req.collection_id)
         if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
 
-        // If document 
+        // If document
         if (collection.document_id) {
             const ids = this.#refs.get(collection.collection_ref)
             const collections = ids ? [...ids].map(id => this.#collections.get(id)).filter(c => c && c.document_id) : []
@@ -318,8 +350,11 @@ export class LivequeryClient {
                 continue
             }
 
-            const cache_key = `${event.collection_ref}/${event.id}`
-            const cached = docs.get(cache_key) || this.config.storage.get(collection.collection_ref, event.id)
+            // A confirmed add moves the document from its `local:` id to the server id: storage
+            // already holds it under the new one.
+            const stored_id = event.data?.id ?? event.id
+            const cache_key = `${event.collection_ref}/${stored_id}`
+            const cached = docs.get(cache_key) || this.config.storage.get(collection.collection_ref, stored_id)
             docs.set(cache_key, cached)
             const doc = await cached
             if (doc && matchesParsedFilters(doc as Record<string, any>, collection.parsedFilters)) {
@@ -337,7 +372,7 @@ export class LivequeryClient {
     }
 
     async #broadcast(collection_ref: string, from: RealtimeChangeSource, e: Partial<LivequeryQueryResult>) {
-        const changes = e.changes || [] 
+        const changes = e.changes || []
         const collections = this.#refs.get(collection_ref) || new Set<CollectionId>()
         const docs = new Map<string, Promise<Doc | null>>()
         for (const collection_id of collections) {
@@ -356,7 +391,7 @@ export class LivequeryClient {
                 continue
             }
 
-            // If local collection 
+            // If local collection
             if (collection.mode == 'local-first' || collection.mode == 'local-only') {
                 const list = await this.#filterLocalEvents(collection, changes, docs)
                 // Is collection
@@ -380,99 +415,19 @@ export class LivequeryClient {
         }
     }
 
-    async #push<T extends Doc>(collection_ref: string, docs: Array<Record<string, any> & { id: string }>, server_first: boolean, context?: Record<string, any>): Promise<DocState<T>[]> {
-        const results = await Promise.all(
-            docs.flatMap(doc =>
-                Object.entries(this.config.transporters).map(async ([tid, transporter]) => {
-                    const id = doc.id
-                    if (String(id).startsWith('local:')) {
-                        using _lock = this.#addLock.acquire(collection_ref)
-                        const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, doc as T, context), tid)
-                        if (e && server_first) throw e
-                        // unlock
-                        const fnd = {
-                            ...data,
-                            _adding: undefined,
-                            ...e ? { _adding_error: e } : {}
-                        }
-                        await this.config.storage.update<T>(collection_ref, id, fnd)
-                        await this.#broadcast(collection_ref, 'action', {
-                            changes: [{
-                                collection_ref,
-                                type: 'modified',
-                                id,
-                                data: fnd
-                            }]
-                        })
-                        return data as DocState<T>
-                    }
-
-                    // _deleting flag → soft-delete on remote then hard-delete locally
-                    if (doc._deleting) {
-                        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id, context), tid)
-                        if (e && server_first) throw e
-                        if (e) {
-                            const fnd = {
-                                _deleting: undefined,
-                                _deleting_error: e
-                            }
-                            await this.config.storage.update<T>(collection_ref, id, fnd)
-                            await this.#broadcast(collection_ref, 'action', {
-                                changes: [{
-                                    collection_ref,
-                                    type: 'modified',
-                                    id,
-                                    data: fnd
-                                }]
-                            })
-                        } else {
-                            await this.config.storage.delete<T>(collection_ref, id)
-                            await this.#broadcast(collection_ref, 'action', {
-                                changes: [{
-                                    collection_ref,
-                                    type: 'removed',
-                                    id
-                                }]
-                            })
-                        }
-                        return data as DocState<T>
-                    }
-
-                    // _prev present → document was updated locally, push changed fields to remote
-                    if (doc._prev && Object.keys(doc._prev).length > 0) {
-                        const changedFields = Object.keys(doc._prev).reduce<Partial<T>>((acc, key) => ({
-                            ...acc,
-                            [key]: doc[key as any as keyof typeof doc]
-                        }), {})
-                        const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, id, changedFields, context), tid)
-                        if (e && server_first) throw e
-                        const fnd = {
-                            _prev: undefined,
-                            _updating: undefined,
-                            _updating_error: e
-                        }
-                        await this.config.storage.update<T>(collection_ref, id, fnd)
-                        await this.#broadcast(collection_ref, 'action', {
-                            changes: [{
-                                collection_ref,
-                                type: 'modified',
-                                id,
-                                data: fnd
-                            }]
-                        })
-                        return data as DocState<T>
-                    }
-                })
-            )
-        )
-        return results.filter(Boolean) as DocState<T>[]
-    }
-
 
     async add<T extends Doc>(collection_ref: string, documents: Partial<DocState<T>>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
-            const list = documents.map(doc => ({ ...doc, id: `local:${uuidv7()}` }))
-            return await this.#push<T>(collection_ref, list as Array<Record<string, any> & { id: string }>, true, context)
+            return await this.#sendNow<T>(documents, async ([tid, transporter], doc) => {
+                // Placeholder id: the add lock and the confirm path address the document by it.
+                const local_id = `local:${uuidv7()}`
+                const payload = toWritePayload(doc)
+                using _lock = this.#addLock.acquire(collection_ref)
+                const [e, data] = await tryCatch(() => transporter.add<T>(collection_ref, payload as T, context), tid)
+                if (e) throw e
+                await this.#confirmAdd(collection_ref, local_id, data as Doc, payload)
+                return data
+            })
         }
         const docs = await Promise.all(documents.map(doc =>
             this.config.storage.add<T>(collection_ref, {
@@ -494,22 +449,24 @@ export class LivequeryClient {
             }
         )
         if (mode === 'local-only') return docs
-        return await this.#push<T>(collection_ref, docs, false, context)
+        return await this.#enqueue<T>(collection_ref, 'add', docs, context)
     }
 
     async update<T extends Doc>(collection_ref: string, documents: ParitalDocState<T>[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
-            // `_prev` holds the values from BEFORE the edit (only its keys drive the payload).
-            const list = await Promise.all(documents.map(async doc => {
-                const old = await this.config.storage.get<T>(collection_ref, doc.id) as Record<string, any> | null
-                const _prev = Object.fromEntries(Object.keys(doc).filter(isEditableField).map(k => [k, old?.[k]]))
-                return { ...doc, _prev }
-            }))
-            return await this.#push<T>(collection_ref, list, true, context)
+            return await this.#sendNow<T>(documents, async ([tid, transporter], doc) => {
+                const fields = toWritePayload(doc)
+                const [e, data] = await tryCatch(() => transporter.update<T>(collection_ref, doc.id, fields as Partial<T>, context), tid)
+                if (e) throw e
+                await this.#confirmUpdate(collection_ref, doc.id, fields)
+                return data
+            })
         }
         const merged = (await Promise.all(documents.map(async doc => {
             const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
             if (!old) return
+            // `_prev` keeps the value from before the FIRST unsent edit of each field: it is both
+            // the set of fields to push and the base the conflict rebase works from.
             const _prev = Object.keys(doc).filter(isEditableField).reduce((acc, key) => {
                 if (key in (old._prev || {})) return acc
                 return { ...acc, [key]: (old as any)[key] }
@@ -529,13 +486,17 @@ export class LivequeryClient {
             }
         )
         if (mode === 'local-only') return merged
-        return await this.#push<T>(collection_ref, merged, false, context)
+        return await this.#enqueue<T>(collection_ref, 'update', merged, context)
     }
 
     async delete<T extends Doc>(collection_ref: string, ids: string[], mode: ActionMode, context?: Record<string, any>) {
         if (mode == 'server-first') {
-            const list = ids.map(id => ({ id, _deleting: true }))
-            return await this.#push<T>(collection_ref, list, true, context)
+            return await this.#sendNow<T>(ids.map(id => ({ id })), async ([tid, transporter], { id }) => {
+                const [e, data] = await tryCatch(() => transporter.delete<T>(collection_ref, id, context), tid)
+                if (e) throw e
+                await this.#confirmDelete(collection_ref, id)
+                return data
+            })
         }
         const soft = Object.keys(this.config.transporters).length > 0
         const merged = (await Promise.all(ids.map(async id => {
@@ -577,7 +538,9 @@ export class LivequeryClient {
 
 
         if (mode == 'local-only') return merged
-        return await this.#push<T>(collection_ref, merged, false, context)
+        // For a `local:` document the outbox drops the unsent add, or deletes it on the server
+        // once an add already in flight comes back with the real id.
+        return await this.#enqueue<T>(collection_ref, 'delete', merged, context)
     }
 
     trigger<Response>(action: LivequeryAction) {
@@ -592,11 +555,142 @@ export class LivequeryClient {
     }
 
     async flush(collection_ref: string) {
+        const pending = await this.outbox.pending()
+        pending.length > 0 && console.warn(`livequery: flush() drops ${pending.length} write(s) that never reached the server`)
         await this.#broadcast(collection_ref, 'realtime', { changes: [{ collection_ref, id: '*', type: 'removed' }] })
-        return this.config.storage.flush()
+        await this.config.storage.flush()
+        this.outbox.cleared()
     }
 
     destroy() {
         this.#running.unsubscribe()
+        this.#subscriptions.unsubscribe()
+        this.outbox.stop()
+    }
+
+    // ── Write path ─────────────────────────────────────────────────────────────
+
+    // server-first: send to every transporter right away and throw on the first failure.
+    async #sendNow<T extends Doc>(
+        docs: Array<Record<string, any>>,
+        send: (transporter: [string, LivequeryTransporter], doc: Record<string, any> & { id: string }) => Promise<unknown>,
+    ): Promise<DocState<T>[]> {
+        const results = await Promise.all(docs.flatMap(doc =>
+            Object.entries(this.config.transporters).map(entry => send(entry, doc as Record<string, any> & { id: string }))
+        ))
+        return results.filter(Boolean) as DocState<T>[]
+    }
+
+    // local-first: the outbox sends the write. Resolve with the server's answer, or with the local
+    // document when the write is stuck behind a network failure.
+    async #enqueue<T extends Doc>(collection_ref: string, op: OutboxOperation, docs: Array<{ id: string }>, context?: Record<string, any>) {
+        const results = await Promise.all(docs.flatMap(doc =>
+            Object.keys(this.config.transporters).map(async transporter_id => {
+                const settlement = await this.outbox.enqueue({ transporter_id, collection_ref, op, doc_id: doc.id, context })
+                if (settlement.status === 'done') return settlement.data
+                if (settlement.status === 'queued') return await this.config.storage.get<T>(collection_ref, doc.id) ?? doc
+            })
+        ))
+        return results.filter(Boolean) as DocState<T>[]
+    }
+
+    async #execute(entry: OutboxEntry): Promise<OutboxExecution> {
+        const { transporter_id: tid, collection_ref, doc_id: id, context } = entry
+        const transporter = this.config.transporters[tid]
+        if (!transporter) {
+            return { status: 'failed', error: { code: 'TRANSPORTER_NOT_FOUND', message: `No transporter "${tid}"`, transporter_id: tid } }
+        }
+        const doc = await this.config.storage.get<DocState<Doc>>(collection_ref, id)
+
+        if (entry.op === 'add') {
+            // Deleted locally before it was sent.
+            if (!doc) return { status: 'done' }
+            const payload = toWritePayload(doc)
+            using _lock = this.#addLock.acquire(collection_ref)
+            const [e, data] = await tryCatch(() => transporter.add(collection_ref, payload as Doc, context), tid)
+            if (e) return await this.#failed(entry, e)
+            await this.#confirmAdd(collection_ref, id, data as Doc, payload)
+            return { status: 'done', data }
+        }
+
+        if (entry.op === 'update') {
+            const fields = pick(doc, Object.keys(doc?._prev ?? {}))
+            // An earlier write already carried these fields.
+            if (Object.keys(fields).length === 0) return { status: 'done' }
+            const [e, data] = await tryCatch(() => transporter.update(collection_ref, id, fields, context), tid)
+            if (e) return await this.#failed(entry, e)
+            await this.#confirmUpdate(collection_ref, id, fields)
+            return { status: 'done', data }
+        }
+
+        const [e, data] = await tryCatch(() => transporter.delete(collection_ref, id, context), tid)
+        // Already gone on the server is what a replayed delete wants.
+        if (e && !isNotFound(e)) return await this.#failed(entry, e)
+        await this.#confirmDelete(collection_ref, id)
+        return { status: 'done', data }
+    }
+
+    async #failed(entry: OutboxEntry, e: DocError): Promise<OutboxExecution> {
+        if (isRetryableError(e)) return { status: 'retry', error: e }
+        const flags = {
+            add: { _adding: undefined, _adding_error: e },
+            update: { _prev: undefined, _updating: undefined, _updating_error: e },
+            delete: { _deleting: undefined, _deleting_error: e },
+        }[entry.op]
+        await this.#patchLocal(entry.collection_ref, entry.doc_id, { ...flags, _queued: undefined })
+        return { status: 'failed', error: e }
+    }
+
+    async #confirmAdd(collection_ref: string, local_id: string, data: Doc, sent: Record<string, any>) {
+        const local = await this.config.storage.get<DocState<Doc>>(collection_ref, local_id)
+        // Fields edited again after the add went out are still unsent: keep them and their `_prev`.
+        const unsent = unsentFields(local, sent)
+        const fnd = {
+            ...data,
+            ...pick(local, unsent),
+            _adding: undefined,
+            _adding_error: undefined,
+            _queued: undefined,
+            _prev: unsent.length > 0 ? pick(local?._prev, unsent) : undefined,
+            _updating: unsent.length > 0 ? true : undefined,
+        }
+        await this.config.storage.update(collection_ref, local_id, fnd)
+        data?.id && await this.outbox.remap(collection_ref, local_id, data.id)
+        await this.#broadcast(collection_ref, 'action', {
+            changes: [{ collection_ref, type: 'modified', id: local_id, data: fnd }]
+        })
+    }
+
+    async #confirmUpdate(collection_ref: string, id: string, sent: Record<string, any>) {
+        const local = await this.config.storage.get<DocState<Doc>>(collection_ref, id)
+        const unsent = unsentFields(local, sent)
+        await this.#patchLocal(collection_ref, id, {
+            _prev: unsent.length > 0 ? pick(local?._prev, unsent) : undefined,
+            _updating: unsent.length > 0 ? true : undefined,
+            _updating_error: undefined,
+            _queued: undefined,
+        })
+    }
+
+    async #confirmDelete(collection_ref: string, id: string) {
+        await this.config.storage.delete(collection_ref, id)
+        await this.#broadcast(collection_ref, 'action', {
+            changes: [{ collection_ref, type: 'removed', id }]
+        })
+    }
+
+    async #markQueued(entries: OutboxEntry[]) {
+        for (const entry of entries) {
+            const doc = await this.config.storage.get<DocState<Doc>>(entry.collection_ref, entry.doc_id)
+            if (!doc || doc._queued) continue
+            await this.#patchLocal(entry.collection_ref, entry.doc_id, { _queued: true })
+        }
+    }
+
+    async #patchLocal(collection_ref: string, id: string, fnd: Record<string, any>) {
+        await this.config.storage.update(collection_ref, id, fnd)
+        await this.#broadcast(collection_ref, 'action', {
+            changes: [{ collection_ref, type: 'modified', id, data: fnd }]
+        })
     }
 }

@@ -20,4 +20,10 @@ export type LivequeryTransporter = {
     update<T extends Doc>(ref: string, id: string, doc: Partial<T>, context?: Record<string, any>): Promise<T>
     delete<T extends Doc>(ref: string, id: string, context?: Record<string, any>): Promise<T>
     trigger<T>(action: LivequeryAction): Promise<T>
+    /**
+     * Connection state, for transporters that hold a connection (a realtime socket). The client
+     * retries queued writes when it turns `connected`, and refetches live queries on a REconnect —
+     * realtime events sent while the connection was down are lost.
+     */
+    status$?: Observable<{ connected: boolean }>
 }
