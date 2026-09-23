@@ -1,4 +1,4 @@
-import { defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
+import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
@@ -41,6 +41,12 @@ export type ConflictResolverFunction = <T extends Doc>(e: {
 export type LivequeryClientConfig = {
     storage: LivequeryStorage
     transporters: Record<string, LivequeryTransporter>
+    /**
+     * Decides what to keep when a remote change reaches a document with local edits not yet
+     * confirmed. Without one, the local value of each edited field wins until its write is
+     * confirmed, and every other field takes the remote value.
+     */
+    conflictResolver?: ConflictResolverFunction
 }
 
 export type ActionMode = 'server-first' | 'local-first' | 'local-only'
@@ -72,6 +78,15 @@ const isSameValue = (a: unknown, b: unknown) => a === b || JSON.stringify(a) ===
 // `_prev` fields whose current value is not the one just sent: edited again while the write was out.
 const unsentFields = (local: Record<string, any> | null, sent: Record<string, any>) => Object.keys(local?._prev ?? {})
     .filter(k => !(k in sent) || !isSameValue(local?.[k], sent[k]))
+
+// Remote values, except the fields the user edited and has not had confirmed yet.
+const rebase = (local: Record<string, any>, remote: Record<string, any>) => {
+    const data = { ...remote }
+    for (const key of Object.keys(local._prev ?? {})) {
+        if (key in data) data[key] = local[key]
+    }
+    return data
+}
 
 const isNotFound = (e: DocError) => e.status === 404 || e.code === 'NOT_FOUND' || e.code === 'HTTP_404'
 
@@ -108,19 +123,19 @@ export class LivequeryClient {
         const clear = () => deduplicate_key && this.#cache.delete(deduplicate_key)
         const cached = deduplicate_key && this.#cache.get(deduplicate_key)
         if (cached) return Object.assign(cached, { clear })
-        const $ = from(Object.values(this.config.transporters)).pipe(
-            mergeMap(transporter => (
+        const $ = from(Object.entries(this.config.transporters)).pipe(
+            mergeMap(([transporter_id, transporter]) => (
                 transporter.query(e).pipe(
-                    mergeMap(async result => {
-                        for (const change of result.changes || []) {
-                            change.type == 'added' && change.data && await this.config.storage.add(change.collection_ref, {
-                                id: change.data.id,
-                                ...change.data
-                            })
-                            change.type == 'modified' && change.data && await this.config.storage.update(change.collection_ref, change.id, change.data)
-                            change.type == 'removed' && await this.config.storage.delete(change.collection_ref, change.id)
+                    // concatMap: storage writes of one emission finish before the next starts, so
+                    // an async storage cannot reorder a `modified` after the `removed` that follows it.
+                    concatMap(async result => {
+                        if (!result.changes) return result
+                        const changes: DataChangeEvent[] = []
+                        for (const change of result.changes) {
+                            const ingested = await this.#ingestRemoteChange(transporter_id, change)
+                            ingested && changes.push(ingested)
                         }
-                        return result
+                        return { ...result, changes }
                     }),
                     map((result, index) => ({ result, index })),
                     mergeMap(({ result, index }) => {
@@ -566,6 +581,44 @@ export class LivequeryClient {
         this.#running.unsubscribe()
         this.#subscriptions.unsubscribe()
         this.outbox.stop()
+    }
+
+    // ── Read path ──────────────────────────────────────────────────────────────
+
+    // Every change a transporter reports — query results and realtime alike — is written to
+    // storage here, BEFORE anyone sees it. A document with unconfirmed local edits is rebased:
+    // the edited fields keep their local value, the rest takes the remote one. The returned change
+    // is what collections receive; null drops it.
+    async #ingestRemoteChange(transporter_id: string, change: DataChangeEvent): Promise<DataChangeEvent | null> {
+        const storage = this.config.storage
+        const { collection_ref, id } = change
+        if (change.type === 'removed') {
+            // The server no longer has it: a pending local edit cannot bring it back.
+            await storage.delete(collection_ref, id)
+            return change
+        }
+        if (!change.data) return change
+
+        const local = await storage.get<DocState<Doc>>(collection_ref, id)
+        if (!local?._prev && !local?._deleting) {
+            if (change.type === 'added') {
+                await storage.add(collection_ref, { id: change.data.id, ...change.data })
+            } else {
+                await storage.update(collection_ref, id, change.data)
+            }
+            return change
+        }
+
+        // The user already chose to delete it; the delete goes out and wins.
+        if (local._deleting && change.type === 'modified') return null
+
+        const resolver = this.config.conflictResolver
+        const resolved = resolver
+            ? resolver({ from: { transporter_id }, old_document: local, change })
+            : { approved: true, document: rebase(local, change.data) }
+        if (!resolved.approved) return null
+        const stored = await storage.update(collection_ref, id, resolved.document)
+        return { ...change, data: change.type === 'added' ? stored ?? resolved.document : resolved.document }
     }
 
     // ── Write path ─────────────────────────────────────────────────────────────
