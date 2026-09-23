@@ -1,4 +1,4 @@
-import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, takeUntil, takeWhile, tap } from "rxjs"
+import { concatMap, defer, EMPTY, expand, filter, finalize, forkJoin, from, groupBy, lastValueFrom, map, merge, mergeMap, Observable, of, scan, shareReplay, Subject, Subscription, switchMap, take, takeUntil, takeWhile, tap, toArray } from "rxjs"
 import type { LivequeryStorage } from "./LivequeryStorage.js"
 import type { LivequeryQueryResult, LivequeryTransporter } from "./LivequeryTransporter.js"
 import type { DataChangeEvent, LivequeryAction, Doc, DocError, LivequeryQueryParams, DocState, LivequeryFilters, RealtimeChangeSource, ParitalDocState } from "./types.js"
@@ -61,9 +61,13 @@ export type CollectionMetadata = {
     mode: 'server-first' | 'local-first' | 'cache-first' | 'local-only'
     filters: Partial<LivequeryFilters<any>>
     parsedFilters: ParsedFilter[]
+    /** The last first-page query, re-run when a transporter reconnects. */
+    last_query?: LivequeryQueryParams<any> & { collection_id: string }
 }
 
-type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata }
+type Query = LivequeryQueryParams<any> & { collection: CollectionMetadata, refetch?: boolean }
+
+const isFirstPageQuery = (filters?: Record<string, any>) => !filters?.[':after'] && !filters?.[':before'] && !filters?.[':around']
 
 // Fields a user edit can change: not the id, not client metadata.
 const isEditableField = (key: string) => key !== 'id' && !key.startsWith('_')
@@ -87,6 +91,9 @@ const rebase = (local: Record<string, any>, remote: Record<string, any>) => {
     }
     return data
 }
+
+// Exists only on this device so far: a refetch that does not see it must not remove it.
+const isUnsynced = (doc: Record<string, any>) => String(doc.id).startsWith('local:') || !!doc._adding || !!doc._local_only
 
 const isNotFound = (e: DocError) => e.status === 404 || e.code === 'NOT_FOUND' || e.code === 'HTTP_404'
 
@@ -120,10 +127,13 @@ export class LivequeryClient {
 
     #cache = new Map<string, Observable<Partial<LivequeryQueryResult>>>()
     #query(e: Query, deduplicate_key?: string) {
-        const clear = () => deduplicate_key && this.#cache.delete(deduplicate_key)
         const cached = deduplicate_key && this.#cache.get(deduplicate_key)
-        if (cached) return Object.assign(cached, { clear })
-        const $ = from(Object.entries(this.config.transporters)).pipe(
+        if (cached) return cached
+        // A refetch may have replaced this entry; only drop it while it is still ours.
+        const clear = () => {
+            deduplicate_key && this.#cache.get(deduplicate_key) === $ && this.#cache.delete(deduplicate_key)
+        }
+        const $: Observable<Partial<LivequeryQueryResult>> = from(Object.entries(this.config.transporters)).pipe(
             mergeMap(([transporter_id, transporter]) => (
                 transporter.query(e).pipe(
                     // concatMap: storage writes of one emission finish before the next starts, so
@@ -165,7 +175,7 @@ export class LivequeryClient {
             shareReplay({ bufferSize: 1, refCount: true })
         )
         deduplicate_key && this.#cache.set(deduplicate_key, $)
-        return Object.assign($, { clear })
+        return $
     }
 
     #start() {
@@ -181,17 +191,25 @@ export class LivequeryClient {
                     const after = e.filters?.[':after']
                     const around = e.filters?.[':around']
                     const loading = ((!before && !after) || (before && after) || around) ? 'all' : (before ? 'prev' : 'next')
-                    e.collection.data$.next({
+                    // A background refetch keeps the list on screen instead of flashing a spinner.
+                    !e.refetch && e.collection.data$.next({
                         from: 'query',
                         loading: e.collection.document_id ? 'all' : loading
                     })
                     return this.#query(e, deduplicate_key).pipe(
                         takeUntil(whenCompleted(e.collection.data$)),
+                        // A new first-page query of the same collection (new filters, a refetch)
+                        // replaces this stream and its realtime subscription. Kept alive, every
+                        // re-query would add one more stream and realtime events would multiply.
+                        takeUntil(this.#queries$.pipe(
+                            filter(next => next.collection === e.collection && isFirstPageQuery(next.filters))
+                        )),
                         tap(result => {
                             e.collection.data$.next({
                                 ...result,
                                 from: 'query',
-                                loading: null
+                                loading: null,
+                                ...e.refetch ? { refetch: true } : {}
                             })
                         })
                     )
@@ -249,14 +267,46 @@ export class LivequeryClient {
         ).subscribe()
     }
 
-    // A transporter coming (back) online retries the queued writes right away instead of waiting
-    // out the backoff.
+    // A transporter coming online retries the queued writes right away instead of waiting out the
+    // backoff. Coming back after a drop also refetches live queries: realtime events sent while
+    // the connection was down are gone for good.
     #watchConnections() {
         for (const transporter of Object.values(this.config.transporters)) {
             if (!transporter.status$) continue
             this.#subscriptions.add(transporter.status$.pipe(
-                filter(s => s.connected)
-            ).subscribe(() => this.outbox.trigger()))
+                scan((state, { connected }) => ({
+                    connected,
+                    seen: state.seen || connected,
+                    reconnected: connected && state.seen && !state.connected,
+                }), { connected: false, seen: false, reconnected: false }),
+                filter(state => state.connected)
+            ).subscribe(state => {
+                this.outbox.trigger()
+                state.reconnected && this.refetch()
+            }))
+        }
+    }
+
+    /**
+     * Re-run the last first-page query of every live collection and reconcile the result with
+     * what is on screen. Called automatically when a transporter reconnects.
+     */
+    refetch() {
+        this.#cache.clear()
+        const local_groups = new Set<string>()
+        for (const collection of this.#collections.values()) {
+            const last = collection.last_query
+            if (!last) continue
+            if (collection.mode === 'server-first' || collection.mode === 'cache-first') {
+                this.#queries$.next({ ...last, collection, refetch: true })
+                continue
+            }
+            if (collection.mode !== 'local-first') continue
+            // Local-first collections of one ref share their sync; fetch it once.
+            const key = `${collection.collection_ref}/${collection.document_id ?? '::'}`
+            if (local_groups.has(key)) continue
+            local_groups.add(key)
+            this.#refetchLocal({ ...last, collection }).catch(e => console.error('livequery: refetch failed', e))
         }
     }
 
@@ -304,6 +354,7 @@ export class LivequeryClient {
     async query<T extends Doc>(req: LivequeryQueryParams<T> & { collection_id: string }) {
         const collection = this.#collections.get(req.collection_id)
         if (!collection) throw new Error(`Collection with id ${req.collection_id} not found`)
+        if (isFirstPageQuery(req.filters)) collection.last_query = req
 
         // If document
         if (collection.document_id) {
@@ -619,6 +670,32 @@ export class LivequeryClient {
         if (!resolved.approved) return null
         const stored = await storage.update(collection_ref, id, resolved.document)
         return { ...change, data: change.type === 'added' ? stored ?? resolved.document : resolved.document }
+    }
+
+    // One-shot re-read of a local-first sync, every page. The long-lived sync keeps running; this
+    // only repairs what it missed. Documents the server no longer returns are removed locally.
+    async #refetchLocal(e: Query) {
+        const count = Object.keys(this.config.transporters).length
+        // No filters: a first-page read without opening another realtime subscription.
+        const read = (filters?: Record<string, any>) => this.#query({ ...e, filters }).pipe(take(count))
+        const pages = await lastValueFrom(read().pipe(
+            expand(page => page.paging?.next ? read({ ':after': page.paging.next.cursor }) : EMPTY),
+            toArray()
+        ))
+        // A partial read cannot tell deleted from not-yet-fetched.
+        if (pages.some(page => page.error)) return
+        const { collection_ref, document_id } = e.collection
+        const changes = pages.flatMap(page => page.changes ?? [])
+        if (!document_id) {
+            const seen = new Set(changes.map(change => change.id))
+            const { documents } = await this.config.storage.query<DocState<Doc>>(collection_ref)
+            for (const doc of documents) {
+                if (seen.has(doc.id) || isUnsynced(doc)) continue
+                await this.config.storage.delete(collection_ref, doc.id)
+                changes.push({ collection_ref, id: doc.id, type: 'removed' })
+            }
+        }
+        await this.#broadcast(collection_ref, 'query', { changes, refetch: true })
     }
 
     // ── Write path ─────────────────────────────────────────────────────────────

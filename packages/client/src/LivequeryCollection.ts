@@ -152,8 +152,9 @@ export class LivequeryCollection<T extends Doc> {
                         return
                     }
 
-                    if (!event.changes || event.changes.length == 0) return
-                    const chaos = event.changes && event.changes.some(change => {
+                    const changes = event.refetch ? this.#reconcile(event.changes ?? []) : event.changes
+                    if (!changes || changes.length == 0) return
+                    const chaos = changes.some(change => {
                         if (change.type == 'added' || change.type == 'removed') return true
                         if (change.data && change.data.id && change.data.id != change.id) return true
                         return Object.keys(change.data || {}).some(k => this.#keys.has(k as keyof T))
@@ -175,7 +176,7 @@ export class LivequeryCollection<T extends Doc> {
                         return a.value.id.localeCompare(b.value.id)
                     }
 
-                    const events = event.changes.reduce((p, c) => {
+                    const events = changes.reduce((p, c) => {
                         return {
                             ...p,
                             [c.type]: [
@@ -219,12 +220,12 @@ export class LivequeryCollection<T extends Doc> {
                             )
                     )
 
-                    const remove_indexes = (
+                    // Deduplicated: removing the same index twice would cut out its neighbour.
+                    const remove_indexes = [...new Set(
                         events.removed
                             .map(r => this.#indexes.get(r.id))
                             .filter(i => i != undefined)
-                            .sort((a, b) => b - a)
-                    )
+                    )].sort((a, b) => b - a)
 
                     const unsort_items = remove_indexes.reduce((p, index) => {
                         return [
@@ -244,6 +245,20 @@ export class LivequeryCollection<T extends Doc> {
         return this.#subscription
     }
 
+
+    // A refetch is a complete re-read: update what we hold, drop what it no longer contains, but
+    // keep documents that exist only on this device.
+    #reconcile(changes: DataChangeEvent[]): DataChangeEvent[] {
+        const mentioned = new Set(changes.map(c => c.id))
+        const reconciled = changes.map(c => c.type === 'added' && this.#indexes.has(c.id) ? { ...c, type: 'modified' as const } : c)
+        for (const item of this.items.value) {
+            const doc = item.value
+            const unsynced = String(doc.id).startsWith('local:') || doc._adding || doc._local_only
+            if (mentioned.has(doc.id) || unsynced) continue
+            reconciled.push({ collection_ref: this.collection_ref ?? '', id: doc.id, type: 'removed' })
+        }
+        return reconciled
+    }
 
     async #query(raw_filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.ref) return

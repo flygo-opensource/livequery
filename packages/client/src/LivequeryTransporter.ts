@@ -10,6 +10,11 @@ export type LivequeryQueryResult = {
     metadata: Record<string, any>
     source: 'query' | 'action' | 'realtime'
     loading?: 'all' | 'next' | 'prev' | null
+    /**
+     * The changes are a complete re-read after a reconnect: collections update the documents they
+     * hold and drop the ones the result no longer contains.
+     */
+    refetch?: boolean
 }
 
 
