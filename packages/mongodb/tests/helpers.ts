@@ -8,11 +8,15 @@ export type MockCollection = {
     insertOneCalls: any[]
     updateOneCalls: Array<{ filter: any, update: any }>
     deleteOneCalls: any[]
+    findOneAndUpdateCalls: Array<{ filter: any, update: any, options: any }>
+    /** What `findOneAndUpdate` answers; a pipeline `$set` of `$$NOW` shows as this clock. */
+    dbNow: number
     aggregateResponse: AggregateResponse
     aggregate: (pipeline: any[]) => { toArray: () => Promise<any[]> }
     insertOne: (doc: any) => Promise<{ insertedId: ObjectId }>
     updateOne: (filter: any, update: any) => Promise<{ acknowledged: boolean, matchedCount: number, modifiedCount: number }>
     deleteOne: (filter: any) => Promise<{ acknowledged: boolean, deletedCount: number }>
+    findOneAndUpdate: (filter: any, update: any, options?: any) => Promise<any>
 }
 
 export function createMockCollection(name = 'items', aggregateResponse: AggregateResponse = []) {
@@ -22,6 +26,8 @@ export function createMockCollection(name = 'items', aggregateResponse: Aggregat
         insertOneCalls: [],
         updateOneCalls: [],
         deleteOneCalls: [],
+        findOneAndUpdateCalls: [],
+        dbNow: 1_790_000_000_000,
         aggregateResponse,
         aggregate(pipeline: any[]) {
             collection.aggregateCalls.push(pipeline)
@@ -36,6 +42,18 @@ export function createMockCollection(name = 'items', aggregateResponse: Aggregat
         async updateOne(filter: any, update: any) {
             collection.updateOneCalls.push({ filter, update })
             return { acknowledged: true, matchedCount: 1, modifiedCount: 1 }
+        },
+        // Applies a pipeline's `$set` stages to `{ _id }`: literals unwrapped, `$$NOW` as dbNow.
+        async findOneAndUpdate(filter: any, update: any, options: any = {}) {
+            collection.findOneAndUpdateCalls.push({ filter, update, options })
+            const doc: Record<string, any> = { _id: filter._id ?? new ObjectId('507f1f77bcf86cd799439011') }
+            for (const stage of Array.isArray(update) ? update : []) {
+                for (const [key, value] of Object.entries(stage.$set ?? {})) {
+                    doc[key] = (value as any)?.$literal !== undefined ? (value as any).$literal
+                        : JSON.stringify(value) === JSON.stringify({ $toLong: '$$NOW' }) ? collection.dbNow : value
+                }
+            }
+            return doc
         },
         async deleteOne(filter: any) {
             collection.deleteOneCalls.push(filter)

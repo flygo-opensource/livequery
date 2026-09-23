@@ -24,24 +24,40 @@ function setup() {
 const matchOf = (pipeline: any[]) => JSON.stringify(pipeline.filter(stage => stage.$match))
 
 describe('MongoDatasource sync routes', () => {
-    test('writes stamp updated_at', async () => {
+    test('writes take updated_at from the database clock', async () => {
+        const { messages, datasource } = setup()
+        const added = await datasource.query(request({ method: 'post', body: { text: 'hi', price: '$100' } }) as any, { collection: 'messages', sync: true }) as any
+        const insert = messages.findOneAndUpdateCalls[0]!
+        // An upsert no existing document can match: a taken _id still fails as a duplicate.
+        expect(Object.keys(insert.filter)).toEqual(['_id', '__livequery_inserting'])
+        expect(insert.options).toMatchObject({ upsert: true, returnDocument: 'after' })
+        expect(insert.update[0].$set).toMatchObject({ text: { $literal: 'hi' }, price: { $literal: '$100' }, updated_at: { $toLong: '$$NOW' } })
+        expect(insert.update[1]).toEqual({ $unset: '__livequery_inserting' })
+        expect(messages.insertOneCalls).toHaveLength(0)
+        expect(added.item).toMatchObject({ text: 'hi', price: '$100', updated_at: messages.dbNow, id: expect.any(String) })
+
+        messages.dbNow++
+        const updated = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'hey' } }) as any, { collection: 'messages', sync: true }) as any
+        const patch = messages.findOneAndUpdateCalls[1]!
+        expect(patch.filter).toEqual({ _id: ObjectId.createFromHexString(id), deleted_at: null })
+        expect(patch.update[0].$set).toEqual({ text: { $literal: 'hey' }, updated_at: { $toLong: '$$NOW' } })
+        expect(updated.item).toMatchObject({ id, text: 'hey', updated_at: messages.dbNow })
+    })
+
+    test('an operator body is stamped by the server instead', async () => {
         const { messages, datasource } = setup()
         const before = Date.now()
-        const added = await datasource.query(request({ method: 'post', body: { text: 'hi' } }) as any, { collection: 'messages', sync: true }) as any
-        expect(messages.insertOneCalls[0].updated_at).toBeGreaterThanOrEqual(before)
-        expect(added.item.updated_at).toBe(messages.insertOneCalls[0].updated_at)
-
-        const updated = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { text: 'hey' } }) as any, { collection: 'messages', sync: true }) as any
-        expect(messages.updateOneCalls[0].filter).toEqual({ _id: ObjectId.createFromHexString(id), deleted_at: null })
-        expect(messages.updateOneCalls[0].update.$set).toMatchObject({ text: 'hey', updated_at: updated.item.updated_at })
+        const updated = await datasource.query(request({ method: 'patch', is_collection: false, document_id: id, keys: { id }, body: { $inc: { likes: 1 } } }) as any, { collection: 'messages', sync: true }) as any
+        expect(messages.updateOneCalls[0]!.update).toMatchObject({ $inc: { likes: 1 }, $set: { updated_at: expect.any(Number) } })
+        expect(updated.item.updated_at).toBeGreaterThanOrEqual(before)
     })
 
     test('a delete leaves a tombstone', async () => {
         const { messages, datasource } = setup()
         const deleted = await datasource.query(request({ method: 'delete', is_collection: false, document_id: id, keys: { id } }) as any, { collection: 'messages', sync: true }) as any
         expect(messages.deleteOneCalls).toHaveLength(0)
-        expect(messages.updateOneCalls[0].update.$set).toEqual({ deleted_at: deleted.item.deleted_at, updated_at: deleted.item.deleted_at })
-        expect(deleted.item).toMatchObject({ id, deleted_at: expect.any(Number) })
+        expect(messages.findOneAndUpdateCalls[0]!.update[0].$set).toEqual({ deleted_at: { $toLong: '$$NOW' }, updated_at: { $toLong: '$$NOW' } })
+        expect(deleted.item).toMatchObject({ id, deleted_at: messages.dbNow, updated_at: messages.dbNow })
     })
 
     test('reads hide tombstones unless a delta asks for them', async () => {

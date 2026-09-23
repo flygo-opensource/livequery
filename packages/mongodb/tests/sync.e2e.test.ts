@@ -59,9 +59,38 @@ describe.skipIf(!URL)('sync route on a real MongoDB', () => {
             [b.id, 'b', true],
         ])
 
+        // Versions are the database's clock in ms; data is stored as sent, `$` strings included.
+        const priced = (await run({ method: 'post', body: { id: uuidv7(), text: '$100', note: { at: '$now' } } })).item
+        expect(Math.abs(priced.updated_at - Date.now())).toBeLessThan(60_000)
+        const raw_priced = await client!.db(DB_NAME).collection(collection_name).findOne({ text: '$100' })
+        expect(raw_priced).toMatchObject({ text: '$100', note: { at: '$now' }, updated_at: priced.updated_at })
+        expect(raw_priced).not.toHaveProperty('__livequery_inserting')
+
+        // The same id again: the insert fails as a duplicate, as before.
+        const duplicate = await run({ method: 'post', body: { id: priced.id, text: 'again' } }).then(() => null, e => e)
+        expect(duplicate).toMatchObject({ status: 409, code: 'ID_ALREADY_EXISTS' })
+
         // A tombstone cannot be edited back to life.
         await run({ method: 'patch', is_collection: false, document_id: b.id, keys: { id: b.id }, body: { text: 'zombie' } })
         const raw = await client!.db(DB_NAME).collection(collection_name).countDocuments({ text: 'zombie' })
         expect(raw).toBe(0)
+    })
+
+    test('the change stream sees an insert as an insert, and an edit or delete as an update', async () => {
+        const datasource = new MongoDatasource({ connections: { default: client!.db(DB_NAME) } })
+        const options = { collection: collection_name, sync: true }
+        const run = (overrides: Record<string, any>) => datasource.query(request(overrides) as any, options) as Promise<any>
+        const stream = client!.db(DB_NAME).collection(collection_name).watch([], { fullDocument: 'updateLookup' })
+        const seen: string[] = []
+        stream.on('change', change => seen.push(change.operationType))
+        await new Promise(resolve => setTimeout(resolve, 1000))  // the stream opens asynchronously
+
+        const doc = (await run({ method: 'post', body: { id: uuidv7(), text: 'watched' } })).item
+        await run({ method: 'patch', is_collection: false, document_id: doc.id, keys: { id: doc.id }, body: { text: 'edited' } })
+        await run({ method: 'delete', is_collection: false, document_id: doc.id, keys: { id: doc.id } })
+        const started = Date.now()
+        while (seen.length < 3 && Date.now() - started < 10_000) await new Promise(resolve => setTimeout(resolve, 100))
+        await stream.close()
+        expect(seen).toEqual(['insert', 'update', 'update'])
     })
 })

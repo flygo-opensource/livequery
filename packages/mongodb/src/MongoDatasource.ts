@@ -45,6 +45,17 @@ export type RouteOptions = {
 // Hidden unless a read asks for them.
 const LIVE = { deleted_at: null }
 
+// Versions come from the database's clock (ms), not from whichever server process wrote: every
+// instance then stamps from one clock. Needs MongoDB 4.2+.
+const DB_NOW = { $toLong: '$$NOW' }
+// Set only in an insert's filter, so an existing document never matches it (see `#insertVersioned`).
+const INSERTING = '__livequery_inserting'
+// Pipeline stages read `$field` strings as paths: data goes in as literals.
+const literals = (fields: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, { $literal: value }]))
+const isPlainBody = (body: unknown): body is Record<string, unknown> =>
+    !!body && typeof body === 'object' && !Object.keys(body).some(key => key.startsWith('$'))
+
 
 export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> implements CoreLivequeryDatasource<RouteOptions> {
 
@@ -222,10 +233,10 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         const merged = {
             ...req.keys,
             ...cleanBody,
-            ...options.sync ? { updated_at: Date.now() } : {},
             ...client_id ? { _id: new UUID(client_id) } : {}
         };
-        const result = await collection.insertOne(merged).catch(e => {
+        const inserted = options.sync ? this.#insertVersioned(collection, merged) : collection.insertOne(merged).then(r => ({ ...merged, _id: r.insertedId }))
+        const stored = await inserted.catch(e => {
             if (e?.code !== 11000) throw e
             // A retried add finds its own first attempt here; the client treats the 409 as
             // "already created" and sends what changed since as an update.
@@ -236,11 +247,23 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         });
         return {
             item: this.#stringifyOids({
-                ...merged,
+                ...stored,
                 _id: undefined,
-                id: fromMongoId(result.insertedId)
+                id: fromMongoId(stored._id)
             })
         };
+    }
+
+    // An insert whose `updated_at` is the database's clock: an upsert whose filter no existing
+    // document can match, so an `_id` already taken still fails with a duplicate key (11000).
+    async #insertVersioned(collection: Collection<any>, doc: Record<string, any>) {
+        const { _id = new ObjectId(), ...fields } = doc
+        const stored = await collection.findOneAndUpdate(
+            { _id, [INSERTING]: true },
+            [{ $set: { ...literals(fields), updated_at: DB_NOW } }, { $unset: INSERTING }],
+            { upsert: true, returnDocument: 'after' },
+        )
+        return stored as Record<string, any> & { _id: unknown }
     }
 
     async #put(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
@@ -248,11 +271,22 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             await collection.updateOne(this.#keys(req), this.#update(req.body))
             return { item: this.#writtenItem(req) }
         }
-        const updated_at = Date.now()
-        const update = this.#update(req.body) ?? {}
         // A tombstone stays deleted: an update racing a delete must not bring it back.
-        await collection.updateOne({ ...this.#keys(req), ...LIVE }, { ...update, $set: { ...update.$set, updated_at } })
-        return { item: { ...this.#writtenItem(req), updated_at } }
+        const filter = { ...this.#keys(req), ...LIVE }
+        if (!isPlainBody(req.body)) {
+            // Operators ($inc, $push…) cannot run in a pipeline: this one is stamped by the server.
+            const updated_at = Date.now()
+            const update = this.#update(req.body) ?? {}
+            await collection.updateOne(filter, { ...update, $set: { ...update.$set, updated_at } })
+            return { item: { ...this.#writtenItem(req), updated_at } }
+        }
+        const { id: _id, _id: _raw_id, ...fields } = req.body
+        const stored = await collection.findOneAndUpdate(
+            filter,
+            [{ $set: { ...literals(fields), updated_at: DB_NOW } }],
+            { returnDocument: 'after', projection: { updated_at: 1 } },
+        )
+        return { item: { ...this.#writtenItem(req), ...stored ? { updated_at: stored.updated_at } : {} } }
     }
 
     async #del(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
@@ -260,9 +294,12 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
             await collection.deleteOne(this.#keys(req))
             return { item: this.#writtenItem(req) }
         }
-        const now = Date.now()
-        await collection.updateOne({ ...this.#keys(req), ...LIVE }, { $set: { deleted_at: now, updated_at: now } })
-        return { item: { ...this.#writtenItem(req), deleted_at: now, updated_at: now } }
+        const stored = await collection.findOneAndUpdate(
+            { ...this.#keys(req), ...LIVE },
+            [{ $set: { deleted_at: DB_NOW, updated_at: DB_NOW } }],
+            { returnDocument: 'after', projection: { deleted_at: 1, updated_at: 1 } },
+        )
+        return { item: { ...this.#writtenItem(req), ...stored ? { deleted_at: stored.deleted_at, updated_at: stored.updated_at } : {} } }
     }
 
     // Build the standard Livequery `{ id, ...data }` shape for a write response from the
