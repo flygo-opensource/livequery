@@ -53,6 +53,8 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 return ws
             }),
             switchMap(ws => merge(
+                // Emits once connected, which resets the retry backoff below.
+                fromEvent(ws, 'open'),
                 fromEvent(ws, 'close').pipe(map(e => { throw e })),
                 fromEvent(ws, 'error').pipe(map(e => { throw e })),
                 fromEvent(ws, 'open').pipe(
@@ -88,7 +90,9 @@ export class Socket extends BehaviorSubject<LivequerySocketMetadata> {
                 })
                 throw e
             }),
-            retry({ delay: (_, attempt) => timer(Math.min(1000 * 2 ** attempt, 30000)) }),
+            // Back off while the server stays unreachable; a connection that opened starts over at
+            // 2s, so a drop after hours of uptime is not retried 30s later.
+            retry({ delay: (_, attempt) => timer(Math.min(1000 * 2 ** attempt, 30000)), resetOnSuccess: true }),
             takeUntil(this.#stop$)
         ).subscribe()
     }

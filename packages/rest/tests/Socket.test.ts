@@ -32,6 +32,10 @@ class FakeWebSocket extends EventTarget {
         // Tests close sockets explicitly through Socket.stop().
     }
 
+    drop() {
+        this.dispatchEvent(new Event("close"));
+    }
+
     open() {
         this.dispatchEvent(new Event("open"));
     }
@@ -125,4 +129,21 @@ describe("Socket", () => {
 
         socket.stop();
     });
+
+    test("a connection that opened resets the reconnect backoff", async () => {
+        const socket = new Socket("ws://example.test/realtime");
+        const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+        // Three drops in a row, each after the connection had opened: every retry waits the
+        // first delay (2s), not 2s, 4s, 8s…
+        for (let drop = 1; drop <= 3; drop++) {
+            await tick();
+            const ws = FakeWebSocket.instances.at(-1)!;
+            ws.open();
+            ws.drop();
+            const started = Date.now();
+            while (FakeWebSocket.instances.length === drop) await wait(50);
+            expect(Date.now() - started).toBeLessThan(3000);
+        }
+        socket.stop();
+    }, 15000);
 });

@@ -208,11 +208,21 @@ export class WebsocketGatewayBase extends Subject<UpdatedData> implements Livequ
     protected _onStart(socket: SocketLike, { id, auth }: { id: string; auth: string }): void {
         if (socket.id) return
         if (auth && auth !== this.auth) { socket.close(); return }
-        if (this._connections.has(id)) { socket.close(); return }
+        const previous = this._connections.get(id)
+        // A peer gateway keeps its id for one connection; a second one is refused.
+        if (previous?.gateway || (previous && auth === this.auth)) { socket.close(); return }
 
         socket.id = id
         socket.gateway = auth === this.auth
-        socket.refs = new Set()
+        socket.refs = new Set(previous?.refs ?? [])
+        if (previous) {
+            // The client reconnected before its previous connection was seen to drop: a half-open
+            // TCP behind a proxy, or a phone switching networks. Refusing the new socket would
+            // keep the client out until the old one timed out, so the newest connection wins —
+            // its subscriptions move over, and the old socket closes without detaching them.
+            previous.id = undefined
+            previous.close()
+        }
         this._connections.set(id, socket)
 
         // Reconnect within the grace window: cancel the pending cleanup and rebuild

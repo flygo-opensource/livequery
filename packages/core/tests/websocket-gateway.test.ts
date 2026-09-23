@@ -72,27 +72,31 @@ describe('WebsocketGateway', () => {
         expect(ws.readyState).toBe(WebSocket.CLOSED)
     })
 
-    test('closes the second socket when a client id is already connected', async () => {
+    test('a client reconnecting before its old socket drops takes over, subscriptions included', async () => {
         const { server, gateway, port } = await startGateway()
         const first = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
+        await startClient(first, 'client-1')
+        gateway.listen([{ ref: 'posts', client_id: 'client-1', gateway_id: gateway.id, listener_node_id: gateway.id }])
+        await sleep(10)
 
-        await once(first, 'open')
-        first.send(JSON.stringify({ event: 'start', data: { id: 'client-1', auth: '' } }))
-        await nextJson(first)
-
+        // The old connection is still open on the server (half-open behind a proxy) when the
+        // client comes back under the same id.
+        const first_closed = once(first, 'close')
         const second = new WebSocket(`ws://127.0.0.1:${port}${WEBSOCKET_PATH}`)
-        await once(second, 'open')
-        const closed = once(second, 'close')
-        second.send(JSON.stringify({ event: 'start', data: { id: 'client-1', auth: '' } }))
+        await startClient(second, 'client-1')
+        await first_closed
+        // The old socket's close must not detach what now belongs to the new one.
+        await sleep(20)
 
-        await closed
-        const firstState = first.readyState
+        const received = nextJson(second)
+        gateway.next({ ref: 'posts', type: 'added', data: { id: 'p1', title: 'Hello' } } as any)
+        const message = await received
 
-        first.close()
+        second.close()
         gateway.close()
         await closeServer(server)
-        expect(firstState).toBe(WebSocket.OPEN)
-        expect(second.readyState).toBe(WebSocket.CLOSED)
+        expect(first.readyState).toBe(WebSocket.CLOSED)
+        expect(message).toMatchObject({ event: 'sync' })
     })
 
     test('sends sync updates to a subscribed client', async () => {

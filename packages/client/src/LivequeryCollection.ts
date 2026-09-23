@@ -210,10 +210,13 @@ export class LivequeryCollection<T extends Doc> {
         }
 
         const events = changes.reduce((p, c) => {
+            // A read (a delta, a refetch) delivers documents as `added`; one already held here is
+            // an update of it, not something to skip.
+            const type = c.type === 'added' && this.#indexes.has(c.id) ? 'modified' : c.type
             return {
                 ...p,
-                [c.type]: [
-                    ...(p[c.type] || []),
+                [type]: [
+                    ...(p[type] || []),
                     c
                 ]
             }

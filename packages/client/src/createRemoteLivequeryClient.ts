@@ -3,6 +3,9 @@ import type { LivequeryClientLike } from './LivequeryCollection.js'
 
 type Remote = { [K in keyof LivequeryClientLike]: (...args: any[]) => any }
 
+// Any object will do — typically a proxy whose every property is a remote method.
+type RemoteLike = Remote | object
+
 /**
  * A client for tabs whose real `LivequeryClient` lives elsewhere — a SharedWorker serving every tab
  * of the app, typically linked with `@livequery/rpc`:
@@ -17,7 +20,8 @@ type Remote = { [K in keyof LivequeryClientLike]: (...args: any[]) => any }
  * observables; the result is what `LivequeryCollection` (and so `useCollection`) needs. Streams open
  * on subscribe and close on unsubscribe, so a collection unmounting in a tab releases it in the worker.
  */
-export function createRemoteLivequeryClient(remote: Remote): LivequeryClientLike {
+export function createRemoteLivequeryClient(remote_like: RemoteLike): LivequeryClientLike {
+    const remote = remote_like as Remote
     const call = (method: keyof Remote) => (...args: any[]) => Promise.resolve(remote[method](...args))
     const stream = (method: keyof Remote) => (...args: any[]) => defer(() => remote[method](...args) as Observable<any>)
     return {

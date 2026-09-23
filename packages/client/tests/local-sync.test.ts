@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, test } from 'bun:test'
-import { Observable, Subject } from 'rxjs'
+import { BehaviorSubject, Observable, Subject } from 'rxjs'
 import { LivequeryClient } from '../src/LivequeryClient.js'
 import { LivequeryCollection } from '../src/LivequeryCollection.js'
 import { LivequeryMemoryStorage } from '../src/LivequeryMemoryStorage.js'
@@ -244,6 +244,25 @@ describe('staying in sync', () => {
         expect(delta?.filters[':tombstones']).toBe(1)
         expect(await storage.get('chats/c1/messages', 'm059')).toBeNull()
         second.destroy()
+    })
+
+    test('a reconnect catches the open collection up on what realtime missed', async () => {
+        const server = makeServer()
+        seedMessages(server, 'chats/c1/messages', 5)
+        const status$ = new BehaviorSubject({ connected: true })
+        server.transporter.status$ = status$
+        const client = makeClient(server)
+        const { col } = open(client, 'chats/c1/messages', { scope: 'full', keep: 'always' })
+        await waitUntil(() => col.items.value.length === 5)
+
+        // The socket drops; meanwhile the server changes without a realtime event reaching us.
+        status$.next({ connected: false })
+        server.quietly('chats/c1/messages', { id: 'm005', text: 'edited' })
+        server.quietly('chats/c1/messages', { id: 'm006', text: 'new', created_at: 6 })
+        status$.next({ connected: true })
+
+        await waitUntil(() => texts(col)[0] === 'new' && texts(col).includes('edited'))
+        client.destroy()
     })
 
     test("keep: realtime stays for `keep` after the last collection closes, then stops", async () => {

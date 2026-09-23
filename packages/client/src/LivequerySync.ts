@@ -71,6 +71,12 @@ type Scope = {
     stop_timer?: ReturnType<typeof setTimeout>
     children: Map<string, SyncHandle>
     active: boolean
+    /**
+     * Realtime has been continuous since the last catch-up, so its events may move `synced_at`.
+     * Off from the moment realtime (re)opens until a catch-up completes: an event arriving in
+     * between is newer than changes the delta has not fetched yet.
+     */
+    live: boolean
 }
 
 const RANK: Record<LocalFirstScope, number> = { 'on-demand': 0, window: 1, full: 2 }
@@ -180,6 +186,7 @@ export class LivequerySync {
                 status$: new BehaviorSubject<ScopeStatus>({ loaded: false, complete: false, extending: false, fetching: false }),
                 children: new Map(),
                 active: false,
+                live: false,
             }
             this.#scopes.set(ref, scope)
             const created = scope
@@ -229,7 +236,8 @@ export class LivequerySync {
                 ':limit': Math.max(limit, 1),
                 ':after': scope.meta.next_cursor,
             })
-            await this.#ingest(scope, page, { source: 'query' })
+            // Older documents: their versions say nothing about what else changed.
+            await this.#ingest(scope, page, { source: 'query' }, false)
             scope.meta.next_cursor = page.result.paging?.next?.cursor ?? null
             scope.meta.complete = !scope.meta.next_cursor
             await this.#persist(scope)
@@ -311,6 +319,7 @@ export class LivequerySync {
             if (!scope.meta.loaded) await this.#initialLoad(scope)
             else if (scope.meta.versioned && scope.meta.synced_at !== null) await this.#delta(scope)
             else await this.#refresh(scope)
+            scope.live = !!scope.realtime
         } catch (e: any) {
             error = { code: e?.code ?? 'SYNC_FAILED', message: e?.message ?? String(e) }
             throw e
@@ -331,7 +340,7 @@ export class LivequerySync {
                 ':limit': Math.min(PAGE, target - loaded),
                 ...cursor ? { ':after': cursor } : {},
             })
-            await this.#ingest(scope, page, { source: 'query' })
+            await this.#ingest(scope, page, { source: 'query' }, true)
             loaded += page.result.changes?.length ?? 0
             cursor = page.result.paging?.next?.cursor
             if (!cursor) break
@@ -344,16 +353,18 @@ export class LivequerySync {
 
     // Only what changed since the last sync, tombstones included.
     async #delta(scope: Scope) {
+        // Fixed for every page of this delta, which pages by cursor.
+        const since = scope.meta.synced_at
         let cursor: string | undefined
         do {
             const page = await this.#read(scope, {
-                'updated_at:gt': scope.meta.synced_at,
+                'updated_at:gt': since,
                 'updated_at:sort': 'asc',
                 ':limit': PAGE,
                 ':tombstones': 1,
                 ...cursor ? { ':after': cursor } : {},
             })
-            await this.#ingest(scope, page, { source: 'query' })
+            await this.#ingest(scope, page, { source: 'query' }, true)
             cursor = page.result.paging?.next?.cursor
         } while (cursor)
         await this.#persist(scope)
@@ -373,7 +384,7 @@ export class LivequerySync {
                 ':limit': PAGE,
                 ...cursor ? { ':after': cursor } : {},
             })
-            changes.push(...await this.#ingest(scope, page, { source: 'query', broadcast: false }))
+            changes.push(...await this.#ingest(scope, page, { source: 'query', broadcast: false }, true))
             cursor = page.result.paging?.next?.cursor
             pages++
             if (!cursor) break
@@ -394,6 +405,7 @@ export class LivequerySync {
 
     #openRealtime(scope: Scope) {
         if (scope.realtime || this.#stopped) return
+        scope.live = false
         const subscription = new Subscription()
         for (const [transporter_id, transporter] of Object.entries(this.#options.transporters)) {
             // Realtime only: the first answer is one document, not another copy of the scope.
@@ -401,7 +413,8 @@ export class LivequerySync {
             subscription.add(transporter.query({ ref: scope.meta.id, filters, context: scope.meta.context }).pipe(
                 concatMap((result, index) => from((async () => {
                     if (result.error || !result.changes?.length) return
-                    await this.#ingest(scope, { transporter_id, result }, { source: index === 0 ? 'query' : 'realtime' })
+                    // The first answer is one document, not what changed: it never moves `synced_at`.
+                    await this.#ingest(scope, { transporter_id, result }, { source: index === 0 ? 'query' : 'realtime' }, index > 0 && scope.live)
                     await this.#persist(scope)
                 })()))
             ).subscribe({ error: e => console.warn('livequery sync: realtime failed', scope.meta.id, e) }))
@@ -414,15 +427,16 @@ export class LivequerySync {
         scope.realtime = undefined
     }
 
-    async #ingest(scope: Scope, page: { transporter_id: string, result: Partial<LivequeryQueryResult> }, options: SyncIngestOptions) {
+    // `advance`: the page covers every change up to its newest version (a load or a delta), so the
+    // next delta may start from there.
+    async #ingest(scope: Scope, page: { transporter_id: string, result: Partial<LivequeryQueryResult> }, options: SyncIngestOptions, advance: boolean) {
         const changes = page.result.changes ?? []
         if (changes.length === 0) return []
         for (const change of changes) {
             const version = change.data?.updated_at
-            if (typeof version === 'number') {
-                scope.meta.versioned = true
-                scope.meta.synced_at = Math.max(scope.meta.synced_at ?? 0, version)
-            }
+            if (typeof version !== 'number') continue
+            scope.meta.versioned = true
+            if (advance) scope.meta.synced_at = Math.max(scope.meta.synced_at ?? 0, version)
         }
         const ingested = await this.#options.ingest(page.transporter_id, scope.meta.id, changes, options)
         await this.#childrenOf(scope, ingested)
