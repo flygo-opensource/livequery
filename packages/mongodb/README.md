@@ -821,9 +821,12 @@ gives it what it needs:
 - Realtime sends a delete as a `modified` change carrying `deleted_at`; clients treat any change with
   `deleted_at` as a removal.
 - With a field allowlist (`validator(Schema)` or `fields`), `updated_at` and `deleted_at` stay queryable.
+- Every read answers with `sync: true` next to `items` / `item`. That flag — not the presence of
+  `updated_at` — is what lets a client switch to deltas.
 
 Without `sync`, a client can still declare a scope: it falls back to re-reading the scope on reconnect,
-since it cannot ask for what changed.
+since it cannot ask for what changed — even when documents carry an `updated_at` of their own. A
+route without sync hard-deletes, so a delta would never learn about a delete.
 
 Tombstones pile up. Purge the old ones once every device has had time to sync — a device offline
 longer than that re-reads its scope instead (the client evicts scopes unused for 30 days by default):

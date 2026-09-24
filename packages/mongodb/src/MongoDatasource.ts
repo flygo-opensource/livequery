@@ -194,11 +194,14 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
         }
 
 
+        // Tells a local-first client it may read deltas: without it, it re-reads what it holds.
+        const sync = options.sync ? { sync: true } : {}
         if (req.is_collection) {
             const data = {
                 ...paging,
                 items,
                 summary,
+                ...sync,
             };
             return data;
         }
@@ -221,6 +224,7 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
                 "total": item ? 1 : 0
             },
             item,
+            ...sync,
         };
 
     }

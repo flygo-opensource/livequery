@@ -17,6 +17,12 @@ export type LivequeryQueryResult = {
     refetch?: boolean
     /** Local-first collections: whether the device holds everything the collection's scope covers. */
     completeness?: LivequeryCompleteness
+    /**
+     * The server serves local-first sync on this route (`mongodb({ sync: true })`): every write
+     * moves `updated_at`, deletes leave tombstones, and `updated_at:gte` + `:tombstones` reads
+     * return both. Only then may a device read deltas instead of re-reading what it holds.
+     */
+    sync?: boolean
 }
 
 

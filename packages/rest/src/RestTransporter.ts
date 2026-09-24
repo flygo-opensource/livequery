@@ -97,6 +97,8 @@ export type LivequeryCollectionResponse<T extends Doc> = {
     }
     has?: { prev: boolean, next: boolean }
     cursor?: { first: string, last: string }
+    /** The route serves deltas and tombstones (local-first sync). */
+    sync?: boolean
 }
 
 
@@ -346,6 +348,7 @@ export class RestTransporter implements LivequeryTransporter {
                         cursor: collection?.cursor?.first
                     } : undefined
                 },
+                ...collection.sync === true ? { sync: true } : {},
                 changes: items.map(data => ({
                     data,
                     type: 'added',
@@ -360,6 +363,7 @@ export class RestTransporter implements LivequeryTransporter {
         if (collection.item != null) {
             return {
                 summary: collection.summary,
+                ...collection.sync === true ? { sync: true } : {},
                 changes: [{
                     data: collection.item,
                     type: 'added',

@@ -60,8 +60,13 @@ type ScopeMeta = {
     next_cursor: string | null
     /** Newest `updated_at` seen: the next delta asks for anything newer. */
     synced_at: number | null
-    /** The server sends `updated_at`, so deltas are possible. */
-    versioned: boolean
+    /**
+     * The server said it serves sync (`sync: true` on a read), so deltas are possible. Having
+     * `updated_at` is not enough: a route without sync hard-deletes, and a delta never sees that.
+     * (3.0.0 stored `versioned`, set from `updated_at` alone; it is ignored, so those devices
+     * re-read once and learn the truth.)
+     */
+    sync: boolean
     last_used_at: number
 }
 
@@ -195,7 +200,10 @@ export class LivequerySync {
             const created = scope
             // Pick up what an earlier session stored about this ref.
             created.catching_up = this.#options.storage.get<ScopeMeta>(LIVEQUERY_SYNC_REF, ref).then(stored => {
-                if (stored) created.meta = { ...stored, config: created.meta.config, context: created.meta.context ?? stored.context }
+                if (stored) {
+                    const { versioned: _legacy, ...meta } = stored as ScopeMeta & { versioned?: boolean }
+                    created.meta = { ...meta, sync: meta.sync === true, config: created.meta.config, context: created.meta.context ?? stored.context }
+                }
                 created.status$.next({ ...created.status$.value, loaded: created.meta.loaded, complete: created.meta.complete })
             })
         }
@@ -273,7 +281,7 @@ export class LivequerySync {
             complete: false,
             next_cursor: null,
             synced_at: null,
-            versioned: false,
+            sync: false,
             last_used_at: Date.now(),
         }
     }
@@ -320,7 +328,7 @@ export class LivequerySync {
         let error: ScopeStatus['error']
         try {
             if (!scope.meta.loaded) await this.#initialLoad(scope)
-            else if (scope.meta.versioned && scope.meta.synced_at !== null) await this.#delta(scope)
+            else if (scope.meta.sync && scope.meta.synced_at !== null) await this.#delta(scope)
             else await this.#refresh(scope)
             scope.live = !!scope.realtime
         } catch (e: any) {
@@ -370,6 +378,8 @@ export class LivequerySync {
                 ':tombstones': 1,
                 ...cursor ? { ':after': cursor } : {},
             })
+            // The route no longer serves sync: this answer may lack deletes, re-read instead.
+            if (!scope.meta.sync) return await this.#refresh(scope)
             await this.#ingest(scope, page, { source: 'query' }, true)
             cursor = page.result.paging?.next?.cursor
         } while (cursor)
@@ -441,7 +451,6 @@ export class LivequerySync {
         for (const change of changes) {
             const version = change.data?.updated_at
             if (typeof version !== 'number') continue
-            scope.meta.versioned = true
             if (advance) scope.meta.synced_at = Math.max(scope.meta.synced_at ?? 0, version)
         }
         const ingested = await this.#options.ingest(page.transporter_id, scope.meta.id, changes, options)
@@ -493,6 +502,8 @@ export class LivequerySync {
                     failure = result.error
                     continue
                 }
+                // Every read of the route says whether it serves sync; a route can lose it too.
+                scope.meta.sync = result.sync === true
                 return { transporter_id, result }
             }
             throw failure ?? { code: 'NO_TRANSPORTER', message: 'No transporter to sync with' }

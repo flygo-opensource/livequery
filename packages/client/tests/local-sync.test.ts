@@ -24,8 +24,12 @@ async function waitUntil(check: () => boolean | Promise<boolean>, ms = 3000) {
     }
 }
 
-/** A versioned server: pages by cursor, answers deltas (`updated_at:gte`), keeps tombstones. */
-function makeServer() {
+/**
+ * A sync server: pages by cursor, answers deltas (`updated_at:gte`), keeps tombstones, and says so
+ * (`sync: true`). `{ sync: false }` is a route without sync: documents still carry `updated_at`,
+ * but a delete removes the document and `:tombstones` means nothing.
+ */
+function makeServer({ sync = true } = {}) {
     const data = new Map<string, Map<string, Record<string, any>>>()
     const realtime = new Map<string, Subject<DataChangeEvent>>()
     const state = { online: true, clock: 1_000 }
@@ -56,6 +60,7 @@ function makeServer() {
         return {
             changes: page.map(d => ({ collection_ref: ref, id: d.id, type: 'added', data: { ...d } })),
             paging: { total: docs.length, current: page.length, ...more ? { next: { count: docs.length - start - limit, cursor: page.at(-1)!.id } } : {} },
+            ...sync ? { sync: true } : {},
             source: 'query',
         }
     }
@@ -95,6 +100,11 @@ function makeServer() {
         remove(ref: string, id: string) {
             const doc = collection(ref).get(id)
             if (!doc) return null
+            if (!sync) {
+                collection(ref).delete(id)
+                channel(ref).next({ collection_ref: ref, id, type: 'removed' })
+                return doc
+            }
             const tombstone = { ...doc, deleted_at: ++state.clock, updated_at: state.clock }
             collection(ref).set(id, tombstone)
             channel(ref).next({ collection_ref: ref, id, type: 'removed' })
@@ -110,6 +120,7 @@ function makeServer() {
         },
         quietlyRemove(ref: string, id: string) {
             const doc = collection(ref).get(id)!
+            if (!sync) return void collection(ref).delete(id)
             collection(ref).set(id, { ...doc, deleted_at: ++state.clock, updated_at: state.clock })
         },
     }
@@ -250,6 +261,58 @@ describe('staying in sync', () => {
         expect(delta?.filters[':tombstones']).toBe(1)
         expect(await storage.get('chats/c1/messages', 'm059')).toBeNull()
         second.destroy()
+    })
+
+    // Documents with `updated_at` do not make a route a sync route. 3.0.0 read deltas as soon as it
+    // saw one, so a document deleted on a route without tombstones stayed on the device forever.
+    test('a route without sync is re-read, not delta-read: a server-side delete leaves the device', async () => {
+        const server = makeServer({ sync: false })
+        seedMessages(server, 'tasks', 5)
+        const storage = new LivequeryMemoryStorage()
+        const first = makeClient(server, storage)
+        const a = open(first, 'tasks', { scope: 'full', keep: 0 })
+        await waitUntil(() => a.col.completeness.value === 'complete')
+        a.close()
+        first.destroy()
+
+        server.quietlyRemove('tasks', 'm003')
+        const reads_before = server.reads.length
+
+        const second = makeClient(server, storage)
+        const b = open(second, 'tasks', { scope: 'full' })
+        await waitUntil(async () => (await storage.get('tasks', 'm003')) === null)
+        expect(texts(b.col)).not.toContain('#3')
+        expect(server.reads.slice(reads_before).some(r => r.filters['updated_at:gte'] != null)).toBe(false)
+        second.destroy()
+    })
+
+    test('a device synced by 3.0.0 (`versioned`, no `sync`) re-reads once, then reads deltas again', async () => {
+        const server = makeServer()
+        seedMessages(server, 'tasks', 5)
+        const storage = new LivequeryMemoryStorage()
+        const first = makeClient(server, storage)
+        const a = open(first, 'tasks', { scope: 'full', keep: 0 })
+        await waitUntil(() => a.col.completeness.value === 'complete')
+        a.close()
+        first.destroy()
+        const { sync: _sync, ...legacy } = (await storage.get<any>(LIVEQUERY_SYNC_REF, 'tasks'))!
+        await storage.update(LIVEQUERY_SYNC_REF, 'tasks', { ...legacy, sync: undefined, versioned: true } as any)
+
+        const reads_before = server.reads.length
+        const second = makeClient(server, storage)
+        const b = open(second, 'tasks', { scope: 'full', keep: 0 })
+        await waitUntil(() => server.reads.length > reads_before && !b.col.loading?.value)
+        await tick(50)
+        expect(server.reads.slice(reads_before).some(r => r.filters['updated_at:gte'] != null)).toBe(false)
+        b.close()
+        second.destroy()
+
+        const reads_after = server.reads.length
+        const third = makeClient(server, storage)
+        const c = open(third, 'tasks', { scope: 'full' })
+        await waitUntil(() => server.reads.slice(reads_after).some(r => r.filters['updated_at:gte'] != null))
+        c.close()
+        third.destroy()
     })
 
     test('a reconnect catches the open collection up on what realtime missed', async () => {

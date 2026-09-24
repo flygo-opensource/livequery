@@ -1088,7 +1088,7 @@ It is only called for documents with unconfirmed edits (`_prev`) or a pending de
 A realtime event sent while the socket was down never arrives. When a transporter's `status$` reconnects, the client:
 
 - re-runs the last first-page query of every `server-first` / `cache-first` collection, without a loading spinner;
-- catches every active local-first scope up: a delta — `updated_at:gte` from `syncOverlap` (default 10s) before the newest version the device holds, tombstones included — when the server versions documents; otherwise a re-read of what the device covers, deleting stored documents the server no longer returns (a failed read deletes nothing);
+- catches every active local-first scope up: a delta — `updated_at:gte` from `syncOverlap` (default 10s) before the newest version the device holds, tombstones included — when the server's reads say `sync: true` (`mongodb({ sync: true })`); otherwise a re-read of what the device covers, deleting stored documents the server no longer returns (a failed read deletes nothing);
 - reconciles each collection with the result: updates what it holds, drops what is gone, keeps documents that only exist on this device (`_adding`, `_local_only`, legacy `local:` ids).
 
 A collection that had loaded several pages is back to its first page after a refetch, as after any new query.
