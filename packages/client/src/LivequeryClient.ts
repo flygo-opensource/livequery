@@ -89,6 +89,16 @@ const isEditableField = (key: string) => key !== 'id' && !key.startsWith('_')
 // What a transporter receives for an add: the document without its id and client metadata.
 const toWritePayload = (doc: Record<string, any>) => Object.fromEntries(Object.entries(doc).filter(([k]) => isEditableField(k)))
 
+// Write-state the client keeps for itself. A caller never sets these: `update({ ...doc.value, x })`
+// (a form reset from the document, a spread copy) hands back a snapshot of them, and a stale
+// `_adding: true` or `_prev: undefined` would make the outbox drop the edit without sending it.
+const CLIENT_STATE_FIELDS = new Set([
+    '_adding', '_adding_error', '_updating', '_updating_error', '_deleting', '_deleting_error',
+    '_queued', '_remotes', '_prev', '_index', '_local_only',
+])
+const withoutClientState = <T extends Record<string, any>>(doc: T) =>
+    Object.fromEntries(Object.entries(doc).filter(([k]) => !CLIENT_STATE_FIELDS.has(k))) as T
+
 const pick = (source: Record<string, any> | null | undefined, keys: string[]) => Object.fromEntries(keys.map(k => [k, source?.[k]]))
 
 const isSameValue = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b)
@@ -609,7 +619,7 @@ export class LivequeryClient {
         const intent = mode === 'local-only' ? undefined : await this.#intend(collection_ref, 'add', ids, context)
         const docs = await Promise.all(documents.map((doc, index) =>
             this.config.storage.add<T>(collection_ref, {
-                ...doc,
+                ...withoutClientState(doc),
                 id: ids[index],
                 _adding: true,
                 ...mode === 'local-only' ? { _local_only: true } : {}
@@ -647,7 +657,8 @@ export class LivequeryClient {
             })
         }
         const intent = mode === 'local-only' ? undefined : await this.#intend(collection_ref, 'update', documents.map(doc => doc.id), context)
-        const merged = (await Promise.all(documents.map(async doc => {
+        const merged = (await Promise.all(documents.map(async input => {
+            const doc = withoutClientState(input)
             const old = await this.config.storage.get<T>(collection_ref, doc.id) as undefined | DocState<T>
             if (!old) return
             // `_prev` keeps the value from before the FIRST unsent edit of each field: it is both
