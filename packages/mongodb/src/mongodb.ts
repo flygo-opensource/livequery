@@ -21,7 +21,7 @@ export type MongodbMiddlewareOptions = {
     collection?: RouteOptions['collection']
     /** Fields stored as ObjectId, so a hex string in a filter is converted before the query. */
     objectIdFields?: string[]
-    /** Accept the uuidv7 a client sends as the new document's id (default true). See `RouteOptions.clientIds`. */
+    /** Accept the uuidv7 a client sends as the new document's id (default: only with `sync`). See `RouteOptions.clientIds`. */
     clientIds?: boolean
     /** Serve local-first sync: versions, tombstones and deltas. See `RouteOptions.sync`. */
     sync?: boolean
@@ -120,7 +120,7 @@ export function mongodb(options: MongodbMiddlewareOptions) {
             collection,
             ...options.db ? { db: options.db } : {},
             ...options.objectIdFields ? { objectIdFields: options.objectIdFields } : {},
-            ...options.clientIds === false ? { clientIds: false } : {},
+            ...options.clientIds !== undefined ? { clientIds: options.clientIds } : {},
             ...options.sync ? { sync: true } : {},
         }
 

@@ -48,6 +48,8 @@ export type BuildAppOptions = {
      * `z.strictObject` any unknown key in a write body (a client `id`, say) answers 400.
      */
     schema?: LivequerySchema
+    /** Hono only: extra MongoDatasource route options, e.g. `{ clientIds: true }`. */
+    routeOptions?: Partial<RouteOptions>
 }
 
 function applyMethodDecorator(decorator: MethodDecorator, target: object, key: string) {
@@ -92,7 +94,7 @@ export async function buildHonoMongoApp(options: BuildAppOptions): Promise<AppHa
     const app = new Hono()
     const lq = createLivequery(app as any, { websocketGateway: gateway })
 
-    const routeOptions: RouteOptions = { collection: options.collection, db: DB_NAME, realtime: true }
+    const routeOptions: RouteOptions = { ...options.routeOptions, collection: options.collection, db: DB_NAME, realtime: true }
     const routes = [
         { method: 'GET', path: `livequery/${ref}`, options: routeOptions },
         { method: 'GET', path: `livequery/${ref}/:id`, options: routeOptions },

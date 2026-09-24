@@ -7,10 +7,11 @@
  * - A collection holding both ObjectId and UUID `_id`s pages through every document exactly once,
  *   in both directions — `$lt`/`$gt` alone would stop at the type boundary.
  * - A real client whose first add loses its response ends with exactly one document.
+ * - Without `clientIds: true` (or `sync: true`) the route ignores the client id: ObjectId `_id`.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
-import { UUID } from 'mongodb'
+import { ObjectId, UUID } from 'mongodb'
 import { uuidv7 } from 'uuidv7'
 import { LivequeryClient, LivequeryCollection, LivequeryMemoryStorage } from '../packages/client/src/index.js'
 import { RestTransporter } from '../packages/rest/src/RestTransporter.js'
@@ -33,7 +34,7 @@ describe('MongoDatasource with client-chosen ids', () => {
     }
 
     beforeAll(async () => {
-        app = await buildHonoMongoApp({ collection: uniqueCollection('client_ids'), ref: 'tasks', realtime: false, wrapData: false })
+        app = await buildHonoMongoApp({ collection: uniqueCollection('client_ids'), ref: 'tasks', realtime: false, wrapData: false, routeOptions: { clientIds: true } })
     }, 60000)
 
     afterAll(async () => {
@@ -130,5 +131,31 @@ describe('MongoDatasource with client-chosen ids', () => {
         } finally {
             client.destroy()
         }
+    })
+})
+
+describe('MongoDatasource by default (no clientIds, no sync)', () => {
+    let app: AppHandle
+
+    beforeAll(async () => {
+        app = await buildHonoMongoApp({ collection: uniqueCollection('client_ids_off'), ref: 'tasks', realtime: false, wrapData: false })
+    }, 60000)
+
+    afterAll(async () => {
+        await app?.close()
+    }, 30000)
+
+    // 3.0.0 accepted the uuidv7 on every route, slipping UUID `_id`s into ObjectId collections.
+    test('a uuidv7 in the body is ignored: MongoDB assigns an ObjectId', async () => {
+        const response = await fetch(`${app.apiUrl}/tasks`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: uuidv7(), title: 'default route', done: false, seq: 1 }),
+        })
+        const json = await response.json() as any
+        const item = (json?.data ?? json).item
+        expect(response.status).toBeLessThan(300)
+        expect(item.id).toMatch(/^[0-9a-f]{24}$/)
+        expect((await app.collection.findOne({ title: 'default route' }))?._id).toBeInstanceOf(ObjectId)
     })
 })

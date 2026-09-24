@@ -30,8 +30,9 @@ export type RouteOptions = {
     objectIdFields?: string[]
     /**
      * Accept the id a client sends on add (a uuidv7, stored as a BSON UUID `_id`), so a retried
-     * add cannot create a second document. Default true; false ignores it and lets MongoDB assign
-     * an ObjectId, as before 3.0.
+     * add cannot create a second document. Default: on for a `sync` route, off otherwise — then
+     * MongoDB assigns an ObjectId as before 3.0 and the client renames its copy. 3.0.0 had it on
+     * everywhere, which slipped UUID `_id`s into collections whose code expects ObjectIds.
      */
     clientIds?: boolean
     /**
@@ -230,7 +231,7 @@ export class MongoDatasource extends Subject<UpdatedData<LivequeryBaseEntity>> i
     }
 
     async #post(req: LivequeryRequest, collection: Collection<any>, options: RouteOptions) {
-        const client_id = options.clientIds === false ? undefined : resolveClientId(req.body)
+        const client_id = (options.clientIds ?? options.sync === true) ? resolveClientId(req.body) : undefined
         const { id: _bodyId, _id: _bodyRawId, ...cleanBody } = req.body || {}
         const merged = {
             ...req.keys,

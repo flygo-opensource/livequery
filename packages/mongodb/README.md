@@ -626,7 +626,7 @@ Fields:
 - `db`: optional database name or resolver function.
 - `connection`: optional connection name or resolver function.
 - `objectIdFields`: top-level request fields that should be converted from valid string ids to `ObjectId`.
-- `clientIds`: accept the uuidv7 id a client sends on add (default `true`). See [Client ids](#client-ids).
+- `clientIds`: accept the uuidv7 id a client sends on add (default: on with `sync`, off otherwise). See [Client ids](#client-ids).
 - `sync`: serve local-first sync. See [Sync](#sync).
 
 Use function values when tenant, database, or collection depends on request keys.
@@ -773,7 +773,15 @@ Use query suffixes for filter values:
 ## Client ids
 
 Since 3.0 a client picks the id of a new document (a uuidv7) and sends it in the POST body, so an
-add retried after a lost response cannot create a second document.
+add retried after a lost response cannot create a second document. A route takes it when it has
+`clientIds: true`, or `sync: true` without `clientIds: false`. Any other route ignores it: MongoDB
+assigns an ObjectId as before 3.0, and the client renames its copy to that id.
+
+> 3.0.0 took the client id on **every** route. A collection whose documents reference each other by
+> ObjectId then got UUID `_id`s mixed in, and `new ObjectId(id)` threw on them. If a 3.0.0 server
+> ran against such a collection, look for them: `db.coll.find({ _id: { $type: 'binData' } })`.
+
+With client ids on:
 
 - A valid uuidv7 is stored as a **BSON UUID** `_id` (`Binary` subtype 4). Responses, realtime
   payloads and cursors expose it as the dashed uuid string.
@@ -784,7 +792,7 @@ add retried after a lost response cannot create a second document.
 - A second add with the same id answers **409 `ID_ALREADY_EXISTS`**; another unique index answers
   409 `DUPLICATE_KEY`. A legacy `local:` id (clients before 3.0) is ignored. Anything else is
   **400 `INVALID_ID`**, as is a uuidv7 timestamped more than a day in the future.
-- `clientIds: false` on a route (or `mongodb({ clientIds: false })`) ignores the client id.
+- `clientIds: false` on a route (or `mongodb({ clientIds: false })`) ignores the client id, even with `sync`.
 
 Sorting on `id` in a collection that mixes both kinds groups them by type (UUIDs first
 ascending), not strictly by creation time.
