@@ -841,6 +841,17 @@ defineStorageConformanceSuite({
 
 It pins: `add` keeps a given id and assigns a `local:` id otherwise; `update` with a different `id` moves the document; documents round-trip as plain JSON; `query()` answers exactly like `filterDocs()`, with paging totals; collections are isolated; `flush()` empties everything.
 
+## Which storage
+
+| Where the app runs | Storage | Survives a restart |
+| --- | --- | --- |
+| Browser, SharedWorker, PWA | `LivequeryIndexedDBStorage` (this package) | yes |
+| React Native / Expo | `LivequerySQLiteStorage` from [`@livequery/expo-sqlite`](../expo-sqlite/README.md) | yes |
+| Tests, SSR, Node / Bun scripts | `LivequeryMemoryStorage` (this package) | no |
+
+`LivequeryIndexedDBStorage` falls back to memory where IndexedDB does not exist, React Native
+included, so on a phone it keeps nothing across an app restart: use the SQLite storage there.
+
 ## `LivequeryMemoryStorage`
 
 The built-in in-memory adapter is useful for demos, tests, and ephemeral browser state.

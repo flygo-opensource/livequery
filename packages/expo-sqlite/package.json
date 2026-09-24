@@ -1,0 +1,52 @@
+{
+  "name": "@livequery/expo-sqlite",
+  "version": "3.2.0",
+  "description": "Persistent LivequeryStorage for React Native / Expo on expo-sqlite",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "CHANGELOG.md",
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:js": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly false --declaration false --declarationMap false",
+    "build:types": "bunx tsc -p tsconfig.build.json --emitDeclarationOnly",
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": {
+    "uuidv7": "^1.2.1"
+  },
+  "peerDependencies": {
+    "@livequery/client": "^3.2.0",
+    "expo-sqlite": ">=14.0.0"
+  },
+  "devDependencies": {
+    "@livequery/client": "^3.2.0",
+    "@types/bun": "latest",
+    "typescript": "^5",
+    "rxjs": "^7.8.2"
+  },
+  "author": "Duong Van Ba",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flygo-opensource/livequery.git",
+    "directory": "packages/expo-sqlite"
+  },
+  "homepage": "https://github.com/flygo-opensource/livequery/tree/main/packages/expo-sqlite#readme",
+  "bugs": {
+    "url": "https://github.com/flygo-opensource/livequery/issues"
+  }
+}

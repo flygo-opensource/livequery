@@ -13,12 +13,13 @@ trong một package, `@livequery/core`, chia theo entry point cho từng runtime
 | [`@livequery/honojs`](packages/honojs/README.md), [`@livequery/nestjs`](packages/nestjs/README.md) | Adapter cho Hono và NestJS |
 | [`@livequery/client`](packages/client/README.md), [`@livequery/rest`](packages/rest/README.md) | Client phía trình duyệt: collection, cache, transport REST + WebSocket |
 | [`@livequery/react`](packages/react/README.md) | Hook React trên `@livequery/client` |
+| [`@livequery/expo-sqlite`](packages/expo-sqlite/README.md) | Storage lưu bền cho React Native / Expo trên expo-sqlite |
 | [`@livequery/rpc`](packages/rpc/README.md) | RPC giữa các worker/service |
 
 ## Cấu trúc repo
 
 ```text
-packages/    10 package phát hành lên npm, mỗi thư mục giữ nguyên lịch sử từ repo cũ
+packages/    11 package phát hành lên npm, mỗi thư mục giữ nguyên lịch sử từ repo cũ
 examples/    api-gateway, todo-mongodb, todo-app (React), cf-worker, cloudflare-multi-worker
 tests/       e2e xuyên package, chạy với MongoDB thật
 scripts/     build và test mọi package theo thứ tự phụ thuộc

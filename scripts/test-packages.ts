@@ -1,5 +1,5 @@
-// Dependency order: core first, then what builds on it; client before rest and react.
-const packages = ['core', 'd1', 'mongodb', 'postgres', 'honojs', 'nestjs', 'client', 'rest', 'rpc', 'react']
+// Dependency order: core first, then what builds on it; client before rest, react and expo-sqlite.
+const packages = ['core', 'd1', 'mongodb', 'postgres', 'honojs', 'nestjs', 'client', 'rest', 'rpc', 'react', 'expo-sqlite']
 
 for (const name of packages) {
   const process = Bun.spawn(['bun', 'test', 'tests/'], {

@@ -1,5 +1,11 @@
 # Changelog — @livequery/client
 
+## 3.2.0
+
+### Added
+- `queryDocs()` is exported: the filter, sort and keyset paging every storage's `query()` answers with. A storage adapter outside this package, such as `@livequery/expo-sqlite`, reuses it to answer exactly like the memory storage.
+- README: which storage to use on each platform.
+
 ## 3.1.0
 
 ### Added
