@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
-import { LIVEQUERY_REALTIME_PATH, type ServiceRouting } from '@livequery/core/workers'
+import { LIVEQUERY_CORS_HEADERS, LIVEQUERY_REALTIME_PATH, type ServiceRouting } from '@livequery/core/workers'
 import { errorHandler, gateway } from '@livequery/honojs'
 import { authenticate } from '../../shared/authenticate.js'
 import routing from '../../shared/routing.json'
@@ -18,7 +18,7 @@ app.onError(errorHandler())
 app.use('*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'x-lcid', 'x-lgid'],
+    allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS],
 }))
 
 app.get('/health', c => c.json({ ok: true, worker: 'api-gateway-worker' }))

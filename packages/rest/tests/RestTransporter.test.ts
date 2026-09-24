@@ -232,3 +232,27 @@ describe("RestTransporter", () => {
         });
     });
 });
+
+describe("RestTransporter debug", () => {
+    test("reports each call with its status, headers and timing", async () => {
+        globalThis.fetch = (async () => new Response(JSON.stringify({ data: { id: "a" } }), { status: 201 })) as typeof fetch;
+        const entries: any[] = [];
+        const transporter = new RestTransporter({ api: "https://api.example.com", debug: entry => entries.push(entry) });
+        await transporter.update("todos", "a", { title: "b" }, undefined, { if_version: 7 });
+
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ method: "PATCH", url: "https://api.example.com/todos/a", status: 201 });
+        expect(entries[0].headers["if-match"]).toBe("7");
+        expect(typeof entries[0].ms).toBe("number");
+    });
+
+    test("reports a request that never got a response, without a status", async () => {
+        globalThis.fetch = (async () => { throw new TypeError("Failed to fetch") }) as typeof fetch;
+        const entries: any[] = [];
+        const transporter = new RestTransporter({ api: "https://api.example.com", debug: entry => entries.push(entry) });
+        await expect(transporter.delete("todos", "a")).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+
+        expect(entries[0].status).toBeUndefined();
+        expect(entries[0].error).toEqual({ code: "NETWORK_ERROR", message: "Failed to fetch" });
+    });
+});

@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import * as z from 'zod/mini'
-import { LIVEQUERY_REALTIME_PATH } from '@livequery/core/workers'
+import { LIVEQUERY_CORS_HEADERS, LIVEQUERY_REALTIME_PATH } from '@livequery/core/workers'
 import { errorHandler, livequery, realtime, validator } from '@livequery/honojs'
 import { d1 } from '@livequery/d1'
 import { createRealtime } from './createRealtime.js'
@@ -32,7 +32,7 @@ const app = new Hono<AppEnv>()
 app.use('*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'x-lcid', 'x-lgid'],
+    allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS],
 }))
 app.use('/livequery/*', requireAuth())
 

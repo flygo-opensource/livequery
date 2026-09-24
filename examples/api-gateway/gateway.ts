@@ -10,7 +10,7 @@
  */
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { LIVEQUERY_REALTIME_PATH, type ServiceRouting } from '@livequery/core'
+import { LIVEQUERY_CORS_HEADERS, LIVEQUERY_REALTIME_PATH, type ServiceRouting } from '@livequery/core'
 import { errorHandler, gateway, realtimeGateway, serve } from '@livequery/honojs'
 import { GATEWAY_PORT, SERVICE_URL } from './shared/config.ts'
 import declared from './shared/routing.json' with { type: 'json' }
@@ -27,11 +27,12 @@ const routing: ServiceRouting = {
 const app = new Hono()
 app.onError(errorHandler())
 
-// The browser client sends x-lcid / x-lgid on every request, so preflight must allow them.
+// The browser client sets socket_id / x-lcid / x-lgid on every request and if-match on a
+// local-first edit, so preflight must allow them all.
 app.use('*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'x-lcid', 'x-lgid'],
+    allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS],
 }))
 
 app.get('/health', c => c.json({ ok: true, kind: 'gateway', gateway_id: realtime.id }))

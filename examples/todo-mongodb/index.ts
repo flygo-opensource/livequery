@@ -16,7 +16,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import * as z from 'zod/mini'
 import { MongoClient } from 'mongodb'
-import { LIVEQUERY_REALTIME_PATH } from '@livequery/core'
+import { LIVEQUERY_CORS_HEADERS, LIVEQUERY_REALTIME_PATH } from '@livequery/core'
 import { MongodbRealtime, mongodb } from '@livequery/mongodb'
 import { errorHandler, livequery, realtime, realtimeGateway, serve, validator } from '@livequery/honojs'
 import { COLLECTION, DB_NAME, MONGO_URL, PORT } from './config.ts'
@@ -57,7 +57,7 @@ app.onError(errorHandler())
 app.use('/livequery/*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'x-lcid', 'x-lgid'],
+    allowHeaders: ['Content-Type', ...LIVEQUERY_CORS_HEADERS],
 }))
 
 app.get('/', c => c.html(page))

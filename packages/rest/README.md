@@ -90,6 +90,7 @@ type RestTransporterConfig = {
     request: RestTransporterRequest & { ref: string },
     response: LivequeryResult<any>
   ) => void | Promise<void>
+  debug?: boolean | ((entry: RestTransporterDebugEntry) => void)
 }
 ```
 
@@ -100,6 +101,7 @@ type RestTransporterConfig = {
 | `credentials` | No | Forwarded to `fetch()` as `RequestInit.credentials`. Use `include` when REST calls must send cross-origin cookies or HTTP auth credentials. |
 | `onRequest` | No | Hook called before `fetch()`. Use it to add headers, override request fields, or return a fake `response` to skip the network. Receives the collection's `context` (see [Context](#context)) so per-collection routing data can become headers. |
 | `onResponse` | No | Hook called after a network or fake response is available. Use it for logging, metrics, error inspection, or tracing. |
+| `debug` | No | Logs every HTTP call once it settles: method, URL, headers sent, status (absent when no response came back — network, CORS, timeout), error, duration. `true` writes to `console.debug`; a function receives the entry. See [Debugging A Client In A Worker](#debugging-a-client-in-a-worker). |
 
 ### Context
 
@@ -143,6 +145,25 @@ POST   <api>/<ref>
 PATCH  <api>/<collectionRef>/<id>
 DELETE <api>/<collectionRef>/<id>
 POST   <api>/<ref>/~<action>
+```
+
+Headers the transporter sets on its own:
+
+| Header | When |
+| --- | --- |
+| `socket_id`, `x-lcid` | Every request, when `ws` is configured — the realtime client id |
+| `x-lgid` | Every request, once the socket knows its gateway |
+| `if-match` | A local-first edit of a versioned document — the version it was based on |
+| `Content-Type` | Requests with a JSON body |
+
+A gateway on another origin must allow all of them in CORS preflight, or the browser blocks the
+request before it is sent: `fetch` fails like a dead network and a local-first outbox retries
+forever. `@livequery/core` exports the list:
+
+```ts
+import { LIVEQUERY_CORS_HEADERS } from '@livequery/core'
+
+app.use('*', cors({ origin, allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS] }))
 ```
 
 Query values are serialized with `URLSearchParams`.
@@ -304,6 +325,25 @@ const transporter = new RestTransporter({
   }
 })
 ```
+
+### Debugging A Client In A Worker
+
+A client hosted in a SharedWorker (`createRemoteLivequeryClient`, `@livequery/rpc`) calls `fetch`
+from the worker, so the page's devtools network tab and a Playwright trace never show those
+requests. Open the worker's own devtools (`chrome://inspect/#workers`) with `debug: true`, or
+forward the entries to the page:
+
+```ts
+// in the worker
+const log = new BroadcastChannel('livequery-debug')
+new RestTransporter({ api, ws, debug: entry => log.postMessage(entry) })
+
+// in the page (or a Playwright init script) — now visible to page.on('console')
+new BroadcastChannel('livequery-debug').onmessage = e => console.debug('[livequery/rest]', e.data)
+```
+
+An entry with no `status` is a request that never got a response. Cross-origin, check first that
+the gateway's CORS `allowHeaders` covers `LIVEQUERY_CORS_HEADERS`.
 
 ## Backend Contract
 

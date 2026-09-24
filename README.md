@@ -108,6 +108,21 @@ app.use('/livequery/*', async (c, next) => {
 Trình duyệt không đặt được header trên một WebSocket upgrade, nên đường realtime phải nhận token
 qua query string. `examples/cf-worker/src/authenticate.ts` xử lý cả hai đường.
 
+### CORS
+
+Client trình duyệt tự gắn `socket_id`, `x-lcid`, `x-lgid` vào mọi request, và `if-match` vào mỗi
+bản sửa local-first. Gateway khác origin phải cho cả bốn qua preflight; thiếu một cái thì trình
+duyệt chặn request trước khi gửi, `fetch` lỗi như mất mạng, và outbox thử lại mãi mà server không
+thấy gì. Dùng hằng số thay vì chép tay:
+
+```ts
+import { LIVEQUERY_CORS_HEADERS } from '@livequery/core'
+
+app.use('*', cors({ origin, allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS] }))
+```
+
+`tests/cors-headers.test.ts` fail khi client gửi thêm header mà hằng số chưa có.
+
 ## Phân quyền
 
 Schema của `validator()` quyết định client **chạm được cột nào**. Nó không quyết định client chạm

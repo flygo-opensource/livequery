@@ -21,6 +21,24 @@ export type RestTransporterConfig = {
     credentials?: RequestCredentials
     onRequest?: (options: RestTransporterRequest & { ref: string, context?: Record<string, any> }) => Promiseable<Partial<RestTransporterRequest & { response?: LivequeryResult<any> }>> | void
     onResponse?: (request: RestTransporterRequest & { ref: string }, response: LivequeryResult<any>) => Promise<void> | void
+    /**
+     * Log every HTTP call once it settles. `true` writes to `console.debug`; a function receives
+     * the entry instead. A client in a SharedWorker makes its requests from the worker, so neither
+     * the page's devtools network tab nor a Playwright trace shows them — pass a function that
+     * forwards the entry to the page (`BroadcastChannel`, the rpc channel) to see them there.
+     */
+    debug?: boolean | ((entry: RestTransporterDebugEntry) => void)
+}
+
+export type RestTransporterDebugEntry = {
+    method: string
+    url: string
+    /** Request headers as sent, so a missing `if-match` or client id is visible. */
+    headers: Record<string, string>
+    /** HTTP status; absent when the request never got a response (network, CORS, timeout). */
+    status?: number
+    error?: { code: string, message: string }
+    ms: number
 }
 
 function normalizeHeaders(headers?: HeadersInit): Record<string, string> {
@@ -175,6 +193,8 @@ export class RestTransporter implements LivequeryTransporter {
                 ...normalizeHeaders(headers)
             },
         }
+        const started_at = Date.now()
+        let status: number | undefined
         const response: LivequeryResult<T> = await (async () => {
             try {
                 const controller = new AbortController()
@@ -183,6 +203,7 @@ export class RestTransporter implements LivequeryTransporter {
                     ...request,
                     signal: controller.signal
                 }).finally(() => clearTimeout(timer))
+                status = result.status
                 const body = await result.text()
                 const parsed = parseJson(body)
                 if (!result.ok) {
@@ -212,12 +233,28 @@ export class RestTransporter implements LivequeryTransporter {
                 }
             }
         })();
+        this.#debug({
+            method: String(request.method ?? 'GET'),
+            url: request.url,
+            headers: request.headers,
+            ...status !== undefined ? { status } : {},
+            ...response.error ? { error: { code: response.error.code, message: response.error.message } } : {},
+            ms: Date.now() - started_at,
+        })
         this.config.onResponse && await this.config.onResponse(request, response)
         if (response.error) throw response.error
         // Servers normally wrap payloads in the `{ data }` envelope; fall back to the raw
         // body for backends that return the payload bare (e.g. hono useDatasource).
         if (typeof response === 'object' && response !== null && 'data' in response) return response.data
         return response as any as T
+    }
+
+    #debug(entry: RestTransporterDebugEntry) {
+        const { debug } = this.config
+        if (!debug) return
+        if (typeof debug === 'function') return debug(entry)
+        const outcome = entry.status ?? entry.error?.code
+        console.debug(`[livequery/rest] ${entry.method} ${entry.url} → ${outcome} (${entry.ms}ms)`, entry)
     }
 
     query<T extends Doc>({ ref, filters, headers, context }: { ref: string, filters?: Partial<LivequeryFilters<T>>, headers?: HeadersInit, context?: Record<string, any> }) {

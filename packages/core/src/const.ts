@@ -32,6 +32,17 @@ export const LIVEQUERY_REF_HEADER = 'x-livequery-ref'
 export const LIVEQUERY_CHANGE_HEADER = 'x-livequery-change'
 
 /**
+ * Request headers the browser client (`@livequery/rest`) sets on its own. A gateway on another
+ * origin must allow all of them in CORS preflight, or the browser blocks the request before it
+ * leaves — and an outbox reads that as "offline" and retries forever. `socket_id` and `x-lcid`
+ * carry the client id, `x-lgid` the gateway id, `if-match` the version a local-first edit is based
+ * on. Add your own (`Content-Type`, `Authorization`) next to these:
+ *
+ *     cors({ allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS] })
+ */
+export const LIVEQUERY_CORS_HEADERS = ['socket_id', 'x-lcid', 'x-lgid', 'if-match'] as const
+
+/**
  * Keep-alive frames, byte for byte.
  *
  * On Cloudflare the runtime answers a ping itself through `setWebSocketAutoResponse`, which
