@@ -14,11 +14,12 @@ const changesOf = (collection: LivequeryCollection<any>) => merge(
     collection.filters.pipe(skip(1)),
     collection.selected.pipe(skip(1)),
     collection.completeness.pipe(skip(1)),
+    collection.status.pipe(skip(1)),
 )
 
 /**
  * A collection that re-renders the component when anything it shows changes — its items, any
- * document's value, loading, error, paging, summary, filters, selection or completeness — so a
+ * document's value, loading, status, error, paging, summary, filters, selection or completeness — so a
  * component reads `collection.items.value`, `collection.loading.value`, … directly.
  */
 export const useCollection = <T extends Doc>(ref: string | undefined | '' | null | false, options: Partial<LivequeryCollectionOptions<T>> = {}) => {

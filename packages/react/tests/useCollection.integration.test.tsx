@@ -11,6 +11,7 @@ import {
     type LivequeryTransporter,
 } from "@livequery/client"
 import { useCollection } from "../src/useCollection.js"
+import { useDocument } from "../src/useDocument.js"
 import { useObservable } from "../src/useObservable.js"
 import { LivequeryClientProvider } from "../src/LivequeryClientContext.js"
 
@@ -203,6 +204,43 @@ describe("useCollection — ref change reload (integration with real client)", (
         expect(ids).not.toContain("p1")
         expect(ids).toEqual(["u1"])
 
+        act(() => { renderer.unmount() })
+    })
+})
+
+describe("useDocument — status", () => {
+    test("a document the list already loaded is ready, with no loading phase", async () => {
+        const client = makeClient()
+        let showDocument = false
+        let result: readonly unknown[] = []
+
+        const List = () => {
+            useCollection<Todo>("posts")
+            return null
+        }
+        const Detail = () => {
+            result = useDocument<Todo>("posts/p1")
+            return null
+        }
+        const tree = () => (
+            <LivequeryClientProvider core={client}>
+                <List />
+                {showDocument && <Detail />}
+            </LivequeryClientProvider>
+        )
+
+        let renderer: ReactTestRenderer
+        act(() => { renderer = create(tree()) })
+        await tick()
+
+        showDocument = true
+        act(() => { renderer.update(tree()) })
+        await tick()
+        const [document, loading, error, status] = result as [any, unknown, unknown, string]
+        expect(document?.value.title).toBe("Post 1")
+        expect(loading).toBeNull()
+        expect(error).toBeNull()
+        expect(status).toBe("ready")
         act(() => { renderer.unmount() })
     })
 })

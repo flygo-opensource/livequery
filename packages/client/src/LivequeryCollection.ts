@@ -40,6 +40,15 @@ export type LivequeryCollectionOptions<T extends Doc> = {
 
 export type OneOrMany<T> = T | T[]
 
+/**
+ * Where a collection is in answering its current query:
+ * - `idle`: nothing asked yet (before `initialize()`, a lazy collection, a ref still holding `undefined`)
+ * - `loading`: a first page was asked for and nothing has answered it yet
+ * - `ready`: the server, the cache or the device answered — an empty answer included
+ * - `error`: the last query failed (`error` holds why)
+ */
+export type LivequeryCollectionStatus = 'idle' | 'loading' | 'ready' | 'error'
+
 /** What a collection needs from a client — a `LivequeryClient`, or a proxy to one in a worker. */
 export type LivequeryClientLike = Pick<LivequeryClient,
     'watch' | 'query' | 'add' | 'update' | 'delete' | 'retry' | 'trigger' | 'flush' | 'seedToStorage'>
@@ -63,6 +72,13 @@ export class LivequeryCollection<T extends Doc> {
     public readonly error: BehaviorSubject<{ code: string, message: string } | null>
     /** Local-first: whether the device holds everything the collection's scope covers. */
     public readonly completeness = new BehaviorSubject<LivequeryCompleteness>('unknown')
+    /** Whether the current query has been answered yet; see `LivequeryCollectionStatus`. */
+    public readonly status = new BehaviorSubject<LivequeryCollectionStatus>('idle')
+    // A first-page query was asked for / something answered it.
+    #asked = false
+    #answered = false
+    // Local-first: the device answered empty before knowing whether it holds the scope.
+    #unloaded = false
     #index = 0
     // Local-first: how many documents the UI asked for so far (`:limit` × pages loaded).
     #window = Infinity
@@ -83,6 +99,13 @@ export class LivequeryCollection<T extends Doc> {
         })
         this.selected = new BehaviorSubject<Set<string>>(new Set())
         this.error = new BehaviorSubject<{ code: string, message: string } | null>(null)
+    }
+
+    #settle() {
+        const status: LivequeryCollectionStatus = this.error.value ? 'error'
+            : this.#answered && this.loading.value === null ? 'ready'
+                : this.#asked ? 'loading' : 'idle'
+        status !== this.status.value && this.status.next(status)
     }
 
     #commit(items: LivequeryDocument<T>[]) {
@@ -119,6 +142,10 @@ export class LivequeryCollection<T extends Doc> {
             this.paging.next({ total: 0, current: 0 })
             this.error.next(null)
         }
+        this.#asked = false
+        this.#answered = false
+        this.#unloaded = false
+        this.#settle()
         this.ref = ref
         const refs = ref.split('/')
         this.collection_ref = refs.length % 2 == 0 ? refs.slice(0, -1).join('/') : ref
@@ -154,6 +181,12 @@ export class LivequeryCollection<T extends Doc> {
                         this.loading.next(null)
                         this.error.next(event.error)
                     } else {
+                        // Answered: a query's result, or a load (server query, first sync) that just finished.
+                        const answer = event.from === 'query' && event.loading === null
+                            && (event.changes !== undefined || this.loading.value !== null)
+                        // Local-first: learning the device holds the scope makes its empty page an answer.
+                        const held = this.#unloaded && event.completeness !== undefined && event.completeness !== 'unknown'
+                        if (answer || held) this.#answered = true
                         if (event.loading !== undefined && event.loading !== this.loading.value) {
                             this.loading.next(event.loading)
                         }
@@ -170,11 +203,13 @@ export class LivequeryCollection<T extends Doc> {
                             current: 0
                         })
                         this.error.next(null)
+                        this.#settle()
                         return
                     }
 
                     this.#applyChanges(event.refetch ? this.#reconcile(event.changes ?? []) : event.changes ?? [])
                     event.paging && this.paging.next(event.paging)
+                    this.#settle()
                 }),
             )
         ).subscribe()
@@ -307,6 +342,12 @@ export class LivequeryCollection<T extends Doc> {
     async #query(raw_filters: Partial<LivequeryFilters<T>>, flush: boolean) {
         if (!this.ref) return
         this.error.next(null)
+        if (flush) {
+            this.#asked = true
+            this.#answered = false
+            this.#unloaded = false
+            this.#settle()
+        }
         const filters = Object.entries(raw_filters).reduce((p, [k, v]) => {
             if (v === undefined) return p
             return {
@@ -334,6 +375,10 @@ export class LivequeryCollection<T extends Doc> {
             })
             if (cache && cache.documents && flush) {
                 this.#commit(cache.documents.map(i => new LivequeryDocument(this, i)))
+                // Local-first on a scope never loaded: an empty device is not an answer, the first sync is.
+                const unloaded = this.#isLocalFirst() && cache.documents.length === 0 && this.completeness.value === 'unknown'
+                this.#unloaded = unloaded
+                if (!unloaded) this.#answered = true
             }
             // Local-first pages come from storage: take its paging, and append pages past the first.
             if (cache && this.#isLocalFirst()) {
@@ -351,6 +396,7 @@ export class LivequeryCollection<T extends Doc> {
                 message: (e as any)?.message ?? String(e)
             })
         }
+        this.#settle()
     }
 
     async query(filters: Partial<LivequeryFilters<T>>) {
@@ -522,6 +568,7 @@ export class LivequeryCollection<T extends Doc> {
 
     resetError() {
         this.error.next(null)
+        this.#settle()
     }
 
     watch(check: (a: T, b: T) => boolean) {

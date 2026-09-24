@@ -172,16 +172,16 @@ Behavior notes:
 - `ref` may be `undefined`, `null`, `false`, or an empty string. Falsy refs skip initialization.
 - The same hook call keeps one collection instance for the lifetime of the component.
 - `options` are used when that collection instance is first created. Pass stable options, or remount the hook if options need to change.
-- The component re-renders when the items, any document's value, `loading`, `error`, `paging`, `summary`, `filters`, `selected` or `completeness` change. A burst of changes (a page arriving) is one render. `useObservable()` still works but is no longer needed.
+- The component re-renders when the items, any document's value, `loading`, `status`, `error`, `paging`, `summary`, `filters`, `selected` or `completeness` change. A burst of changes (a page arriving) is one render. `useObservable()` still works but is no longer needed.
 - Do not call `query()`, `add()`, `update()`, or `delete()` directly during render.
 
 ## `useDocument`
 
 `useDocument<T>(ref, options)` is a document-focused convenience wrapper over `useCollection()`.
 
-It initializes a collection for a document ref and returns `[items[0], loading, error]`, re-rendering when the document, loading state or error changes.
+It initializes a collection for a document ref and returns `[items[0], loading, error, status]`, re-rendering when any of them changes.
 
-Use it when a component only needs one document, a loading flag, and basic error handling.
+`status` is `collection.status` (see `@livequery/client`): `'idle'`, `'loading'`, `'ready'` or `'error'`. Wait for `'ready'` rather than for `loading` to go back to `null`: a document the client already holds (say, one the list on the previous screen loaded) is answered from memory with no loading phase at all, and `undefined` while `'ready'` means the document does not exist.
 
 ```tsx
 import { useDocument } from '@livequery/react'
@@ -193,10 +193,10 @@ type Todo = {
 }
 
 export function TodoDetail({ id }: { id: string }) {
-  const [todo, loading, error] = useDocument<Todo>(`todos/${id}`)
+  const [todo, , error, status] = useDocument<Todo>(`todos/${id}`)
 
-  if (loading) return <p>Loading...</p>
   if (error) return <p>Error: {error.message}</p>
+  if (status !== 'ready') return <p>Loading...</p>
   if (!todo) return <p>Not found</p>
 
   return <h1>{todo.value.title}</h1>

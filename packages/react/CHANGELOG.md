@@ -1,5 +1,15 @@
 # Changelog — @livequery/react
 
+## 3.1.0
+
+### Added
+- `useDocument` returns `[document, loading, error, status]`; `status` is the collection's new `status` (`'idle' | 'loading' | 'ready' | 'error'`). A document the client already holds has no loading phase, so `loading` alone could not say it was ready.
+- `useCollection` re-renders when `collection.status` changes.
+
+### Changed
+- Peer dependency `react` is now `^18.2.0 || ^19.0.0` (was `^19.2.5`), so Expo SDK 57 / React Native 0.86 (react 19.2.3) installs without ERESOLVE.
+- Peer dependency `@livequery/client` is now `^3.1.0`, which adds `collection.status`.
+
 ## 3.0.1
 
 ### Changed

@@ -462,6 +462,8 @@ Because `context` lives on the collection options, switching context means a new
 items: BehaviorSubject<LivequeryDocument<DocState<T>>[]>
 summary: BehaviorSubject<Record<string, any>>
 loading: BehaviorSubject<null | "all" | "next" | "prev">
+status: BehaviorSubject<"idle" | "loading" | "ready" | "error">
+completeness: BehaviorSubject<"unknown" | "partial" | "complete">
 filters: BehaviorSubject<Partial<LivequeryFilters<T>>>
 paging: BehaviorSubject<LivequeryPaging>
 selected: BehaviorSubject<Set<string>>
@@ -470,6 +472,19 @@ ref: string | undefined
 collection_ref: string | undefined
 id: string
 ```
+
+`loading` is `null` both before the first answer and after it, and a ref the client already holds
+(a document the list loaded, a cache or device answer) never shows a loading phase. Use `status`
+to tell them apart:
+
+- `idle`: nothing asked yet: before `initialize()`, a `lazy` collection, a ref that contains `undefined`
+- `loading`: a first page was asked for and nothing has answered it yet
+- `ready`: the server, the cache or the device answered, including an empty answer. A local-first
+  scope on a device that has never loaded it waits for its first sync
+- `error`: the last query failed; `error` holds why
+
+`initialize()` with a new ref and each new first-page query (`query()`, `filter()`) go back to
+`loading`. `loadMore()` and realtime do not change it.
 
 Reading `.value` gives a snapshot. Subscribe for live updates:
 

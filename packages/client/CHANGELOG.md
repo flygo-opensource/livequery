@@ -1,5 +1,10 @@
 # Changelog — @livequery/client
 
+## 3.1.0
+
+### Added
+- `collection.status`: `'idle' | 'loading' | 'ready' | 'error'` (`LivequeryCollectionStatus`). `loading` is `null` both before the first answer and after it, and a ref the client already holds, such as a document the list already loaded, never goes through a loading phase. `status` becomes `'ready'` on the first answer from the server, the cache or the device, including an empty one. It goes back to `'idle'` on `initialize()` with a new ref, and to `'loading'` on each new first-page query.
+
 ## 3.0.1
 
 ### Added
