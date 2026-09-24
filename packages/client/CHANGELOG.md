@@ -1,5 +1,10 @@
 # Changelog — @livequery/client
 
+## 3.2.1
+
+### Fixed
+- `LivequeryIndexedDBStorage` and `RestTransporter` are assignable to `LivequeryStorage` / `LivequeryTransporter` under `exactOptionalPropertyTypes: true`. The optional members `shared` and `status$` now accept `undefined`, which these classes set when the member does not apply. Apps no longer need `as unknown as LivequeryTransporter`.
+
 ## 3.2.0
 
 ### Added

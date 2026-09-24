@@ -46,7 +46,7 @@ export type LivequeryTransporter = {
      * retries queued writes when it turns `connected`, and refetches live queries on a REconnect —
      * realtime events sent while the connection was down are lost.
      */
-    status$?: Observable<{ connected: boolean }>
+    status$?: Observable<{ connected: boolean }> | undefined
     /**
      * One read, no realtime subscription: used by local-first sync to load pages and deltas.
      * Without it the client takes the first result of `query()` and unsubscribes.

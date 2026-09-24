@@ -18,5 +18,5 @@ export type LivequeryStorage = {
      * by every tab of an origin). Contexts that see the same value elect a single outbox drainer
      * through `navigator.locks`, so a queued write is not sent twice.
      */
-    readonly shared?: string
+    readonly shared?: string | undefined
 }
