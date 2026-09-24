@@ -742,7 +742,7 @@ await first.update({ title: "Local edit" }, "local-only")
 Passing the whole value back is fine — `update({ ...first.value, title })`, as a form reset from
 the document does. The client's own write-state (`_adding`, `_updating`, `_prev`, `_queued`,
 `_deleting`, the `*_error` fields, `_remotes`, `_index`, `_local_only`) is ignored when a caller
-sends it; before 3.0.1 a stale copy of it made a local-first edit show on screen and never reach
+sends it; in 3.0.0 and earlier a stale copy of it made a local-first edit show on screen and never reach
 the server.
 
 ### `del(mode?)`

@@ -1,7 +1,7 @@
 /**
  * `doc.update({ ...doc.value, name })` — a form reset from the document, then submitted whole —
  * hands the client back a snapshot of its own write-state (`_adding`, `_prev`, `_updating`…).
- * Before 3.0.1 that snapshot overwrote the state the client had just computed, and the outbox
+ * In 3.0.0 (and 2.x) that snapshot overwrote the state the client had just computed, and the outbox
  * dropped the edit without a request: `_adding: true` from a dialog opened before the add was
  * confirmed read as "never created on the server", `_prev: undefined` from one opened after read
  * as "nothing left to send". The screen showed the edit; the server never heard of it.
