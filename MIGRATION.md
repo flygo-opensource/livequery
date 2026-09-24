@@ -1,8 +1,11 @@
 # Nâng từ Livequery 2.x lên 3.x
 
 Chi tiết từng package nằm trong `packages/<name>/CHANGELOG.md`. Tài liệu này là danh sách việc phải
-làm, theo thứ tự hay gặp khi nâng một ứng dụng thật. Mục nào ghi **(chưa phát hành)** là thay đổi
-đã có trên `main` nhưng chưa lên npm; bản 3.0.0 trên npm vẫn hành xử như mô tả trong ngoặc.
+làm, theo thứ tự hay gặp khi nâng một ứng dụng thật. Nhắm thẳng tới `@livequery/core` 3.0.2 và
+`client`, `rest`, `react`, `rpc`, `mongodb` 3.0.1: các bản này sửa những lỗi của 3.0.0 ghi ở mục 3–6.
+
+Cài lại một package **cùng số version** từ tarball hay `file:` thì xoá cache optimize của Vite
+(`node_modules/.vite`) — không thì dev server vẫn phục vụ bản cũ.
 
 ## Danh sách kiểm tra
 
@@ -12,7 +15,7 @@ làm, theo thứ tự hay gặp khi nâng một ứng dụng thật. Mục nào 
 3. CORS của gateway cho qua `LIVEQUERY_CORS_HEADERS` — có `if-match` mới.
 4. MongoDB: quyết định route nào nhận id do client chọn (`clientIds`, `sync`).
 5. Collection `mode: 'local-first'`: đọc mục 5 — tên giữ nguyên nhưng ngữ nghĩa đổi.
-6. Không truyền lại các field `_…` của client vào `update()` nếu còn dùng 3.0.0.
+6. Không truyền lại các field `_…` của client vào `update()` nếu còn dùng client 3.0.0.
 7. Peer dependency mới: `@livequery/core@^3` (datasource, adapter), `@livequery/client@^3`
    (`rest`, `react`), `rxjs`.
 
@@ -104,14 +107,14 @@ mỗi bản sửa local-first. Gateway khác origin thiếu một header là tr�
 lỗi như mất mạng, và outbox thử lại mãi — server không thấy request nào.
 
 ```ts
-import { LIVEQUERY_CORS_HEADERS } from '@livequery/core'   // (chưa phát hành) — 3.0.0: tự liệt kê 4 header
+import { LIVEQUERY_CORS_HEADERS } from '@livequery/core'   // từ 3.0.2; bản trước: tự liệt kê 4 header
 
 app.use('*', cors({ origin, allowHeaders: ['Content-Type', 'Authorization', ...LIVEQUERY_CORS_HEADERS] }))
 ```
 
 Client chạy trong SharedWorker thì request không hiện trong devtools của trang hay trace của
 Playwright; xem "Debugging A Client In A Worker" trong `packages/rest/README.md` (option `debug`,
-chưa phát hành).
+từ `@livequery/rest` 3.0.1).
 
 ## 4. Id do client chọn
 
@@ -123,14 +126,13 @@ Phía server:
 
 | Datasource | Mặc định | Ghi chú |
 | --- | --- | --- |
-| `@livequery/mongodb` (chưa phát hành) | chỉ nhận khi route có `sync: true` | route khác bỏ qua id, MongoDB cấp ObjectId, client đổi tên bản của nó |
+| `@livequery/mongodb` ≥ 3.0.1 | chỉ nhận khi route có `sync: true` | route khác bỏ qua id, MongoDB cấp ObjectId, client đổi tên bản của nó |
 | `@livequery/mongodb` 3.0.0 | nhận trên **mọi** route | lưu thành `_id` BSON UUID — xem cảnh báo dưới |
 | `@livequery/postgres` 3.0.0 | nhận | khoá `serial`/`bigint` trả 400 `INVALID_ID`: đặt `clientIds: false` |
 | `@livequery/d1` | nhận | id vốn là uuid text |
 
 > **MongoDB 3.0.0:** route nào không có schema lọc bỏ `id` sẽ nhận `_id` UUID lẫn vào collection
-> ObjectId, và mọi `new ObjectId(id)` vỡ. Đặt `clientIds: false` trên route cũ, hoặc nâng lên bản
-> có mặc định mới. Nếu server 3.0.0 đã chạy: `db.coll.find({ _id: { $type: 'binData' } })`.
+> ObjectId, và mọi `new ObjectId(id)` vỡ. Nâng lên 3.0.1, hoặc đặt `clientIds: false` trên route cũ. Nếu server 3.0.0 đã chạy: `db.coll.find({ _id: { $type: 'binData' } })`.
 
 Id trong body mà không phải uuidv7 (và không phải `local:`) giờ là 400 `INVALID_ID` trên route nhận
 client id; 2.x lặng lẽ bỏ qua. Trùng id là 409 `ID_ALREADY_EXISTS`, client coi là "đã tạo".
@@ -147,7 +149,8 @@ client id; 2.x lặng lẽ bỏ qua. Trùng id là 409 `ID_ALREADY_EXISTS`, clie
 
   > **3.0.0** suy ra "đọc delta được" chỉ từ việc document có `updated_at` dạng số. Trên route không
   > bật sync (không có tombstone), document bị xoá trên server **nằm mãi** trong bản sao local.
-  > Bản chưa phát hành bỏ cờ cũ, nên máy đã đồng bộ bằng 3.0.0 đọc lại một lần rồi tự đúng.
+  > Client 3.0.1 bỏ cờ cũ, nên máy đã đồng bộ bằng 3.0.0 đọc lại một lần rồi tự đúng. Cần cả
+> `@livequery/mongodb` 3.0.1 (trả `sync: true`) thì route sync mới đọc delta lại được.
 
 - **`If-Match`:** bản sửa local-first gửi `updated_at` đang giữ; route `sync` trả 409
   `VERSION_CONFLICT` nếu có người ghi trước, client đưa qua `conflictResolver` rồi gửi lại. Route
@@ -169,7 +172,7 @@ README gốc.
 Truyền lại cả `doc.value` (ví dụ form `reset(doc.value)` rồi submit nguyên) mang theo các field
 trạng thái của client — `_adding`, `_prev`, `_updating`… Ở 3.0.0 và 2.x chúng đè lên trạng thái
 client vừa tính, và outbox **bỏ bản sửa mà không gửi**: giao diện hiện giá trị mới, server không
-nhận PATCH nào. Bản chưa phát hành bỏ qua các field đó. Với 3.0.0, lọc trước khi gọi:
+nhận PATCH nào. Client 3.0.1 bỏ qua các field đó. Với 3.0.0, lọc trước khi gọi:
 
 ```ts
 const fields = Object.fromEntries(Object.entries(values).filter(([key]) => !key.startsWith('_')))

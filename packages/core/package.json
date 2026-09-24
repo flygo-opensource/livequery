@@ -7,11 +7,12 @@
     "url": "git+https://github.com/flygo-opensource/livequery.git",
     "directory": "packages/core"
   },
-  "version": "3.0.1",
+  "version": "3.0.2",
   "description": "Livequery protocol, realtime gateway and runtime adapters (Node, Bun, Cloudflare Workers)",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
+    "CHANGELOG.md",
     "build/**/*",
     "LIVEQUERY_SPEC.md",
     "!build/tsconfig.tsbuildinfo"

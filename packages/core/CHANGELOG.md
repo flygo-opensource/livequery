@@ -1,6 +1,6 @@
 # Changelog — @livequery/core
 
-## Unreleased
+## 3.0.2
 
 ### Added
 - `LIVEQUERY_CORS_HEADERS` (`socket_id`, `x-lcid`, `x-lgid`, `if-match`): the request headers the

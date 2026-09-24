@@ -1,5 +1,10 @@
 # Changelog — @livequery/react
 
+## 3.0.1
+
+### Changed
+- No code changes. Released with `@livequery/client` 3.0.1, which fixes local-first deltas and `update()` with a snapshot of the document.
+
 ## 3.0.0
 
 ### Breaking

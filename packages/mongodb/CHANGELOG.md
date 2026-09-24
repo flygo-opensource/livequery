@@ -1,6 +1,6 @@
 # Changelog — @livequery/mongodb
 
-## Unreleased
+## 3.0.1
 
 ### Breaking (vs 3.0.0)
 - `RouteOptions.clientIds` / `mongodb({ clientIds })` now defaults to on only for `sync: true`
@@ -20,7 +20,7 @@
   `^6.20.0`. The package imports `@livequery/core` at runtime (`resolveClientId`,
   `ID_ALREADY_EXISTS`, `toLivequeryError`); 2.x only used its types.
 - Client ids: a uuidv7 `id` in a POST body is stored as a BSON UUID `_id` (`Binary` subtype 4) on
-  every route by default (`61e3aed`; narrowed to sync routes in Unreleased). Responses, realtime
+  every route by default (`61e3aed`; narrowed to sync routes in 3.0.1). Responses, realtime
   payloads and cursors expose it as the dashed uuid string, so an `id` is no longer always 24 hex.
   A body `id` that is neither a uuidv7 nor a legacy `local:` id answers 400 `INVALID_ID` (2.x
   dropped any body `id`). `clientIds: false` restores the 2.x behaviour.

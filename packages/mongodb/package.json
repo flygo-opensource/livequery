@@ -8,11 +8,12 @@
     "url": "git+https://github.com/flygo-opensource/livequery.git",
     "directory": "packages/mongodb"
   },
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "MongoDB datasource mapping for @livequery ecosystem",
   "main": "./build/src/index.js",
   "types": "./build/src/index.d.ts",
   "files": [
+    "CHANGELOG.md",
     "build/src/**/*"
   ],
   "exports": {

@@ -1,6 +1,6 @@
 # Changelog — @livequery/rest
 
-## Unreleased
+## 3.0.1
 
 ### Added
 - `RestTransporterConfig.debug`: `true` logs every HTTP call to `console.debug`. A function instead receives each call's `RestTransporterDebugEntry` (`{ method, url, headers, status?, error?, ms }`). This is useful for a client running in a SharedWorker, whose requests do not show up in the page's devtools.

@@ -1,6 +1,6 @@
 # Changelog — @livequery/client
 
-## Unreleased
+## 3.0.1
 
 ### Added
 - `LivequeryQueryResult.sync`: set when the server says a route serves local-first sync (`mongodb({ sync: true })`).

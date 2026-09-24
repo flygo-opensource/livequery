@@ -1,5 +1,10 @@
 # Changelog — @livequery/rpc
 
+## 3.0.1
+
+### Changed
+- No code changes. Released with `@livequery/client` 3.0.1, which fixes local-first deltas and `update()` with a snapshot of the document.
+
 ## 3.0.0
 
 Released with the rest of the 3.0.0 packages. The public API (exports, signatures, entry points, dependencies) is unchanged from 2.0.155.
