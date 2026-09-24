@@ -27,6 +27,7 @@ scripts/     build và test mọi package theo thứ tự phụ thuộc
 Một workspace Bun, một lockfile. Các package tham chiếu nhau bằng version (`^3.0.0`), workspace tự
 nối vào bản local, nên `package.json` của từng package vẫn đúng khi publish.
 
+Nâng từ 2.x: [MIGRATION.md](MIGRATION.md); thay đổi từng package: `packages/<name>/CHANGELOG.md`.
 Danh sách class và symbol: [PACKAGE_API.md](PACKAGE_API.md).
 Quy chuẩn viết TypeScript: [CODE_STYLE.md](CODE_STYLE.md).
 
